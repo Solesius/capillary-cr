@@ -1,7 +1,7 @@
 # Registry-first single-instance deployment for Capillary.
 #
 # Default (pull the published image from GHCR):
-#   CAPILLARY_IMAGE=ghcr.io/Solesius/capillary:latest docker compose up -d
+#   CAPILLARY_IMAGE=ghcr.io/solesius/capillary-cr:latest docker compose up -d
 # or set CAPILLARY_IMAGE in a .env file (see .env.example) and run:
 #   docker compose up -d
 #
@@ -14,7 +14,7 @@
 # overrides it with a locally built image tagged the same as CAPILLARY_IMAGE.
 services:
   capillary:
-    image: "${CAPILLARY_IMAGE:-ghcr.io/Solesius/capillary:latest}"
+    image: "${CAPILLARY_IMAGE:-ghcr.io/solesius/capillary-cr:latest}"
     pull_policy: missing
     build:
       context: .
