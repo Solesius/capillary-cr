@@ -593,7 +593,22 @@ Deno.test("should_prefer_runtime_llm_config_when_reviewing_packet", async () => 
   assertEquals(findings[0].evidence.some((line) => line.includes("provider.kind=gemini")), true);
 });
 
-Deno.test("should_route_codex_alias_runtime_config_through_review_flow", async () => {
+// Spawns a real `codex-app-server` subprocess over stdio; on hosts without the
+// binary on PATH (e.g. CI runners) the spawn hangs and trips the subprocess
+// leak sanitizer, so the test only runs where the binary exists.
+const hasCodexAppServer = await (async () => {
+  try {
+    const probe = await new Deno.Command("which", { args: ["codex-app-server"] }).output();
+    return probe.success;
+  } catch {
+    return false;
+  }
+})();
+
+Deno.test({
+  name: "should_route_codex_alias_runtime_config_through_review_flow",
+  ignore: !hasCodexAppServer,
+  fn: async () => {
   const { repository, githubService, reviewService } = buildFixture();
   await githubService.connectGithub("valid", "ghp_test_token");
   await githubService.listRepositories();
@@ -622,6 +637,7 @@ Deno.test("should_route_codex_alias_runtime_config_through_review_flow", async (
     findings[0].evidence.some((line) => line.includes("provider.kind=codex_app_server")),
     true,
   );
+  },
 });
 
 Deno.test("should_build_retv_loop_from_top_risk_surfaces", async () => {
