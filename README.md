@@ -89,7 +89,7 @@ make dev
 
 ```bash
 # Run the published image
-CAPILLARY_IMAGE=ghcr.io/Solesius/capillary:latest docker compose up -d
+CAPILLARY_IMAGE=ghcr.io/solesius/capillary-cr:latest docker compose up -d
 
 # Build and run locally
 make docker-up

@@ -58,7 +58,7 @@ same origin. See [README.md](README.md) and
 [docker-compose.yml](docker-compose.yml).
 
 - **Registry-first**: `docker compose up -d` runs the published image
-  (`CAPILLARY_IMAGE`, default `ghcr.io/Solesius/capillary:latest`). `make docker-up`
+  (`CAPILLARY_IMAGE`, default `ghcr.io/solesius/capillary-cr:latest`). `make docker-up`
   builds locally (UID/GID-mapped for host-owned volumes).
 - **Auth gate**: with `CAPILLARY_REQUIRE_GITHUB_LOGIN=1`, every `/api/*` route
   except the GitHub OAuth handshake requires a connected identity.

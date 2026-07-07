@@ -764,7 +764,7 @@ export function buildPrSummaryComment(record: ReviewAgentRunRecord): string {
   lines.push(`**Model:** \`${record.model || "deterministic"}\``);
   lines.push("");
   lines.push(
-    `<sub>Posted by [Capillary](https://github.com/Solesius/capillary) · ` +
+    `<sub>Posted by [Capillary](https://github.com/Solesius/capillary-cr) · ` +
       `TCSRTC gated review · run \`${record.runId}\`</sub>`,
   );
   return lines.join("\n");
