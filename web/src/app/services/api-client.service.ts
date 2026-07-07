@@ -1,0 +1,270 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Khalil Warren — capillary
+import { Injectable } from "@angular/core";
+import {
+  CdpSessionSummary,
+  GitHubOAuthPollResponse,
+  GitHubOAuthStartResponse,
+  RetvPlannerConfigUpdate,
+  RetvPlannerConfigView,
+  CdpWorkUnitRequest,
+  CdpWorkUnitResult,
+  GraphSnapshotView,
+  GitHubRepository,
+  PullRequest,
+  RetvCdpRunListItem,
+  RetvCdpRunRecord,
+  RetvCdpRunResult,
+  ReviewAgentRunListItem,
+  ReviewAgentRunRecord,
+  ReviewRun,
+  ReviewChecklistItem,
+  ReviewFinding,
+} from "../models";
+
+@Injectable({ providedIn: "root" })
+export class ApiClientService {
+  private readonly baseUrl = this.resolveBaseUrl();
+
+  getApiOrigin(): string {
+    return new URL(this.baseUrl).origin;
+  }
+
+  async connectGithub(token?: string): Promise<void> {
+    await this.post("/api/github/connect", {
+      oauthState: "valid",
+      ...(token ? { token } : {}),
+    });
+  }
+
+  async startGithubOAuth(webOrigin: string): Promise<GitHubOAuthStartResponse> {
+    const query = new URLSearchParams({ webOrigin });
+    return this.get(`/api/github/oauth/start?${query.toString()}`);
+  }
+
+  async pollGithubOAuth(sessionId: string): Promise<GitHubOAuthPollResponse> {
+    return this.get(`/api/github/oauth/poll/${sessionId}`);
+  }
+
+  async listRepositories(): Promise<GitHubRepository[]> {
+    return this.get("/api/github/repositories");
+  }
+
+  async listPullRequests(repositoryId: string, stateFilter: "open" | "closed" = "open"): Promise<PullRequest[]> {
+    return this.get(`/api/github/repositories/${repositoryId}/pull-requests?state=${stateFilter}`);
+  }
+
+  async beginReview(pullRequestId: string, repositoryId: string): Promise<ReviewRun> {
+    return this.post("/api/review/runs", { pullRequestId, repositoryId });
+  }
+
+  async beginReviewAsync(pullRequestId: string, repositoryId: string): Promise<ReviewRun> {
+    return this.post("/api/review/runs/async", { pullRequestId, repositoryId });
+  }
+
+  buildReviewStreamUrl(request: {
+    pullRequestId: string;
+    repositoryId: string;
+    maxCycles?: number;
+    trace?: boolean;
+  }): string {
+    const query = new URLSearchParams({
+      pullRequestId: request.pullRequestId,
+      repositoryId: request.repositoryId,
+    });
+    if (request.maxCycles !== undefined) {
+      query.set("maxCycles", String(request.maxCycles));
+    }
+    if (request.trace) {
+      query.set("trace", "1");
+    }
+    return `${this.baseUrl}/api/review/runs/stream?${query.toString()}`;
+  }
+
+  async getReviewRun(runId: string): Promise<ReviewRun> {
+    return this.get(`/api/review/runs/${runId}`);
+  }
+
+  async getReviewEvents(runId: string): Promise<{ events: string[] }> {
+    return this.get(`/api/review/runs/${runId}/events`);
+  }
+
+  async getReviewFindings(runId: string): Promise<{ findings: ReviewFinding[] }> {
+    return this.get(`/api/review/runs/${runId}/findings`);
+  }
+
+  async getReviewChecklist(runId: string): Promise<{ checklist: ReviewChecklistItem[] }> {
+    return this.get(`/api/review/runs/${runId}/checklist`);
+  }
+
+  async cancelReview(runId: string): Promise<{ cancelled: boolean }> {
+    return this.post(`/api/review/runs/${runId}/cancel`, {});
+  }
+
+  async postReviewSummaryToPr(runId: string): Promise<{ posted: boolean; url: string }> {
+    return this.post(`/api/review/runs/${runId}/pr-comment`, {});
+  }
+
+  async listReviewAgentRuns(): Promise<ReviewAgentRunListItem[]> {
+    const response = await this.get<{ runs: ReviewAgentRunListItem[] }>("/api/review/agent/runs");
+    return response.runs;
+  }
+
+  async getReviewAgentRun(runId: string): Promise<ReviewAgentRunRecord> {
+    return this.get(`/api/review/agent/runs/${runId}`);
+  }
+
+  buildReviewExportUrl(runId: string): string {
+    return `${this.baseUrl}/api/review/agent/runs/${runId}/export`;
+  }
+
+  async getMarkdown(runId: string): Promise<string> {
+    const response = await fetch(`${this.baseUrl}/api/artifacts/${runId}/markdown`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    return response.text();
+  }
+
+  async getGraph(runId: string): Promise<GraphSnapshotView> {
+    const response = await fetch(`${this.baseUrl}/api/artifacts/${runId}/graph`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const text = await response.text();
+    return JSON.parse(text) as GraphSnapshotView;
+  }
+
+  async createCdpSession(startUrl = "about:blank"): Promise<CdpSessionSummary> {
+    return this.post("/api/cdp/sessions", { startUrl });
+  }
+
+  async listCdpSessions(): Promise<CdpSessionSummary[]> {
+    return this.get("/api/cdp/sessions");
+  }
+
+  async executeCdpWorkUnit(sessionId: string, request: CdpWorkUnitRequest): Promise<CdpWorkUnitResult> {
+    return this.post(`/api/cdp/sessions/${sessionId}/work-units`, request);
+  }
+
+  async runRetvCdpGoalRound(request: {
+    goal: string;
+    sessionId?: string;
+    startUrl?: string;
+    maxCycles?: number;
+    trace?: boolean;
+  }): Promise<RetvCdpRunResult> {
+    return this.post("/api/cdp/retv/run", request);
+  }
+
+  buildRetvCdpStreamUrl(request: {
+    goal: string;
+    sessionId?: string;
+    startUrl?: string;
+    maxCycles?: number;
+    maxDurationMs?: number;
+    trace?: boolean;
+    allowedDomains?: string;
+  }): string {
+    const query = new URLSearchParams({ goal: request.goal });
+    if (request.sessionId) {
+      query.set("sessionId", request.sessionId);
+    }
+    if (request.startUrl) {
+      query.set("startUrl", request.startUrl);
+    }
+    if (request.maxCycles !== undefined) {
+      query.set("maxCycles", String(request.maxCycles));
+    }
+    if (request.maxDurationMs !== undefined) {
+      query.set("maxDurationMs", String(request.maxDurationMs));
+    }
+    if (request.trace) {
+      query.set("trace", "1");
+    }
+    if (request.allowedDomains && request.allowedDomains.trim().length > 0) {
+      query.set("allowedDomains", request.allowedDomains.trim());
+    }
+    return `${this.baseUrl}/api/cdp/retv/run/stream?${query.toString()}`;
+  }
+
+  async listRetvRuns(): Promise<RetvCdpRunListItem[]> {
+    const response = await this.get<{ runs: RetvCdpRunListItem[] }>("/api/cdp/retv/runs");
+    return response.runs;
+  }
+
+  async getRetvRun(runId: string): Promise<RetvCdpRunRecord> {
+    return this.get(`/api/cdp/retv/runs/${runId}`);
+  }
+
+  buildRetvRunExportUrl(runId: string): string {
+    return `${this.baseUrl}/api/cdp/retv/runs/${runId}/export`;
+  }
+
+  async getRetvPlannerConfig(): Promise<RetvPlannerConfigView> {
+    return this.get("/api/cdp/retv/config");
+  }
+
+  async setRetvPlannerConfig(request: RetvPlannerConfigUpdate): Promise<RetvPlannerConfigView> {
+    return this.post("/api/cdp/retv/config", request);
+  }
+
+  async closeCdpSession(sessionId: string): Promise<{ closed: boolean }> {
+    const response = await fetch(`${this.baseUrl}/api/cdp/sessions/${sessionId}`, { method: "DELETE" });
+    if (!response.ok) {
+      throw await this.toApiError(response);
+    }
+    return response.json();
+  }
+
+  private resolveBaseUrl(): string {
+    if (typeof window === "undefined") {
+      return "http://localhost:8080";
+    }
+
+    const { hostname, origin, protocol } = window.location;
+    const localhostHost = hostname === "localhost" || hostname === "127.0.0.1";
+
+    if (localhostHost && window.location.port === "4200") {
+      return `${protocol}//${hostname}:8080`;
+    }
+
+    return origin;
+  }
+
+  private async get<T>(path: string): Promise<T> {
+    const response = await fetch(`${this.baseUrl}${path}`);
+    if (!response.ok) {
+      throw await this.toApiError(response);
+    }
+    return response.json();
+  }
+
+  private async post<T>(path: string, body: unknown): Promise<T> {
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      throw await this.toApiError(response);
+    }
+    return response.json();
+  }
+
+  private async toApiError(response: Response): Promise<Error> {
+    try {
+      const payload = await response.json();
+      if (payload?.message) {
+        return new Error(payload.message);
+      }
+    } catch {
+      // ignore parse failures and fallback to status text
+    }
+
+    return new Error(`HTTP ${response.status}`);
+  }
+}

@@ -1,0 +1,33 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Dependencies
+**/node_modules/
+
+# Build artifacts
+web/dist/
+web/.angular/
+
+# Tooling caches
+**/.deno/
+
+# Native build outputs
+**/target/
+**/build/
+api/native/.deps/
+
+# Runtime data — never commit
+api/.data/
+
+# SML specs — not public
+*.sml

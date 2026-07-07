@@ -1,0 +1,53 @@
+# Registry-first single-instance deployment for Capillary.
+#
+# Default (pull the published image from GHCR):
+#   CAPILLARY_IMAGE=ghcr.io/Solesius/capillary:latest docker compose up -d
+# or set CAPILLARY_IMAGE in a .env file (see .env.example) and run:
+#   docker compose up -d
+#
+# Build locally instead of pulling (developers / air-gapped hosts):
+#   make docker-up            # UID/GID-mapped local build, foreground
+#   docker compose build && docker compose up -d
+#
+# `pull_policy: missing` means an already-present image is used as-is and is only
+# pulled when absent; an explicit `docker compose build` (or `make docker-build`)
+# overrides it with a locally built image tagged the same as CAPILLARY_IMAGE.
+services:
+  capillary:
+    image: "${CAPILLARY_IMAGE:-ghcr.io/Solesius/capillary:latest}"
+    pull_policy: missing
+    build:
+      context: .
+      dockerfile: Dockerfile
+    user: "${UID:-1000}:${GID:-1000}"
+    ports:
+      - "${CAPILLARY_PORT:-8080}:8080"
+    environment:
+      PORT: "8080"
+      CORS_ORIGIN: "${CORS_ORIGIN:-http://localhost:8080}"
+      CAPILLARY_SERVE_WEB: "1"
+      CAPILLARY_WEB_DIST: "/app/web-dist"
+      CAPILLARY_STORAGE_DIR: "/var/lib/capillary"
+      CAPILLARY_REQUIRE_GITHUB_LOGIN: "${CAPILLARY_REQUIRE_GITHUB_LOGIN:-1}"
+      GITHUB_OAUTH_CLIENT_ID: "${GITHUB_OAUTH_CLIENT_ID:-}"
+      GITHUB_OAUTH_CLIENT_SECRET: "${GITHUB_OAUTH_CLIENT_SECRET:-}"
+      GITHUB_OAUTH_REDIRECT_URI: "${GITHUB_OAUTH_REDIRECT_URI:-}"
+      GITHUB_OAUTH_SCOPES: "${GITHUB_OAUTH_SCOPES:-repo workflow read:org read:user}"
+      # LLM planner credentials are read from the server environment only; pass
+      # whichever provider key(s) you use. See .env.example / ARCHITECTURE.md.
+      CAPILLARY_LLM_API_KEY: "${CAPILLARY_LLM_API_KEY:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      CDP_BASE_URL: "${CDP_BASE_URL:-}"
+      CHROME_PATH: "${CHROME_PATH:-}"
+    volumes:
+      - ./data:/var/lib/capillary
+      - ./api/.data/review_captures:/app/api/.data/review_captures
+    healthcheck:
+      test: ["CMD", "deno", "eval", "const r = await fetch(`http://127.0.0.1:${Deno.env.get('PORT') || 8080}/healthz`); if (!r.ok) Deno.exit(1);"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    restart: unless-stopped

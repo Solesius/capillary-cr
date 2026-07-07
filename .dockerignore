@@ -1,0 +1,17 @@
+# VCS
+.git
+.gitignore
+
+# Build artifacts
+api/.data
+api/native/.deps
+api/native/libceler_ffi.so
+web/dist
+
+# Dependency directories
+web/node_modules
+
+# Editor/runtime noise
+.vscode
+.DS_Store
+*.log
