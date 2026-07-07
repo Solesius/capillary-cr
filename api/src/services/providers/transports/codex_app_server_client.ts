@@ -202,7 +202,7 @@ function mapCodexError(payload: unknown): ProviderError {
 interface PendingRequest {
   resolve: (result: unknown) => void;
   reject: (error: ProviderError) => void;
-  timer: number;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 interface TurnState {
@@ -449,7 +449,7 @@ export class CodexAppServerSession {
   }
 
   private async waitForTurnCompletion(turn: TurnState, turnTimeoutMs: number): Promise<void> {
-    let timeoutHandle = 0;
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<void>((resolve) => {
       timeoutHandle = setTimeout(() => {
         this.markTurnError(turn, { kind: "network", message: "codex_turn_timeout" });
