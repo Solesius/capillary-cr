@@ -38,21 +38,32 @@ const PROVIDER_DEFAULTS: Record<ProviderKind, { baseUrl: string; model: string }
     model: "openai/gpt-4.1",
   },
   codex_app_server: {
-    // Operator-set env override (e.g. ws://host.docker.internal:7899) lets a
-    // containerized API reach a codex app-server bridged on the host — see
-    // scripts/codex_ws_bridge.ts. Env-only, same trust posture as API keys;
-    // request payloads still cannot repoint this provider.
-    baseUrl: Deno.env.get("CODEX_APP_SERVER_URL")?.trim() || "stdio://codex-app-server",
+    baseUrl: "stdio://codex-app-server",
     model: DEFAULT_CODEX_APP_SERVER_MODEL,
   },
   claude_code: {
-    // Operator-set env override (e.g. ws://host.docker.internal:7898) lets a
-    // containerized API reach a claude CLI bridged on the host — see
-    // scripts/claude_ws_bridge.ts. Env-only, mirrors CODEX_APP_SERVER_URL.
-    baseUrl: Deno.env.get("CLAUDE_CODE_URL")?.trim() || "stdio://claude-code",
+    baseUrl: "stdio://claude-code",
     model: DEFAULT_CLAUDE_CODE_MODEL,
   },
 };
+
+// Operator-set env overrides (e.g. ws://host.docker.internal:7899) let a
+// containerized API reach a CLI bridged on the host — see
+// scripts/codex_ws_bridge.ts / scripts/claude_ws_bridge.ts. Env-only, same
+// trust posture as API keys; request payloads still cannot repoint these
+// providers. Read lazily (not at module load) so resolution always reflects
+// the live environment.
+const CLI_BASE_URL_ENV: Partial<Record<ProviderKind, string>> = {
+  codex_app_server: "CODEX_APP_SERVER_URL",
+  claude_code: "CLAUDE_CODE_URL",
+};
+
+function resolveProviderDefaults(kind: ProviderKind): { baseUrl: string; model: string } {
+  const defaults = PROVIDER_DEFAULTS[kind];
+  const envVar = CLI_BASE_URL_ENV[kind];
+  const override = envVar ? Deno.env.get(envVar)?.trim() || "" : "";
+  return override ? { ...defaults, baseUrl: override } : defaults;
+}
 
 const PROVIDER_OPS: Record<ProviderKind, ProviderOps> = {
   gemini: createGeminiProviderOps(),
@@ -100,8 +111,18 @@ export function buildProviderFromKind(
   partial: Partial<ProviderDescriptor> = {},
 ): ProviderDescriptor {
   const resolvedApiKey = partial.apiKey ?? resolveProviderApiKey(kind);
-  return buildProviderDescriptor(kind, PROVIDER_DEFAULTS[kind], {
+  const defaults = resolveProviderDefaults(kind);
+  // A persisted vanilla stdio:// base URL (e.g. runtime config rehydrated
+  // from the durable store, saved before a ws bridge existed) must not pin a
+  // CLI provider to in-process spawning once the operator points it at a
+  // bridge via env. Explicit non-default values still win.
+  const partialBaseUrl = partial.baseUrl?.trim() || "";
+  const baseUrl = partialBaseUrl && partialBaseUrl !== PROVIDER_DEFAULTS[kind].baseUrl
+    ? partialBaseUrl
+    : defaults.baseUrl;
+  return buildProviderDescriptor(kind, defaults, {
     ...partial,
+    baseUrl,
     apiKey: resolvedApiKey,
   });
 }

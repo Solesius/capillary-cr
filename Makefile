@@ -38,13 +38,13 @@ cdp-retv:
 	cd api && deno task cdp:retv $(ARGS)
 
 docker-build:
-	UID=$$(id -u) GID=$$(id -g) docker compose build capillary
+	docker compose build capillary
 
 docker-up:
-	UID=$$(id -u) GID=$$(id -g) docker compose up --build capillary
+	docker compose up --build capillary
 
 docker-down:
-	UID=$$(id -u) GID=$$(id -g) docker compose down
+	docker compose down
 
 ## --- GitHub Container Registry (GHCR) ---------------------------------------
 
@@ -64,5 +64,5 @@ image-pull: ## Pull $(IMAGE):$(TAG) from GHCR
 	docker pull $(IMAGE):$(TAG)
 
 image-run: ## Run the published image via compose (CAPILLARY_IMAGE=$(IMAGE):$(TAG))
-	CAPILLARY_IMAGE=$(IMAGE):$(TAG) UID=$$(id -u) GID=$$(id -g) docker compose up -d
+	CAPILLARY_IMAGE=$(IMAGE):$(TAG) docker compose up -d
 
