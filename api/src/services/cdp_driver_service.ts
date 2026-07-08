@@ -493,11 +493,19 @@ export class CdpDriverService {
 
     const debugPort = this.resolveDebugPort();
     const userDataDir = Deno.env.get("CDP_USER_DATA_DIR") || `/tmp/capillary-cdp-${debugPort}`;
+    // Extra operator-set launch flags, e.g. the container image sets
+    // CDP_LAUNCH_FLAGS="--headless=new --no-sandbox --disable-gpu
+    // --disable-dev-shm-usage" — headless Chromium cannot start in a
+    // non-root container without them. Unset for local headed driving.
+    const extraFlags = (Deno.env.get("CDP_LAUNCH_FLAGS") || "")
+      .split(/\s+/)
+      .filter((flag) => flag.length > 0);
     const args = [
       `--remote-debugging-port=${debugPort}`,
       `--user-data-dir=${userDataDir}`,
       "--no-first-run",
       "--no-default-browser-check",
+      ...extraFlags,
       "--new-window",
       "about:blank",
     ];
