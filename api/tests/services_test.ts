@@ -327,6 +327,49 @@ Deno.test("should_reject_github_connection_when_token_is_missing", async () => {
   }
 });
 
+Deno.test("should_paginate_past_100_visible_repositories", async () => {
+  const buildRepoDto = (id: number) => ({
+    id,
+    owner: { login: "acme-org" },
+    name: `repo-${id}`,
+    full_name: `acme-org/repo-${id}`,
+    default_branch: "main",
+    private: true,
+    html_url: `https://github.com/acme-org/repo-${id}`,
+    language: "TypeScript",
+    open_issues_count: 0,
+  });
+  const paginatingFetch = ((input: string | URL | Request): Promise<Response> => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    if (url.endsWith("/user")) {
+      return Promise.resolve(new Response(JSON.stringify({
+        id: 1,
+        login: "acme-user",
+        name: "Acme User",
+        avatar_url: "https://example.com/a.png",
+      }), { status: 200 }));
+    }
+    if (url.includes("/user/repos")) {
+      const page = Number(new URL(url).searchParams.get("page") || "1");
+      const batch = page === 1
+        ? Array.from({ length: 100 }, (_, i) => buildRepoDto(i + 1))
+        : page === 2
+        ? [buildRepoDto(101), buildRepoDto(102)]
+        : [];
+      return Promise.resolve(new Response(JSON.stringify(batch), { status: 200 }));
+    }
+    return Promise.resolve(new Response("{}", { status: 404 }));
+  }) as typeof fetch;
+
+  const repository = new InMemoryReviewRepository();
+  const githubService = new GitHubOakService(repository, paginatingFetch);
+  await githubService.connectGithub("valid", "ghp_test_token");
+
+  const repositories = await githubService.listRepositories();
+  assertEquals(repositories.length, 102);
+  assertEquals(repositories.some((repo) => repo.name === "repo-102"), true);
+});
+
 Deno.test("should_list_repositories_when_identity_is_connected", async () => {
   const { githubService } = buildFixture();
   await githubService.connectGithub("valid", "ghp_test_token");

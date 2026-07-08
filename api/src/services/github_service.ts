@@ -331,10 +331,7 @@ export class GitHubOakService {
     this.requireAuthenticatedIdentity();
     const token = this.requireGithubToken();
 
-    const repositories = await this.githubGet<GitHubRepositoryDto[]>(
-      "/user/repos?per_page=100&sort=updated&direction=desc",
-      token,
-    );
+    const repositories = await this.fetchAllUserRepositories(token);
 
     const mapped = repositories.map((repo) => ({
       id: String(repo.id),
@@ -572,10 +569,7 @@ export class GitHubOakService {
   }
 
   private async findRepositoryById(repositoryId: string, token: string): Promise<GitHubRepositoryDto> {
-    const repositories = await this.githubGet<GitHubRepositoryDto[]>(
-      "/user/repos?per_page=100&sort=updated&direction=desc",
-      token,
-    );
+    const repositories = await this.fetchAllUserRepositories(token);
 
     const repo = repositories.find((item) => String(item.id) === repositoryId);
     if (!repo) {
@@ -583,6 +577,25 @@ export class GitHubOakService {
     }
 
     return repo;
+  }
+
+  // GitHub caps per_page at 100, so accounts that can see more repos than
+  // that (org members especially) silently lost everything past the first
+  // page. Walk pages until a short page; the page cap bounds worst-case
+  // latency for accounts with thousands of visible repos.
+  private async fetchAllUserRepositories(token: string): Promise<GitHubRepositoryDto[]> {
+    const all: GitHubRepositoryDto[] = [];
+    for (let page = 1; page <= 10; page++) {
+      const batch = await this.githubGet<GitHubRepositoryDto[]>(
+        `/user/repos?per_page=100&sort=updated&direction=desc&page=${page}`,
+        token,
+      );
+      all.push(...batch);
+      if (batch.length < 100) {
+        break;
+      }
+    }
+    return all;
   }
 
   private async githubGet<T>(path: string, token: string): Promise<T> {
