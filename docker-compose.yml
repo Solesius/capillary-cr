@@ -44,6 +44,8 @@ services:
       # Reach a codex app-server on the host via the ws bridge, e.g.
       # ws://host.docker.internal:7899 — see api/scripts/codex_ws_bridge.ts.
       CODEX_APP_SERVER_URL: "${CODEX_APP_SERVER_URL:-}"
+      # Same pattern for the claude CLI — see api/scripts/claude_ws_bridge.ts.
+      CLAUDE_CODE_URL: "${CLAUDE_CODE_URL:-}"
       # RetV browser agent: the image bundles chromium with headless launch
       # flags baked in — functional tests work out of the box. Point
       # CDP_BASE_URL at an external endpoint to use a different browser, or

@@ -46,7 +46,10 @@ const PROVIDER_DEFAULTS: Record<ProviderKind, { baseUrl: string; model: string }
     model: DEFAULT_CODEX_APP_SERVER_MODEL,
   },
   claude_code: {
-    baseUrl: "stdio://claude-code",
+    // Operator-set env override (e.g. ws://host.docker.internal:7898) lets a
+    // containerized API reach a claude CLI bridged on the host — see
+    // scripts/claude_ws_bridge.ts. Env-only, mirrors CODEX_APP_SERVER_URL.
+    baseUrl: Deno.env.get("CLAUDE_CODE_URL")?.trim() || "stdio://claude-code",
     model: DEFAULT_CLAUDE_CODE_MODEL,
   },
 };
