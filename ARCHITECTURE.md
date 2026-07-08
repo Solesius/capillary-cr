@@ -285,8 +285,12 @@ flowchart LR
 - **Enablement**: durability turns on only when `CAPILLARY_STORAGE_DIR` is set
   **and** the native FFI library loads; otherwise the process runs fully
   in-memory.
-- **celer-mem FFI**: built from [api/native](api/native) into
+- **celer-mem FFI**: built by [api/native/build.sh](api/native/build.sh) into
   `libceler_ffi.so` (sqlite-only; the only system dependency is `sqlite3`).
+  celer-mem sources are not vendored — the script fetches the canonical
+  [Solesius/celer-mem](https://github.com/Solesius/celer-mem) repo at a pinned
+  ref (`CELER_MEM_GIT_REF`, see Dockerfile), or uses a local checkout via
+  `CELER_MEM_DIR`.
 
 ---
 

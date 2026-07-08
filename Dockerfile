@@ -18,6 +18,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /build/api
 COPY api/ ./
+# celer-mem sources are not vendored; build.sh fetches them from the canonical
+# repo at this pinned ref. Bump deliberately.
+ENV CELER_MEM_GIT_REF=v3.1.0
 RUN ./native/build.sh
 RUN deno cache src/main.ts
 

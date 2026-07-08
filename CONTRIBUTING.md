@@ -8,6 +8,8 @@ the conventions the codebase expects.
 - [Deno](https://deno.com/) 2.x (API)
 - Node.js 22+ (web)
 - `sqlite3` + a C++23 compiler (`g++`) if you build the native `celer-mem` FFI
+  (`api/native/build.sh` auto-fetches the [celer-mem](https://github.com/Solesius/celer-mem)
+  sources, or point `CELER_MEM_DIR` at a local checkout)
 - Docker (optional, for the container deploy)
 
 ## Layout
