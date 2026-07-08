@@ -30,9 +30,9 @@ const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 app.use(async (ctx, next) => {
 	const requestOrigin = ctx.request.headers.get("origin");
-	const allowOrigin = requestOrigin && allowedOrigins.includes(requestOrigin)
-		? requestOrigin
-		: primaryOrigin;
+	const originAllowed = requestOrigin !== null &&
+		(allowedOrigins.includes(requestOrigin) || isSameHostOrigin(requestOrigin, ctx.request.url.host));
+	const allowOrigin = requestOrigin && originAllowed ? requestOrigin : primaryOrigin;
 
 	ctx.response.headers.set("Access-Control-Allow-Origin", allowOrigin);
 	ctx.response.headers.set("Vary", "Origin");
@@ -47,9 +47,13 @@ app.use(async (ctx, next) => {
 	// CSRF guard: a cross-origin browser can issue "simple" state-changing
 	// requests without triggering a preflight, so CORS response headers alone do
 	// not protect mutating endpoints (e.g. setting a provider API key). Reject
-	// any mutating request whose Origin is present but not allow-listed.
-	// Requests with no Origin (curl, server-to-server, tests) are permitted.
-	if (MUTATING_METHODS.has(ctx.request.method) && requestOrigin && !allowedOrigins.includes(requestOrigin)) {
+	// any mutating request whose Origin is present but neither allow-listed nor
+	// same-host. An Origin matching the request's own Host header is same-origin
+	// by definition (an attacker page cannot be served from the victim's own
+	// host:port), so it is safe on any published container port without
+	// operator configuration. Requests with no Origin (curl, server-to-server,
+	// tests) are permitted.
+	if (MUTATING_METHODS.has(ctx.request.method) && requestOrigin && !originAllowed) {
 		ctx.response.status = 403;
 		ctx.response.body = { error: "origin_not_allowed" };
 		return;
@@ -112,6 +116,14 @@ if (serveWebApp) {
 
 console.log(`Capillary API listening on :${port}`);
 await app.listen({ port });
+
+function isSameHostOrigin(origin: string, requestHost: string): boolean {
+	try {
+		return new URL(origin).host === requestHost;
+	} catch {
+		return false;
+	}
+}
 
 function isGithubLoginExemptPath(pathname: string): boolean {
 	if (GITHUB_LOGIN_EXEMPT_API_PATHS.includes(pathname)) {

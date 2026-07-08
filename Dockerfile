@@ -22,6 +22,7 @@ COPY api/ ./
 # repo at this pinned ref. Bump deliberately.
 ENV CELER_MEM_GIT_REF=v3.1.0
 RUN ./native/build.sh
+ENV DENO_DIR=/deno-dir
 RUN deno cache src/main.ts
 
 FROM denoland/deno:latest AS runtime
@@ -33,9 +34,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app/api
 COPY --from=api-build /build/api /app/api
 COPY --from=web-build /build/web/dist/capillary-web/browser /app/web-dist
+# Ship the dependency cache so startup needs no network and no cache writes
+# (the container may run as an arbitrary non-root uid via compose).
+ENV DENO_DIR=/deno-dir
+COPY --from=api-build /deno-dir /deno-dir
 RUN mkdir -p /var/lib/capillary /app/api/.data/review_captures \
   && chown -R deno:deno /var/lib/capillary /app \
-  && chmod -R u+rwX,g+rwX /var/lib/capillary /app/api/.data
+  && chmod -R u+rwX,g+rwX /var/lib/capillary /app/api/.data \
+  && chmod -R a+rX /deno-dir
 
 ENV PORT=8080
 ENV CORS_ORIGIN=http://localhost:8080
