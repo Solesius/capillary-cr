@@ -116,6 +116,10 @@ const DEFAULT_CHROME_CANDIDATES = [
   "/usr/bin/google-chrome-stable",
   "/usr/bin/chromium-browser",
   "/usr/bin/chromium",
+  // Bundled in the container image; listed so auto-detect still works when a
+  // stale compose file overrides CHROME_PATH with an empty string.
+  "/headless-shell/headless-shell",
+  "/snap/bin/chromium",
 ] as const;
 
 type ProbeExecutable = (candidate: string) => Promise<boolean>;
