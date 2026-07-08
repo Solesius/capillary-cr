@@ -46,7 +46,13 @@ interface HoverInfo {
         <span class="cap-muted">DAG diff // wetting // T³ projection</span>
       </header>
       <div class="cap-panel-body">
-        <div class="cap-torus-stage">
+        @if (webglUnavailable()) {
+          <div class="cap-torus-fallback">
+            <strong>WebGL is unavailable in this browser.</strong>
+            <span class="cap-muted">The 3D torus view is disabled (often a browser policy — e.g. Firefox AllowWebgl2:false). Reviews, findings, and reports work normally without it.</span>
+          </div>
+        }
+        <div class="cap-torus-stage" [hidden]="webglUnavailable()">
           <canvas
             #torusCanvas
             class="cap-torus-canvas"
@@ -73,6 +79,15 @@ interface HoverInfo {
   `,
   styles: [`
     .cap-torus-stage { position: relative; }
+    .cap-torus-fallback {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 14px;
+      border: 1px dashed var(--cap-border);
+      border-radius: var(--cap-radius-sm, 12px);
+      font-size: 0.82rem;
+    }
     .cap-torus-canvas {
       width: 100%;
       height: 360px;
@@ -140,6 +155,7 @@ export class GraphTorusViewportComponent implements AfterViewInit, OnDestroy {
 
   readonly store = inject(CapillaryStore);
   readonly hover = signal<HoverInfo | null>(null);
+  readonly webglUnavailable = signal(false);
 
   private renderer?: THREE.WebGLRenderer;
   private scene?: THREE.Scene;
@@ -174,7 +190,15 @@ export class GraphTorusViewportComponent implements AfterViewInit, OnDestroy {
   }
 
   ngAfterViewInit(): void {
-    this.initThree();
+    // WebGL can be unavailable (enterprise browser policy, software-only
+    // environments). Degrade to a notice instead of throwing out of the
+    // lifecycle hook and breaking the whole view.
+    try {
+      this.initThree();
+    } catch {
+      this.webglUnavailable.set(true);
+      return;
+    }
     this.buildGraphObjects();
     this.ready = true;
     this.animate();
