@@ -1,4 +1,8 @@
+
 # Capillary
+<img width="2508" height="627" alt="pic" src="https://github.com/user-attachments/assets/aa0fb72f-3ada-429f-909f-75f4506bc371" />
+
+
 
 **A PR is not a patch. It is a disturbance in a software graph.**
 
