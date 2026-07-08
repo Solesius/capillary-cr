@@ -44,8 +44,13 @@ services:
       # Reach a codex app-server on the host via the ws bridge, e.g.
       # ws://host.docker.internal:7899 — see api/scripts/codex_ws_bridge.ts.
       CODEX_APP_SERVER_URL: "${CODEX_APP_SERVER_URL:-}"
+      # RetV browser agent: the image bundles chromium with headless launch
+      # flags baked in — functional tests work out of the box. Point
+      # CDP_BASE_URL at an external endpoint to use a different browser, or
+      # override CDP_LAUNCH_FLAGS for custom launch behavior.
       CDP_BASE_URL: "${CDP_BASE_URL:-}"
-      CHROME_PATH: "${CHROME_PATH:-}"
+      CHROME_PATH: "${CHROME_PATH:-/headless-shell/headless-shell}"
+      CDP_LAUNCH_FLAGS: "${CDP_LAUNCH_FLAGS:---no-sandbox --disable-gpu --disable-dev-shm-usage --disable-crashpad}"
     extra_hosts:
       # Makes host.docker.internal resolve on Linux too (Docker Desktop has it
       # built in); used for the codex ws bridge and host CDP endpoints.

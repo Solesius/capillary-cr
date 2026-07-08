@@ -25,12 +25,21 @@ RUN ./native/build.sh
 ENV DENO_DIR=/deno-dir
 RUN deno cache src/main.ts
 
+# Upstream headless chromium for the RetV functional-test agent. The Debian
+# distro chromium build SIGTRAPs in containers on some kernels (e.g. WSL2);
+# chromedp/headless-shell is the battle-tested container build.
+FROM chromedp/headless-shell:stable AS chrome
+
 FROM denoland/deno:latest AS runtime
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
   libsqlite3-0 \
   ca-certificates \
+  fonts-liberation \
+  libnss3 \
+  libexpat1 \
   && rm -rf /var/lib/apt/lists/*
+COPY --from=chrome /headless-shell /headless-shell
 WORKDIR /app/api
 COPY --from=api-build /build/api /app/api
 COPY --from=web-build /build/web/dist/capillary-web/browser /app/web-dist
@@ -49,6 +58,11 @@ ENV CAPILLARY_SERVE_WEB=1
 ENV CAPILLARY_WEB_DIST=/app/web-dist
 ENV CAPILLARY_STORAGE_DIR=/var/lib/capillary
 ENV CAPILLARY_REQUIRE_GITHUB_LOGIN=1
+# RetV browser agent: bundled headless chromium; flags required to launch as a
+# non-root container user (HOME may be unset/unwritable under a compose uid).
+ENV CHROME_PATH=/headless-shell/headless-shell
+ENV CDP_LAUNCH_FLAGS="--no-sandbox --disable-gpu --disable-dev-shm-usage --disable-crashpad"
+ENV HOME=/tmp
 
 EXPOSE 8080
 USER deno
