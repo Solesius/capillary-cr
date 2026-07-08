@@ -24,7 +24,8 @@ posture. It is the map for consuming and operating Capillary.
   truth and the store is a write-through mirror.
 - **Topology** — deliberately **single instance**. The in-memory repository is
   the synchronous source of truth; there is no horizontal-scaling story and none
-  is intended. Durability is provided by the local store + bind-mounted volume.
+  is intended. Durability is provided by the local store + a docker-managed
+  named volume.
 
 ```mermaid
 flowchart LR
@@ -46,7 +47,7 @@ flowchart LR
     API -- OAuth + repo/PR/diff --> GH
     API -- planner turns --> LLM
     API -- functional-test driving --> CDP
-    CELER -. bind mount .-> VOL[(./data on host)]
+    CELER -. named volume .-> VOL[(capillary-data)]
 ```
 
 ---

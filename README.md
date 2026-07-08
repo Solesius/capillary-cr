@@ -93,14 +93,13 @@ make dev
 
 ```bash
 # Run the published image
-mkdir -p data   # durable-storage mount; create it first so it's owned by you, not root
 CAPILLARY_IMAGE=ghcr.io/solesius/capillary-cr:latest docker compose up -d
 
 # Build and run locally
 make docker-up
 ```
 
-The container serves the built Angular SPA and the API from the same origin on `:8080`. Review captures and durable storage are bind-mounted with host UID/GID ownership.
+The container serves the built Angular SPA and the API from the same origin on `:8080`. Durable storage and review captures live in docker-managed named volumes — no host directory setup or ownership configuration needed.
 
 Key environment variables:
 
