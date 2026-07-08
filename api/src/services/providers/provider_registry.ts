@@ -38,7 +38,11 @@ const PROVIDER_DEFAULTS: Record<ProviderKind, { baseUrl: string; model: string }
     model: "openai/gpt-4.1",
   },
   codex_app_server: {
-    baseUrl: "stdio://codex-app-server",
+    // Operator-set env override (e.g. ws://host.docker.internal:7899) lets a
+    // containerized API reach a codex app-server bridged on the host — see
+    // scripts/codex_ws_bridge.ts. Env-only, same trust posture as API keys;
+    // request payloads still cannot repoint this provider.
+    baseUrl: Deno.env.get("CODEX_APP_SERVER_URL")?.trim() || "stdio://codex-app-server",
     model: DEFAULT_CODEX_APP_SERVER_MODEL,
   },
   claude_code: {

@@ -1,6 +1,7 @@
 # Registry-first single-instance deployment for Capillary.
 #
 # Default (pull the published image from GHCR):
+#   mkdir -p data   # create the storage mount first so you own it (not root)
 #   CAPILLARY_IMAGE=ghcr.io/solesius/capillary-cr:latest docker compose up -d
 # or set CAPILLARY_IMAGE in a .env file (see .env.example) and run:
 #   docker compose up -d
@@ -39,13 +40,21 @@ services:
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
       GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GITHUB_COPILOT_TOKEN: "${GITHUB_COPILOT_TOKEN:-}"
+      # Reach a codex app-server on the host via the ws bridge, e.g.
+      # ws://host.docker.internal:7899 — see api/scripts/codex_ws_bridge.ts.
+      CODEX_APP_SERVER_URL: "${CODEX_APP_SERVER_URL:-}"
       CDP_BASE_URL: "${CDP_BASE_URL:-}"
       CHROME_PATH: "${CHROME_PATH:-}"
+    extra_hosts:
+      # Makes host.docker.internal resolve on Linux too (Docker Desktop has it
+      # built in); used for the codex ws bridge and host CDP endpoints.
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./data:/var/lib/capillary
       - ./api/.data/review_captures:/app/api/.data/review_captures
     healthcheck:
-      test: ["CMD", "deno", "eval", "const r = await fetch(`http://127.0.0.1:${Deno.env.get('PORT') || 8080}/healthz`); if (!r.ok) Deno.exit(1);"]
+      test: ["CMD", "deno", "eval", "const r = await fetch(`http://127.0.0.1:$${Deno.env.get('PORT') || 8080}/healthz`); if (!r.ok) Deno.exit(1);"]
       interval: 30s
       timeout: 5s
       start_period: 20s

@@ -93,6 +93,7 @@ make dev
 
 ```bash
 # Run the published image
+mkdir -p data   # durable-storage mount; create it first so it's owned by you, not root
 CAPILLARY_IMAGE=ghcr.io/solesius/capillary-cr:latest docker compose up -d
 
 # Build and run locally
