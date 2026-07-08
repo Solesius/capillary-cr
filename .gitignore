@@ -25,6 +25,7 @@ web/.angular/
 **/target/
 **/build/
 api/native/.deps/
+*.so
 
 # Runtime data — never commit
 api/.data/
