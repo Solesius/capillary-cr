@@ -232,13 +232,18 @@ and pluggable transports. Provider kinds:
 - **stdio-first**: Codex and Claude Code are the recommended paths — the model
   credential never enters Capillary.
 - **Container → host passthrough**: a containerized API can use the host's
-  Codex CLI login. Run the stdio↔WebSocket bridge on the host
-  ([api/scripts/codex_ws_bridge.ts](api/scripts/codex_ws_bridge.ts)) and set
-  `CODEX_APP_SERVER_URL=ws://host.docker.internal:7899` on the container
-  (compose already maps `host.docker.internal` via `host-gateway`). The
-  override is env-only — request payloads still cannot repoint the provider.
-  GitHub Copilot needs no bridge: it authenticates with the connected GitHub
-  OAuth token over REST from anywhere.
+  CLI logins. Run the stdio↔WebSocket bridge on the host and point the
+  container at it (compose already maps `host.docker.internal` via
+  `host-gateway`):
+  - Codex: [api/scripts/codex_ws_bridge.ts](api/scripts/codex_ws_bridge.ts) +
+    `CODEX_APP_SERVER_URL=ws://host.docker.internal:7899`
+  - Claude Code: [api/scripts/claude_ws_bridge.ts](api/scripts/claude_ws_bridge.ts) +
+    `CLAUDE_CODE_URL=ws://host.docker.internal:7898` (the bridge allowlists
+    the exact print-mode flag set the transport emits — nothing else spawns)
+
+  Both overrides are env-only — request payloads still cannot repoint the
+  providers. GitHub Copilot needs no bridge: it authenticates with the
+  connected GitHub OAuth token over REST from anywhere.
 - **Reasoning / timeouts**: Codex sessions are pooled per base URL and reuse a
   thread per run context; agent contexts request low reasoning effort and a
   longer turn budget, review contexts use full reasoning (all env-tunable).

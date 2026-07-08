@@ -47,6 +47,11 @@ export function isClaudeCliBaseUrl(baseUrl: string): boolean {
   return normalized.startsWith("stdio://claude") || normalized.startsWith("cli://claude");
 }
 
+export function isClaudeWsBaseUrl(baseUrl: string): boolean {
+  const normalized = baseUrl.trim().toLowerCase();
+  return normalized.startsWith("ws://") || normalized.startsWith("wss://");
+}
+
 function isExecutableFile(path: string): boolean {
   try {
     return Deno.statSync(path).isFile;
@@ -149,6 +154,93 @@ function defaultClaudeCliSpawner(invocation: ClaudeCliInvocation): ClaudeCliProc
       }
       return stderrPromise;
     },
+  };
+}
+
+// WebSocket spawner: drives a `claude` CLI that lives on another machine via
+// scripts/claude_ws_bridge.ts (e.g. container → host passthrough, mirroring
+// the codex ws channel). Envelope protocol, one JSON object per text frame:
+//   client → bridge:  { args, stdin }            (sent once, on open)
+//   bridge → client:  { stream: "stdout"|"stderr", data } | { exit: code }
+// env/clearEnv are intentionally not forwarded — the bridge owns its own
+// environment and strips API-key variables itself.
+export function createClaudeWsSpawner(baseUrl: string): ClaudeCliSpawner {
+  return (invocation: ClaudeCliInvocation): ClaudeCliProcess => {
+    const encoder = new TextEncoder();
+    let stderrText = "";
+    let settled = false;
+    let resolveStatus: (status: { success: boolean; code: number }) => void;
+    const status = new Promise<{ success: boolean; code: number }>((resolve) => {
+      resolveStatus = resolve;
+    });
+
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const stdout = new ReadableStream<Uint8Array>({
+      start(c) {
+        controller = c;
+      },
+    });
+
+    const settle = (code: number) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      try {
+        controller.close();
+      } catch {
+        // already closed
+      }
+      resolveStatus({ success: code === 0, code });
+    };
+
+    const socket = new WebSocket(baseUrl);
+    socket.onopen = () => {
+      socket.send(JSON.stringify({ args: invocation.args, stdin: invocation.stdin }));
+    };
+    socket.onmessage = (event) => {
+      if (typeof event.data !== "string") {
+        return;
+      }
+      let envelope: unknown;
+      try {
+        envelope = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      if (!isRecord(envelope)) {
+        return;
+      }
+      if (typeof envelope.exit === "number") {
+        settle(envelope.exit);
+        socket.close();
+        return;
+      }
+      const data = asString(envelope.data);
+      if (!data) {
+        return;
+      }
+      if (envelope.stream === "stdout" && !settled) {
+        controller.enqueue(encoder.encode(data));
+      } else if (envelope.stream === "stderr") {
+        stderrText += data;
+      }
+    };
+    socket.onerror = () => {
+      stderrText = stderrText || `claude_ws_connect_failed: ${baseUrl}`;
+      settle(1);
+    };
+    socket.onclose = () => {
+      // Close without an exit envelope means the bridge or network died mid-turn.
+      stderrText = settled ? stderrText : stderrText || "claude_ws_closed_before_exit";
+      settle(1);
+    };
+
+    return {
+      stdout,
+      status,
+      stderr: () => Promise.resolve(stderrText),
+    };
   };
 }
 
@@ -405,7 +497,8 @@ export function createClaudeCodeProviderOps(
     }
 
     const baseUrl = provider.baseUrl.trim();
-    if (!isClaudeCliBaseUrl(baseUrl)) {
+    const useWs = isClaudeWsBaseUrl(baseUrl);
+    if (!isClaudeCliBaseUrl(baseUrl) && !useWs) {
       return invalidRequest("invalid_provider_base_url");
     }
 
@@ -420,7 +513,8 @@ export function createClaudeCodeProviderOps(
       clearEnv,
     };
 
-    return await runClaudeStream(spawner, invocation, model, onStream);
+    const activeSpawner = useWs ? createClaudeWsSpawner(baseUrl) : spawner;
+    return await runClaudeStream(activeSpawner, invocation, model, onStream);
   };
 
   return {
