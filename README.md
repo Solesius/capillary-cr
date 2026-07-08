@@ -10,6 +10,33 @@ Capillary is a code review system built around that premise. It takes a pull req
 
 ---
 
+## Quick start — Docker
+
+One command, everything included (UI, browser agent, durable storage):
+
+```bash
+docker run -d --name capillary -p 8080:8080 \
+  -v capillary-data:/var/lib/capillary \
+  -e GITHUB_OAUTH_CLIENT_ID=your_client_id \
+  ghcr.io/solesius/capillary-cr:latest
+```
+
+Open **http://localhost:8080**, connect GitHub (device flow — or paste a PAT and skip the client id), pick a PR, hit **Begin Review**. Compose users: clone the repo and `docker compose up -d`. Details in [Docker deploy](#docker-deploy-single-instance).
+
+## Quick start — local
+
+Requirements: [Deno](https://deno.com/) 2.x, Node.js 22+.
+
+```bash
+git clone https://github.com/Solesius/capillary-cr.git && cd capillary-cr
+cp .env.example .env       # add GITHUB_OAUTH_CLIENT_ID (2-min setup below)
+make dev                   # API :8080 + Angular dev server :4200
+```
+
+Open **http://localhost:4200**. The review agent needs a model: the Codex or Claude Code CLI logged in locally (no key), or a provider key in `.env`. OAuth app setup and provider details in [Local development](#local-development).
+
+---
+
 ## Why a torus
 
 Most review tools draw a flat list of files. Capillary draws a field.
