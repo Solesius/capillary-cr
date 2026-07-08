@@ -52,16 +52,25 @@ import { CapillaryStore } from "../state/capillary.store";
           </div>
         } @else {
           <div class="cap-field-group">
-            <label class="cap-field-label" for="repoSelect">Repository</label>
+            <label class="cap-field-label" for="repoSearch">Repository</label>
+            <input
+              id="repoSearch"
+              type="search"
+              class="cap-input"
+              autocomplete="off"
+              placeholder="Search {{ store.repositories().length }} repositories…"
+              [value]="repoQuery()"
+              (input)="repoQuery.set($any($event.target).value)" />
             <select
               id="repoSelect"
               class="cap-select"
+              [size]="listSize()"
               [value]="store.selectedRepositoryId() ?? ''"
               (change)="selectRepository($any($event.target).value)">
               <option value="" disabled>
-                {{ store.repositories().length === 0 ? 'Loading repositories…' : 'Select a repository' }}
+                {{ store.repositories().length === 0 ? 'Loading repositories…' : filteredRepositories().length === 0 ? 'No repositories match' : 'Select a repository' }}
               </option>
-              @for (repo of store.repositories(); track repo.id) {
+              @for (repo of filteredRepositories(); track repo.id) {
                 <option [value]="repo.id">{{ repo.fullName }}</option>
               }
             </select>
@@ -170,6 +179,26 @@ import { CapillaryStore } from "../state/capillary.store";
 export class GitHubRepositoryPickerComponent {
   readonly store = inject(CapillaryStore);
   readonly githubToken = signal("");
+  readonly repoQuery = signal("");
+  readonly filteredRepositories = computed(() => {
+    const query = this.repoQuery().trim().toLowerCase();
+    const repos = this.store.repositories();
+    if (!query) {
+      return repos;
+    }
+    // Always keep the current selection visible so the <select> value stays valid.
+    const selectedId = this.store.selectedRepositoryId();
+    return repos.filter((repo) =>
+      repo.fullName.toLowerCase().includes(query) || repo.id === selectedId
+    );
+  });
+  // Expand into a scrollable listbox while filtering; stay a dropdown otherwise.
+  readonly listSize = computed(() => {
+    if (!this.repoQuery().trim()) {
+      return 1;
+    }
+    return Math.max(2, Math.min(8, this.filteredRepositories().length + 1));
+  });
 
   connectOAuth(): void {
     void this.store.connectWithGithubOAuth(window.location.origin, this.githubToken().trim() || undefined);
