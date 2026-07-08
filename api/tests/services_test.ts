@@ -12,6 +12,7 @@ import { LlmProviderService } from "../src/services/llm_provider_service.ts";
 import { buildRetvLoop, runRetvLoop } from "../src/services/providers/retv_loop.ts";
 import { buildRetvTcsrctSystemPrompt } from "../src/services/providers/retv_system_prompt.ts";
 import {
+  buildProviderFromKind,
   listProviderKinds,
   resolveProviderOps,
 } from "../src/services/providers/provider_registry.ts";
@@ -325,6 +326,31 @@ Deno.test("should_reject_github_connection_when_token_is_missing", async () => {
       Deno.env.set("GITHUB_TOKEN", previousToken);
     }
   }
+});
+
+Deno.test("should_let_env_bridge_url_supersede_persisted_stdio_base_url", () => {
+  const previous = Deno.env.get("CLAUDE_CODE_URL");
+  try {
+    Deno.env.set("CLAUDE_CODE_URL", "ws://host.docker.internal:7898");
+    // Simulates runtime config rehydrated from the durable store before the
+    // ws bridge existed: the stale stdio default must not win over the env.
+    const provider = buildProviderFromKind("claude_code", { baseUrl: "stdio://claude-code" });
+    assertEquals(provider.baseUrl, "ws://host.docker.internal:7898");
+
+    // An explicit non-default value still wins over the env override.
+    const explicit = buildProviderFromKind("claude_code", { baseUrl: "ws://10.0.0.5:7898" });
+    assertEquals(explicit.baseUrl, "ws://10.0.0.5:7898");
+  } finally {
+    if (previous === undefined) {
+      Deno.env.delete("CLAUDE_CODE_URL");
+    } else {
+      Deno.env.set("CLAUDE_CODE_URL", previous);
+    }
+  }
+
+  // Without the env override, the stdio default holds.
+  const vanilla = buildProviderFromKind("claude_code", { baseUrl: "stdio://claude-code" });
+  assertEquals(vanilla.baseUrl, "stdio://claude-code");
 });
 
 Deno.test("should_paginate_past_100_visible_repositories", async () => {
