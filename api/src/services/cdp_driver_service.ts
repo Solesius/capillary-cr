@@ -415,7 +415,13 @@ export class CdpDriverService {
         return { selector: step.selector, length: step.text.length };
       case "assertText":
         await this.waitForSelector(session.connection, step.selector, step.timeoutMs || 10000);
-        return await this.assertSelectorText(session.connection, step.selector, step.includes, step.equals);
+        return await this.assertSelectorText(
+          session.connection,
+          step.selector,
+          step.includes,
+          step.equals,
+          step.timeoutMs || 10000,
+        );
       case "extractText":
         await this.waitForSelector(session.connection, step.selector, step.timeoutMs || 10000);
         return await this.extractSelectorText(session.connection, step.selector);
@@ -735,21 +741,30 @@ export class CdpDriverService {
     selector: string,
     includes?: string,
     equals?: string,
+    timeoutMs = 10000,
   ): Promise<{ selector: string; text: string }> {
-    const text = await this.extractSelectorText(connection, selector);
+    // Poll until the condition holds or the budget runs out: an element can
+    // exist (waitForSelector passed) while the framework is still rendering
+    // its text — a one-shot read produces false negatives against SPAs.
+    const start = Date.now();
+    let text = "";
+    while (true) {
+      text = await this.extractSelectorText(connection, selector);
+      const equalsOk = typeof equals !== "string" || text === equals;
+      const includesOk = typeof includes !== "string" || text.includes(includes);
+      if (equalsOk && includesOk) {
+        return { selector, text };
+      }
+      if (Date.now() - start >= timeoutMs) {
+        break;
+      }
+      await this.sleep(150);
+    }
 
     if (typeof equals === "string" && text !== equals) {
       throw new AppError(`assert_text_failed_equals: ${selector}`, 409, "assert_text_failed");
     }
-
-    if (typeof includes === "string" && !text.includes(includes)) {
-      throw new AppError(`assert_text_failed_includes: ${selector}`, 409, "assert_text_failed");
-    }
-
-    return {
-      selector,
-      text,
-    };
+    throw new AppError(`assert_text_failed_includes: ${selector}`, 409, "assert_text_failed");
   }
 
   private async extractSelectorText(connection: CdpConnection, selector: string): Promise<string> {

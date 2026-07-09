@@ -329,6 +329,61 @@ Deno.test("should_reject_github_connection_when_token_is_missing", async () => {
   }
 });
 
+Deno.test("should_floor_milestone_progress_with_clean_cycle_evidence", async () => {
+  const { reconcileCompletedMilestones } = await import(
+    "../src/services/cdp_retv_agent_service.ts"
+  );
+  const base = { allowAutoAdvance: true, totalMilestones: 4 };
+
+  // Weak planner under-reports (says 2) while the cycle succeeded: evidence wins.
+  assertEquals(
+    reconcileCompletedMilestones({ ...base, plannerReported: 2, prior: 2, cycleSucceeded: true }),
+    3,
+  );
+  // Planner ahead of the floor is trusted.
+  assertEquals(
+    reconcileCompletedMilestones({ ...base, plannerReported: 4, prior: 1, cycleSucceeded: true }),
+    4,
+  );
+  // Failed cycle: no advance, and a low planner claim cannot regress progress.
+  assertEquals(
+    reconcileCompletedMilestones({ ...base, plannerReported: 1, prior: 3, cycleSucceeded: false }),
+    3,
+  );
+  // Planner silent + clean cycle: auto-advance, capped at total.
+  assertEquals(
+    reconcileCompletedMilestones({ ...base, plannerReported: undefined, prior: 4, cycleSucceeded: true }),
+    4,
+  );
+  // Unreachable planner disables auto-advance.
+  assertEquals(
+    reconcileCompletedMilestones({
+      plannerReported: undefined,
+      prior: 1,
+      cycleSucceeded: true,
+      allowAutoAdvance: false,
+      totalMilestones: 4,
+    }),
+    1,
+  );
+});
+
+Deno.test("should_treat_loopback_equivalent_hosts_as_one_origin_for_drift", async () => {
+  const { canonicalOrigin, isDrift } = await import("../src/services/cdp_retv_agent_service.ts");
+
+  // The loopback auto-rewrite moves the browser between these mid-run;
+  // none of them is drift relative to the others.
+  assertEquals(canonicalOrigin("http://host.docker.internal:7858/x"), "http://localhost:7858");
+  assertEquals(canonicalOrigin("http://127.0.0.1:7858/"), "http://localhost:7858");
+
+  const allowed = new Set([canonicalOrigin("http://localhost:7858")]);
+  assertEquals(isDrift("http://host.docker.internal:7858/app", allowed), false);
+  assertEquals(isDrift("http://127.0.0.1:7858/", allowed), false);
+  assertEquals(isDrift("https://evil.example/", allowed), true);
+  // Different port on the same host is still drift.
+  assertEquals(isDrift("http://localhost:9999/", allowed), true);
+});
+
 Deno.test("should_let_env_bridge_url_supersede_persisted_stdio_base_url", () => {
   const previous = Deno.env.get("CLAUDE_CODE_URL");
   try {
