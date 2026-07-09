@@ -598,8 +598,11 @@ function selectRiskSurfaceNodeIds(
 ): string[] {
   const nodesById = new Map(nodes.map((node) => [node.id, node]));
   const samplesByNodeId = new Map(shapeSamples.map((sample) => [sample.nodeId, sample]));
+  // Risk surfaces must anchor to files a reviewer opens — never symbol nodes
+  // (interfaces, functions), which otherwise surface as "hot paths" like
+  // `foo.ts#PlacedNode` and read as noise in the report.
   const rankedSeeds = shapeSamples
-    .slice()
+    .filter((sample) => nodesById.get(sample.nodeId)?.kind !== "symbol")
     .sort((left, right) => riskSeedScore(right, nodesById.get(right.nodeId), flowStats) - riskSeedScore(left, nodesById.get(left.nodeId), flowStats));
 
   const selected = new Set<string>();
