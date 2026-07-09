@@ -44,6 +44,9 @@ const DEFAULT_EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
 // inside the tokenizer anyway. Head of the file (imports, declarations,
 // doc comments) carries most of the "what is this about" signal.
 const MAX_CONTENT_CHARS = 2000;
+// Files per wasm inference batch — bounds peak (and therefore permanent)
+// wasm heap growth; see embed().
+const EMBED_BATCH_SIZE = 8;
 
 export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
   // Vectors are unit-length, so the dot product is the cosine.
@@ -84,8 +87,16 @@ export class MiniLmEmbeddingService implements FileEmbeddingProvider {
             model?: string,
             options?: Record<string, unknown>,
           ) => Promise<unknown>;
-          env: { backends?: { onnx?: { wasm?: { numThreads?: number } } } };
+          env: {
+            allowLocalModels?: boolean;
+            backends?: { onnx?: { wasm?: { numThreads?: number } } };
+          };
         };
+        // Outside a browser the "local model" probe resolves bare filesystem
+        // paths the web bundle cannot fetch ("Invalid URL: /models/..."),
+        // logging noise on every load. Hub download + cache is the only path
+        // we use.
+        env.allowLocalModels = false;
         // Single wasm thread: Deno lacks the worker shims the
         // multi-threaded path expects.
         if (env.backends?.onnx?.wasm) {
@@ -110,11 +121,18 @@ export class MiniLmEmbeddingService implements FileEmbeddingProvider {
     const texts = files.map((file) =>
       `${file.path}\n${file.content.slice(0, MAX_CONTENT_CHARS)}`
     );
-    const output = await extractor(texts, { pooling: "mean", normalize: true });
-    const rows = output.tolist();
-    files.forEach((file, index) => {
-      vectors.set(file.path, Float32Array.from(rows[index] ?? []));
-    });
+    // Chunked inference: wasm memory grows to the peak batch size and never
+    // shrinks for the process lifetime, so a 100-file PR embedded as one
+    // batch permanently balloons the heap. Small sequential batches bound
+    // peak memory to a constant regardless of PR size.
+    for (let start = 0; start < texts.length; start += EMBED_BATCH_SIZE) {
+      const batch = texts.slice(start, start + EMBED_BATCH_SIZE);
+      const output = await extractor(batch, { pooling: "mean", normalize: true });
+      const rows = output.tolist();
+      batch.forEach((_, offset) => {
+        vectors.set(files[start + offset].path, Float32Array.from(rows[offset] ?? []));
+      });
+    }
     return vectors;
   }
 }

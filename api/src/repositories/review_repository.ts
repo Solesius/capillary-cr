@@ -318,6 +318,24 @@ export class InMemoryReviewRepository implements ReviewRepository {
   saveRetvRun(record: RetvCdpRunRecord): void {
     this.#retvRuns.set(record.runId, record);
     void this.#durable?.saveRetvRun(record);
+    this.#pruneHeavyTraces();
+  }
+
+  /**
+   * Trace payloads (base64 screenshots especially) are the dominant resident
+   * memory after a day of dogfooding — a traced RetV run holds megabytes of
+   * screenshots, forever. Keep full payloads for only the most recent traced
+   * runs in memory; the durable store already received the complete record
+   * (written above, before pruning), so nothing is lost on disk.
+   */
+  #pruneHeavyTraces(): void {
+    const MAX_TRACED_IN_MEMORY = 3;
+    const traced = [...this.#retvRuns.values()]
+      .filter((run) => run.trace)
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+    for (const run of traced.slice(MAX_TRACED_IN_MEMORY)) {
+      this.#retvRuns.set(run.runId, { ...run, trace: undefined });
+    }
   }
 
   listRetvRuns(): RetvCdpRunListItem[] {
