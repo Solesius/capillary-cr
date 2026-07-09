@@ -2,6 +2,7 @@
 // Copyright 2026 Khalil Warren — capillary
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from "@angular/core";
 import { CommonModule } from "@angular/common";
+import { ApiClientService } from "../services/api-client.service";
 import { CapillaryStore } from "../state/capillary.store";
 
 @Component({
@@ -27,7 +28,11 @@ import { CapillaryStore } from "../state/capillary.store";
 
         @if (!store.githubConnected()) {
           <div class="cap-connect-block">
-            <button class="cap-button cap-button-primary cap-button-full" (click)="connectOAuth()">
+            <button
+              class="cap-button cap-button-primary cap-button-full"
+              [class.busy]="busy()"
+              [disabled]="busy()"
+              (click)="connectOAuth()">
               Connect with GitHub
             </button>
 
@@ -45,7 +50,8 @@ import { CapillaryStore } from "../state/capillary.store";
               (input)="githubToken.set($any($event.target).value)" />
             <button
               class="cap-button cap-button-full"
-              [disabled]="!githubToken().trim()"
+              [class.busy]="busy()"
+              [disabled]="!githubToken().trim() || busy()"
               (click)="connectPat()">
               Connect PAT
             </button>
@@ -178,6 +184,8 @@ import { CapillaryStore } from "../state/capillary.store";
 })
 export class GitHubRepositoryPickerComponent {
   readonly store = inject(CapillaryStore);
+  private readonly api = inject(ApiClientService);
+  readonly busy = computed(() => this.api.inFlight() > 0);
   readonly githubToken = signal("");
   readonly repoQuery = signal("");
   readonly filteredRepositories = computed(() => {

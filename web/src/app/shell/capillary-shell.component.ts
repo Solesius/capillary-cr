@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { ChangeDetectionStrategy, Component, effect, ElementRef, inject, signal, viewChild } from "@angular/core";
+import { ChangeDetectionStrategy, Component, computed, effect, ElementRef, inject, signal, viewChild } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { GitHubRepositoryPickerComponent } from "../github/github-repository-picker.component";
 import { GraphTorusViewportComponent } from "../graph/graph-torus-viewport.component";
 import { PullRequestCardGridComponent } from "../pr/pull-request-card-grid.component";
 import { ReviewControlPanelComponent } from "../review/review-control-panel.component";
+import { ApiClientService } from "../services/api-client.service";
 import { CapillaryStore } from "../state/capillary.store";
 import { RetvPlannerProviderKind } from "../models";
 import { MarkdownPipe } from "./markdown.pipe";
@@ -23,6 +24,7 @@ import { MarkdownPipe } from "./markdown.pipe";
   ],
   template: `
     <div class="cap-app">
+      <div class="cap-netbar" [class.active]="networkBusy()" aria-hidden="true"><span></span></div>
       <header class="cap-appbar">
         <div class="cap-appbar-row">
           <section class="cap-appbar-left">
@@ -586,6 +588,8 @@ import { MarkdownPipe } from "./markdown.pipe";
 })
 export class CapillaryShellComponent {
   readonly store = inject(CapillaryStore);
+  private readonly api = inject(ApiClientService);
+  readonly networkBusy = computed(() => this.api.inFlight() > 0);
   private readonly agentConsoleBox = viewChild<ElementRef<HTMLElement>>("agentConsoleBox");
   readonly activePage = signal<"run" | "github" | "setup" | "agent">("run");
   readonly theme = signal<"light" | "dark">(this.readStoredTheme());

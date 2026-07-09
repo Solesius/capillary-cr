@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { Injectable } from "@angular/core";
+import { Injectable, signal } from "@angular/core";
 import {
   CdpSessionSummary,
   GitHubOAuthPollResponse,
@@ -27,8 +27,21 @@ import {
 export class ApiClientService {
   private readonly baseUrl = this.resolveBaseUrl();
 
+  /** Number of in-flight HTTP requests — drives the global network loader. */
+  readonly inFlight = signal(0);
+
   getApiOrigin(): string {
     return new URL(this.baseUrl).origin;
+  }
+
+  /** Wrap any fetch so the UI can show a pending state instead of dead-air. */
+  private async tracked<T>(run: () => Promise<T>): Promise<T> {
+    this.inFlight.update((n) => n + 1);
+    try {
+      return await run();
+    } finally {
+      this.inFlight.update((n) => Math.max(0, n - 1));
+    }
   }
 
   async connectGithub(token?: string): Promise<void> {
@@ -252,26 +265,30 @@ export class ApiClientService {
     return origin;
   }
 
-  private async get<T>(path: string): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${path}`);
-    if (!response.ok) {
-      throw await this.toApiError(response);
-    }
-    return response.json();
+  private get<T>(path: string): Promise<T> {
+    return this.tracked(async () => {
+      const response = await fetch(`${this.baseUrl}${path}`);
+      if (!response.ok) {
+        throw await this.toApiError(response);
+      }
+      return response.json();
+    });
   }
 
-  private async post<T>(path: string, body: unknown): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(body),
+  private post<T>(path: string, body: unknown): Promise<T> {
+    return this.tracked(async () => {
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        throw await this.toApiError(response);
+      }
+      return response.json();
     });
-    if (!response.ok) {
-      throw await this.toApiError(response);
-    }
-    return response.json();
   }
 
   private async toApiError(response: Response): Promise<Error> {
