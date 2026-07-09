@@ -159,9 +159,17 @@ html[data-theme="dark"] .cap-appbar {
 }
 
 .cap-brand {
-  display: grid;
-  gap: 3px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
   min-width: 0;
+}
+
+.cap-brand-logo {
+  height: 34px;
+  width: auto;
+  display: block;
+  border-radius: 6px;
 }
 
 .cap-appbar-right {

@@ -276,7 +276,8 @@ export interface GraphEdge {
   id: string;
   fromNodeId: string;
   toNodeId: string;
-  kind: "imports" | "calls" | "owns" | "extends" | "changed_with";
+  /** Open union: the API grows edge kinds (e.g. "semantic") ahead of the UI. */
+  kind: string;
   directed: boolean;
   weight: number;
 }

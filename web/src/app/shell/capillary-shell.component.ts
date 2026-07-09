@@ -27,13 +27,11 @@ import { MarkdownPipe } from "./markdown.pipe";
         <div class="cap-appbar-row">
           <section class="cap-appbar-left">
             <div class="cap-brand">
-              <p class="cap-kicker">Capillary</p>
-              <h1 class="cap-title">PR Graph Review</h1>
+              <img class="cap-brand-logo" src="assets/capillary-logo.png" alt="Capillary" />
             </div>
           </section>
 
           <section class="cap-appbar-right">
-            <p class="cap-muted cap-mode-label">Mode: Graph immersion</p>
             <span class="cap-chip">{{ store.status() }}</span>
             <button
               class="cap-icon-button cap-theme-toggle"
@@ -67,7 +65,7 @@ import { MarkdownPipe } from "./markdown.pipe";
           </section>
         </div>
 
-        <p class="cap-subtitle">Trace Contracts State Runtime CodeShape Tests across a living dependency graph.</p>
+        <p class="cap-subtitle">A PR is not a patch — see what your change touches, then review it gate by gate.</p>
       </header>
 
       @if (functionMenuOpen()) {
