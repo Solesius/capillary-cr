@@ -24,6 +24,7 @@ import {
   ReviewProgress,
   ReviewRun,
   ReviewRunEvent,
+  ReviewSessionSummary,
   TcsrtcGate,
 } from "../models";
 import { ApiClientService } from "../services/api-client.service";
@@ -214,7 +215,16 @@ export class CapillaryStore {
 
   #cdpQueue: Promise<void> = Promise.resolve();
 
-  constructor(private readonly api: ApiClientService) {}
+  constructor(private readonly api: ApiClientService) {
+    // Reconnect to any server-side review sessions that outlived the last
+    // page: reviews are durable, the browser is just a viewport.
+    void this.restoreReviewSessions();
+    setInterval(() => {
+      if (this.reviewSessions().some((session) => session.active)) {
+        void this.refreshReviewSessions();
+      }
+    }, 20_000);
+  }
 
   async refreshCdpSessions(): Promise<void> {
     try {
@@ -798,16 +808,127 @@ export class CapillaryStore {
     this.reviewEvents.update((events) => events.concat(`pull_request_selected:${pullRequestId}`));
   }
 
+  // --- durable review sessions --------------------------------------------
+  // Runs live on the server; the browser only attaches. Bouncing between
+  // screens, reloading, or switching sessions never interrupts a review —
+  // re-attaching replays the full narrative, then tails live.
+
+  readonly reviewSessions = signal<ReviewSessionSummary[]>([]);
+  readonly activeSessionRunId = signal<string | null>(null);
+  readonly newSessionWarningVisible = signal(false);
+
+  async refreshReviewSessions(): Promise<void> {
+    try {
+      this.reviewSessions.set(await this.api.listReviewSessions());
+    } catch {
+      // Session list is advisory UI state; never surface a poll failure.
+    }
+  }
+
+  /** Reconnect to server-side sessions on app load (survives reloads). */
+  async restoreReviewSessions(): Promise<void> {
+    await this.refreshReviewSessions();
+    const latestActive = this.reviewSessions().find((session) => session.active);
+    if (latestActive && !this.#reviewStream) {
+      this.attachToSession(latestActive.runId);
+    }
+  }
+
+  /**
+   * Entry point for the Begin Review button. When other sessions are still
+   * running, surface the token-cost warning first — each concurrent session
+   * drives its own model turns.
+   */
   async beginReview(): Promise<void> {
+    if (!this.selectedPullRequestId() || !this.selectedRepositoryId()) {
+      return;
+    }
+    if (this.reviewSessions().some((session) => session.active)) {
+      this.newSessionWarningVisible.set(true);
+      return;
+    }
+    await this.startNewSession();
+  }
+
+  async confirmNewSession(): Promise<void> {
+    this.newSessionWarningVisible.set(false);
+    await this.startNewSession();
+  }
+
+  dismissNewSessionWarning(): void {
+    this.newSessionWarningVisible.set(false);
+  }
+
+  private async startNewSession(): Promise<void> {
     const pullRequestId = this.selectedPullRequestId();
     const repositoryId = this.selectedRepositoryId();
     if (!pullRequestId || !repositoryId) {
       return;
     }
-    if (this.#reviewStream) {
+
+    this.lastError.set(null);
+    try {
+      const session = await this.api.createReviewSession({
+        pullRequestId,
+        repositoryId,
+        trace: this.reviewTraceEnabled(),
+      });
+      await this.refreshReviewSessions();
+      this.attachToSession(session.runId);
+    } catch (error) {
+      this.status.set("failed");
+      this.lastError.set(`Unable to start review session: ${toMessage(error)}`);
+    }
+  }
+
+  /** Switch the viewport to a session; the previous one keeps running. */
+  switchToSession(runId: string): void {
+    if (runId === this.activeSessionRunId()) {
+      return;
+    }
+    this.attachToSession(runId);
+  }
+
+  private attachToSession(runId: string): void {
+    this.stopReviewStream();
+    this.#resetReviewViewState();
+    this.activeSessionRunId.set(runId);
+
+    let source: EventSource;
+    try {
+      source = new EventSource(this.api.buildSessionStreamUrl(runId));
+    } catch (error) {
+      this.status.set("failed");
+      this.lastError.set(`Unable to attach to session: ${toMessage(error)}`);
       return;
     }
 
+    this.#reviewStream = source;
+    this.status.set("graphing");
+
+    source.onmessage = (message) => {
+      try {
+        const event = JSON.parse(message.data) as ReviewRunEvent;
+        void this.handleReviewStreamEvent(event);
+      } catch {
+        this.reviewEvents.update((events) => events.concat(`unparseable:${String(message.data).slice(0, 160)}`));
+      }
+    };
+
+    source.onerror = () => {
+      // The server closes the stream after `done` — that is a normal end,
+      // not a failure. Only flag streams that die mid-run.
+      const status = this.status();
+      if (this.#reviewStream && status !== "completed" && status !== "failed") {
+        this.lastError.set("Review stream closed before completion.");
+        this.status.set("failed");
+      }
+      this.stopReviewStream();
+      void this.refreshReviewSessions();
+    };
+  }
+
+  #resetReviewViewState(): void {
     this.status.set("queued");
     this.progress.set(4);
     this.lastError.set(null);
@@ -826,42 +947,6 @@ export class CapillaryStore {
     this.prCommentState.set("idle");
     this.prCommentUrl.set(null);
     this.#liveRunId = null;
-
-    const url = this.api.buildReviewStreamUrl({
-      pullRequestId,
-      repositoryId,
-      maxCycles: 6,
-      trace: this.reviewTraceEnabled(),
-    });
-
-    let source: EventSource;
-    try {
-      source = new EventSource(url);
-    } catch (error) {
-      this.status.set("failed");
-      this.lastError.set(`Unable to open review stream: ${toMessage(error)}`);
-      return;
-    }
-
-    this.#reviewStream = source;
-    this.status.set("graphing");
-
-    source.onmessage = (message) => {
-      try {
-        const event = JSON.parse(message.data) as ReviewRunEvent;
-        void this.handleReviewStreamEvent(event);
-      } catch {
-        this.reviewEvents.update((events) => events.concat(`unparseable:${String(message.data).slice(0, 160)}`));
-      }
-    };
-
-    source.onerror = () => {
-      if (this.#reviewStream && this.status() !== "completed") {
-        this.lastError.set("Review stream closed before completion.");
-        this.status.set("failed");
-      }
-      this.stopReviewStream();
-    };
   }
 
   stopReviewStream(): void {
@@ -999,6 +1084,7 @@ export class CapillaryStore {
         this.reviewProgress.set(event.result.progress);
         this.reviewCycles.set(event.result.cycles);
         this.stopReviewStream();
+        void this.refreshReviewSessions();
         if (event.result.phase === "failed") {
           this.status.set("failed");
           this.lastError.set(`Review failed: ${event.result.stopReason}`);

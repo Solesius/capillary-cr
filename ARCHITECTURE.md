@@ -140,6 +140,21 @@ completed`.
    TCSRTC Feature Process gates: **Target → Constrain → Sanitize → Review →
    Test → Confirm**.
 
+### Durable sessions
+
+Review runs are **sessions** decoupled from client connections
+([review_session_hub.ts](api/src/services/review_session_hub.ts)): the
+pipeline executes detached on the server, every typed event is recorded
+(bounded ring per session), and any number of clients attach via
+`GET /api/review/sessions/:runId/stream` — a full replay of the narrative so
+far, then the live tail. Closing a tab, navigating away, or reloading never
+affects a run; the web app re-attaches to active sessions on load. Multiple
+sessions run concurrently; the UI warns before starting an additional one
+(each concurrent session drives its own model turns — token cost stacks).
+The agent CLI (`deno task review`, [review_cli.ts](api/scripts/review_cli.ts))
+runs the same pipeline in-process with a stable stdout/stderr/exit-code
+contract for automation.
+
 ### 4a. Agentic review loop
 
 Orchestrated by `AgenticReviewService`

@@ -68,6 +68,23 @@ import { MarkdownPipe } from "../shell/markdown.pipe";
           </div>
         }
 
+        @if (store.reviewSessions().length > 0) {
+          <div class="cap-session-strip" style="margin-top: 14px;">
+            @for (session of store.reviewSessions(); track session.runId) {
+              <button
+                type="button"
+                class="cap-session-chip"
+                [class.current]="session.runId === store.activeSessionRunId()"
+                (click)="switchSession(session.runId)"
+                [attr.title]="session.active ? 'Running — click to view' : 'Finished — click to view'">
+                <span class="cap-session-dot" [class.live]="session.active"></span>
+                <span class="cap-session-id">{{ session.runId.slice(-6) }}</span>
+                <span class="cap-session-state">{{ session.active ? 'running' : 'done' }}</span>
+              </button>
+            }
+          </div>
+        }
+
         <div class="cap-activity-head" style="margin-top: 14px;">
           <div class="cap-row">
             <strong>Live Review Output</strong>
@@ -77,6 +94,26 @@ import { MarkdownPipe } from "../shell/markdown.pipe";
             </span>
           </div>
         </div>
+
+        @if (store.newSessionWarningVisible()) {
+          <div class="cap-modal-backdrop" (click)="dismissWarning()">
+            <div class="cap-modal-card" (click)="$event.stopPropagation()">
+              <div class="cap-modal-glyph">⚡</div>
+              <h3 class="cap-modal-title">Start another session?</h3>
+              <p class="cap-modal-body">
+                {{ runningCount() }} review session{{ runningCount() === 1 ? ' is' : 's are' }} still running.
+                Each concurrent session drives its own model — <strong>tokens, rate limits, and
+                provider costs stack per session</strong>. Running sessions keep going either way.
+              </p>
+              <div class="cap-modal-actions">
+                <button class="cap-button" type="button" (click)="dismissWarning()">Cancel</button>
+                <button class="cap-button cap-button-primary" type="button" (click)="confirmNewSession()">
+                  Run concurrent session
+                </button>
+              </div>
+            </div>
+          </div>
+        }
 
         @if (showFinalOutput()) {
           <div class="cap-review-output-shell cap-review-output-final">
@@ -159,6 +196,102 @@ import { MarkdownPipe } from "../shell/markdown.pipe";
       gap: 12px;
     }
     .cap-review-output-head .cap-button-sm { white-space: nowrap; }
+
+    .cap-session-strip {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .cap-session-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 11px;
+      border-radius: 99px;
+      border: 1px solid var(--cap-border);
+      background: var(--cap-surface-raised);
+      color: var(--cap-muted);
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: border-color 0.18s, color 0.18s, transform 0.12s;
+    }
+    .cap-session-chip:hover { transform: translateY(-1px); border-color: var(--cap-primary-line); }
+    .cap-session-chip.current {
+      border-color: var(--cap-accent);
+      color: var(--cap-text);
+      box-shadow: 0 0 0 1px rgba(var(--cap-accent-rgb), 0.25);
+    }
+    .cap-session-id { font-family: var(--cap-mono, monospace); letter-spacing: 0.03em; }
+    .cap-session-state { font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.75; }
+    .cap-session-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--cap-muted);
+      opacity: 0.5;
+    }
+    .cap-session-dot.live {
+      background: var(--cap-ok);
+      opacity: 1;
+      animation: cap-session-pulse 1.6s ease-in-out infinite;
+    }
+    @keyframes cap-session-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(15, 118, 110, 0.45); }
+      50% { box-shadow: 0 0 0 5px rgba(15, 118, 110, 0); }
+    }
+
+    .cap-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 60;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(8, 12, 20, 0.55);
+      backdrop-filter: blur(6px);
+      animation: cap-modal-fade 0.16s ease-out;
+    }
+    .cap-modal-card {
+      width: min(440px, calc(100vw - 48px));
+      padding: 26px 26px 22px;
+      border-radius: 16px;
+      border: 1px solid var(--cap-border);
+      background: var(--cap-surface, #0e1420);
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+      animation: cap-modal-rise 0.18s cubic-bezier(0.21, 1.02, 0.73, 1);
+    }
+    .cap-modal-glyph {
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      border-radius: 12px;
+      border: 1px solid var(--cap-border);
+      background: var(--cap-surface-raised);
+      font-size: 1.1rem;
+      margin-bottom: 14px;
+    }
+    .cap-modal-title {
+      margin: 0 0 8px;
+      font-size: 1.02rem;
+      letter-spacing: -0.01em;
+    }
+    .cap-modal-body {
+      margin: 0;
+      font-size: 0.85rem;
+      line-height: 1.55;
+      color: var(--cap-muted);
+    }
+    .cap-modal-body strong { color: var(--cap-text); }
+    .cap-modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    @keyframes cap-modal-fade { from { opacity: 0; } }
+    @keyframes cap-modal-rise { from { opacity: 0; transform: translateY(10px) scale(0.98); } }
 
     .cap-gate-rail {
       display: flex;
@@ -303,5 +436,21 @@ export class ReviewControlPanelComponent {
 
   postToPr(): void {
     void this.store.postReviewSummaryToPr();
+  }
+
+  readonly runningCount = computed(() =>
+    this.store.reviewSessions().filter((session) => session.active).length
+  );
+
+  switchSession(runId: string): void {
+    this.store.switchToSession(runId);
+  }
+
+  confirmNewSession(): void {
+    void this.store.confirmNewSession();
+  }
+
+  dismissWarning(): void {
+    this.store.dismissNewSessionWarning();
   }
 }
