@@ -56,7 +56,7 @@ import { CapillaryStore } from "../state/capillary.store";
             </div>
             <p class="cap-muted" style="margin-top: 7px;">{{ finding.filePath }}:{{ finding.line ?? 'n/a' }}</p>
             <p style="margin-top: 8px;">{{ finding.finding }}</p>
-            <p class="cap-muted" style="margin-top: 8px;">Pass {{ finding.passName }} // Confidence {{ finding.confidence }}</p>
+            <p class="cap-muted" style="margin-top: 8px;">Gate {{ finding.passName }} // Confidence {{ finding.confidence }}</p>
             @if (finding.evidence?.length) {
               <p class="cap-muted" style="margin-top: 8px;">Evidence: {{ finding.evidence[0] }}</p>
             }

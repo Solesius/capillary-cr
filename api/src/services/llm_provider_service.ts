@@ -2,6 +2,7 @@
 // Copyright 2026 Khalil Warren — capillary
 import { ReviewFinding } from "../domain/entities.ts";
 import { AppError } from "../domain/errors.ts";
+import { toTcsrtcGate } from "../domain/review_phase.ts";
 import { ReviewRepository } from "../repositories/review_repository.ts";
 import {
   buildProviderFromKind,
@@ -127,7 +128,7 @@ export class LlmProviderService {
             "Review this pull request using graph-first TCSRCT analysis.",
             "Return ONLY valid JSON.",
             "Schema:",
-            "{\"findings\":[{\"severity\":\"blocker|high|medium|low|note\",\"passName\":\"Trace|Contracts|State|Runtime|CodeShape|Tests\",\"filePath\":\"path/to/file\",\"line\":123,\"title\":\"short title\",\"finding\":\"detailed finding\",\"evidence\":[\"e1\",\"e2\"],\"confidence\":0.0}]}",
+            "{\"findings\":[{\"severity\":\"blocker|high|medium|low|note\",\"gate\":\"Target|Constrain|Sanitize|Review|Test|Confirm\",\"filePath\":\"path/to/file\",\"line\":123,\"title\":\"short title\",\"finding\":\"detailed finding\",\"evidence\":[\"e1\",\"e2\"],\"confidence\":0.0}]}",
             "If confidence is uncertain, return lower confidence values.",
             "Packet JSON:",
             JSON.stringify(buildModelReviewInput(packet, graph)),
@@ -145,7 +146,7 @@ export class LlmProviderService {
         id: "llm_finding_0",
         runId: "llm",
         severity: "note",
-        passName: "Runtime",
+        passName: "Review",
         filePath: primaryPath,
         title: isRateLimited
           ? "LLM provider rate-limited for DAG review"
@@ -171,7 +172,7 @@ export class LlmProviderService {
         id: "llm_finding_0",
         runId: "llm",
         severity: "medium",
-        passName: "Runtime",
+        passName: "Review",
         filePath: selectPrimaryChangedPath(packet),
         title: "LLM returned unstructured review narrative",
         finding: providerPayload.content,
@@ -355,7 +356,7 @@ function parseModelFindings(content: string): ParsedModelFinding[] {
 
     out.push({
       severity,
-      passName: normalizePassName(asString(candidate.passName) || "CodeShape"),
+      passName: toTcsrtcGate(asString(candidate.gate) || asString(candidate.passName) || "Review"),
       filePath: asString(candidate.filePath) || "unknown",
       line: normalizeLine(candidate.line),
       title,
@@ -405,16 +406,6 @@ function normalizeSeverity(value: unknown): ReviewFinding["severity"] {
     return text;
   }
   return "medium";
-}
-
-function normalizePassName(value: string): string {
-  const normalized = value.trim();
-  if (!normalized) {
-    return "CodeShape";
-  }
-
-  const valid = new Set(["Trace", "Contracts", "State", "Runtime", "CodeShape", "Tests"]);
-  return valid.has(normalized) ? normalized : "CodeShape";
 }
 
 function normalizeEvidence(value: unknown): string[] {

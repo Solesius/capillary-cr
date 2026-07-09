@@ -2,10 +2,9 @@
 // Copyright 2026 Khalil Warren — capillary
 import { AppError } from "../domain/errors.ts";
 import { ReviewFinding } from "../domain/entities.ts";
+import { lensToGate, TCSRTC_GATES } from "../domain/review_phase.ts";
 import { enforceDefensiveInput } from "../lib/validation.ts";
 import { ReviewRepository } from "../repositories/review_repository.ts";
-
-const TCSRCT_PASS_ORDER = ["Trace", "Contracts", "State", "Runtime", "CodeShape", "Tests"] as const;
 
 export class ArtifactService {
   constructor(private readonly repository: ReviewRepository) {}
@@ -22,24 +21,20 @@ export class ArtifactService {
     const events = this.repository.listReviewEvents(runId);
     const graph = this.repository.findGraphByPullRequest(run.pullRequestId);
 
-    const findingsByPass = groupFindingsByPass(findings);
+    const findingsByGate = groupFindingsByGate(findings);
     const findingLines = findings.length === 0
       ? ["- No findings"]
-      : TCSRCT_PASS_ORDER.flatMap((passName) => {
-        const passFindings = findingsByPass.get(passName) || [];
-        const lines = [`### ${passName} Pass`, `- Findings: ${passFindings.length}`];
-        if (passFindings.length === 0) {
-          lines.push("- No findings for this pass");
-          lines.push("");
-          return lines;
+      : TCSRTC_GATES.flatMap((gate) => {
+        const gateFindings = findingsByGate.get(gate) || [];
+        if (gateFindings.length === 0) {
+          return [];
         }
-
-        for (const finding of passFindings) {
+        const lines = [`### ${gate} Gate`, `- Findings: ${gateFindings.length}`];
+        for (const finding of gateFindings) {
           lines.push(
-            `- [${finding.severity}] ${finding.title} (${finding.filePath}:${finding.line ?? "n/a"}) [pass=${finding.passName}; confidence=${finding.confidence.toFixed(2)}]`,
+            `- [${finding.severity}] ${finding.title} (${finding.filePath}:${finding.line ?? "n/a"}) [gate=${gate}; confidence=${finding.confidence.toFixed(2)}]`,
           );
         }
-
         lines.push("");
         return lines;
       });
@@ -76,7 +71,7 @@ export class ArtifactService {
       "## LLM Stage",
       ...llmStageLines,
       "",
-      "## Findings (TCSRCT Structured)",
+      "## Findings (TCSRTC Gates)",
       ...findingLines,
       "",
       "## Checklist",
@@ -96,20 +91,22 @@ export class ArtifactService {
   }
 }
 
-function groupFindingsByPass(findings: ReviewFinding[]): Map<string, ReviewFinding[]> {
+function groupFindingsByGate(findings: ReviewFinding[]): Map<string, ReviewFinding[]> {
   const map = new Map<string, ReviewFinding[]>();
 
-  for (const pass of TCSRCT_PASS_ORDER) {
-    map.set(pass, []);
+  for (const gate of TCSRTC_GATES) {
+    map.set(gate, []);
   }
 
   for (const finding of findings) {
-    const passName = TCSRCT_PASS_ORDER.includes(finding.passName as (typeof TCSRCT_PASS_ORDER)[number])
+    // passName may hold a gate (current runs) or a legacy lens (old stored
+    // runs) — lensToGate handles both, defaulting unknowns to Review.
+    const gate = (TCSRTC_GATES as readonly string[]).includes(finding.passName)
       ? finding.passName
-      : "CodeShape";
-    const existing = map.get(passName) || [];
+      : lensToGate(finding.passName);
+    const existing = map.get(gate) || [];
     existing.push(finding);
-    map.set(passName, existing);
+    map.set(gate, existing);
   }
 
   return map;

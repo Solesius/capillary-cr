@@ -49,6 +49,8 @@ import { createZipArchive } from "./storage/zip_writer.ts";
 const DEFAULT_REVIEW_MAX_DURATION_MS = 300_000;
 const HARD_CYCLE_CAP = 60;
 const DEFAULT_MAX_CYCLES = 12;
+// Tools whose successful use marks a path as examined for coverage purposes.
+const READ_TOOLS = new Set(["readDiff", "readFile", "readFileSlice", "readNeighbor"]);
 const MAX_TOOL_OUTPUT_CHARS = 6_000;
 const MAX_FILE_CHARS = 20_000;
 
@@ -111,6 +113,8 @@ interface ReviewCapture {
   neighborFiles: CapturedFile[];
   riskSurfaces: AnchoredRiskSurface[];
   shapeSamples: AnchoredShapeSample[];
+  /** "a.ts ~ b.ts .61" — meaning-coupled pairs with no direct import edge. */
+  semanticPairs: string[];
   dag: {
     nodeCount: number;
     edgeCount: number;
@@ -169,6 +173,7 @@ export class ReviewAgentService {
     let stopReason = "deterministic_review";
     let cycleCount = 0;
     let llmReport: string | null = null;
+    let unexaminedHotPaths: string[] = [];
 
     if (config) {
       const loop = await this.runToolLoop(input, capture, config, recordedFindings, traceCycles);
@@ -178,7 +183,26 @@ export class ReviewAgentService {
         verdict = loop.verdict;
       }
       summary = loop.summary;
-      llmReport = await this.generateLlmReport(capture, recordedFindings, verdict, summary, config);
+      unexaminedHotPaths = loop.unexaminedHotPaths;
+
+      // Coverage teeth: an approval that skipped hot paths is not an
+      // approval. Downgrade to comment and say why — "LGTM" on a large
+      // review with unexamined risk is the failure mode this exists to kill.
+      if (verdict === "approve" && unexaminedHotPaths.length > 0) {
+        verdict = "comment";
+        const note = `Downgraded from approve: ${unexaminedHotPaths.length} hot path(s) were not examined.`;
+        summary = summary ? `${summary} ${note}` : note;
+        input.emit({ type: "log", level: "warn", message: note });
+      }
+
+      llmReport = await this.generateLlmReport(
+        capture,
+        recordedFindings,
+        verdict,
+        summary,
+        config,
+        unexaminedHotPaths,
+      );
     }
 
     // Merge agent findings with the deterministic baseline (dedupe by signature).
@@ -203,7 +227,8 @@ export class ReviewAgentService {
       highCount,
     }));
 
-    const report = llmReport ?? buildDeterministicReport(capture, merged, verdict, summary);
+    const report = llmReport ??
+      buildDeterministicReport(capture, merged, verdict, summary, unexaminedHotPaths);
     input.emit({ type: "report", markdown: report });
 
     const finishedAt = new Date();
@@ -337,6 +362,17 @@ export class ReviewAgentService {
         torsion: sample.torsion,
       }));
 
+    // Semantic edges: meaning-coupled files the import graph does not join.
+    // Surfaced to the planner so it can chase "same concept, different
+    // module" drift — the class of defect human reviewers miss most.
+    const semanticPairs = (graph?.edges ?? [])
+      .filter((edge) => edge.kind === "semantic")
+      .map((edge) =>
+        `${nodePath.get(edge.fromNodeId) ?? edge.fromNodeId} ~ ` +
+        `${nodePath.get(edge.toNodeId) ?? edge.toNodeId} ${edge.weight.toFixed(2)}`
+      )
+      .slice(0, 12);
+
     const capture: ReviewCapture = {
       runId: input.runId,
       pullRequestId: input.pullRequestId,
@@ -348,6 +384,7 @@ export class ReviewAgentService {
       neighborFiles,
       riskSurfaces: anchoredSurfaces,
       shapeSamples: anchoredSamples,
+      semanticPairs,
       dag: {
         nodeCount: graph?.dag.nodeCount ?? 0,
         edgeCount: graph?.dag.edgeCount ?? 0,
@@ -418,12 +455,24 @@ export class ReviewAgentService {
     config: PlannerChatConfig,
     recordedFindings: ReviewFinding[],
     traceCycles: ReviewAgentTraceCycle[],
-  ): Promise<{ cycleCount: number; stopReason: string; verdict: string; summary: string }> {
+  ): Promise<{
+    cycleCount: number;
+    stopReason: string;
+    verdict: string;
+    summary: string;
+    unexaminedHotPaths: string[];
+  }> {
     const deadline = Date.now() + reviewMaxDurationMs();
-    const budget = Math.max(1, Math.min(HARD_CYCLE_CAP, input.maxCycles ?? DEFAULT_MAX_CYCLES));
+    // Budget scales with the change surface: a 100-file review gets more
+    // cycles than a 3-file one, capped hard. Explicit maxCycles still wins.
+    const scaledCycles = DEFAULT_MAX_CYCLES + Math.ceil(capture.changedFiles.length / 6);
+    const budget = Math.max(1, Math.min(HARD_CYCLE_CAP, input.maxCycles ?? scaledCycles));
     const fileCache = new Map<string, string>();
     const observations: string[] = [];
     const coveredGates = new Set<TcsrtcGate>();
+    // Hot paths the agent is obliged to examine before Confirm is legitimate.
+    const hotPaths = [...new Set(capture.riskSurfaces.map((surface) => surface.path))].slice(0, 10);
+    const examinedPaths = new Set<string>();
 
     let verdict = "";
     let summary = "";
@@ -436,7 +485,15 @@ export class ReviewAgentService {
         break;
       }
 
-      const userMessage = buildPlannerUserMessage(capture, observations, recordedFindings, cycle, budget);
+      const unexamined = hotPaths.filter((path) => !examinedPaths.has(path));
+      const userMessage = buildPlannerUserMessage(
+        capture,
+        observations,
+        recordedFindings,
+        cycle,
+        budget,
+        { hot: hotPaths.length, examined: hotPaths.length - unexamined.length, unexamined },
+      );
       const reply = await plannerChat(config, REVIEW_SYSTEM_PROMPT, userMessage, {
         runContextId: input.runId,
         maxOutputTokens: 1800,
@@ -445,7 +502,13 @@ export class ReviewAgentService {
       if (!reply.ok || !reply.value) {
         if (cycle === 1) {
           // No usable provider — abandon the LLM loop and fall back to baseline.
-          return { cycleCount: 0, stopReason: "llm_unavailable", verdict: "", summary: "" };
+          return {
+            cycleCount: 0,
+            stopReason: "llm_unavailable",
+            verdict: "",
+            summary: "",
+            unexaminedHotPaths: hotPaths,
+          };
         }
         stopReason = "planner_error";
         break;
@@ -486,6 +549,9 @@ export class ReviewAgentService {
         const stepStart = Date.now();
 
         const result = await this.executeTool(input, capture, fileCache, recordedFindings, tool, args);
+        if (result.ok && typeof args.path === "string" && READ_TOOLS.has(tool)) {
+          examinedPaths.add(args.path.trim());
+        }
         if (result.findingTitle) {
           cycleFindings.push(result.findingTitle);
           const last = recordedFindings[recordedFindings.length - 1];
@@ -562,7 +628,13 @@ export class ReviewAgentService {
       }
     }
 
-    return { cycleCount: Math.min(cycle, budget), stopReason, verdict, summary };
+    return {
+      cycleCount: Math.min(cycle, budget),
+      stopReason,
+      verdict,
+      summary,
+      unexaminedHotPaths: hotPaths.filter((path) => !examinedPaths.has(path)),
+    };
   }
 
   private async executeTool(
@@ -691,7 +763,9 @@ export class ReviewAgentService {
       id: createId("finding"),
       runId,
       severity,
-      passName: normalizePass(String(args.passName || "Review")),
+      // Findings carry the TCSRTC gate they were raised under (the field name
+      // is legacy; `gate` in the tool schema, `passName` in storage).
+      passName: toTcsrtcGate(String(args.gate ?? args.passName ?? "Review")),
       filePath,
       line: Number.isFinite(lineRaw) && lineRaw > 0 ? lineRaw : undefined,
       title,
@@ -728,8 +802,9 @@ export class ReviewAgentService {
     verdict: string,
     summary: string,
     config: PlannerChatConfig,
+    unexaminedHotPaths: string[] = [],
   ): Promise<string | null> {
-    const userMessage = buildReportUserMessage(capture, findings, verdict, summary);
+    const userMessage = buildReportUserMessage(capture, findings, verdict, summary, unexaminedHotPaths);
     const reply = await plannerChat(config, REVIEW_REPORT_PROMPT, userMessage, {
       maxOutputTokens: 2200,
       temperature: 0.2,
@@ -824,30 +899,28 @@ function findFile(capture: ReviewCapture, path: string): CapturedFile | null {
     null;
 }
 
+// Terse by design: this block rides in every planner turn, so each line must
+// earn its tokens. Internal geometry (curvature/torsion) stays out — the
+// planner acts on ranked paths, not raw telemetry.
 function describeTorus(capture: ReviewCapture): string {
   const lines: string[] = [];
   lines.push(
-    `DAG: nodes=${capture.dag.nodeCount} edges=${capture.dag.edgeCount} ` +
-      `changed=${capture.dag.changedNodeCount} saturation=${capture.dag.saturation.toFixed(2)} ` +
-      `torusVariance=${capture.dag.torusVariance.toFixed(3)} ` +
-      `flowCompleteness=${capture.dag.flowCompleteness.toFixed(2)}`,
+    `graph: ${capture.dag.nodeCount}n/${capture.dag.edgeCount}e ` +
+      `changed=${capture.dag.changedNodeCount} flow=${capture.dag.flowCompleteness.toFixed(2)}`,
   );
-  lines.push("Risk surfaces (anchored to files):");
+  lines.push("hot paths (examine every one before Confirm):");
   if (capture.riskSurfaces.length === 0) {
     lines.push("  (none)");
   } else {
     for (const surface of capture.riskSurfaces) {
-      lines.push(
-        `  - ${surface.kind} ${surface.path} (risk ${surface.riskScore.toFixed(2)}): ${surface.reason}`,
-      );
+      lines.push(`  - ${surface.path} ${surface.riskScore.toFixed(2)} ${surface.reason}`);
     }
   }
-  lines.push("Hottest files (by risk gradient):");
-  for (const sample of capture.shapeSamples) {
-    lines.push(
-      `  - ${sample.path}: riskGradient=${sample.riskGradient.toFixed(3)} ` +
-        `curvature=${sample.curvature.toFixed(3)} torsion=${sample.torsion.toFixed(3)}`,
-    );
+  if (capture.semanticPairs.length > 0) {
+    lines.push("semantic siblings (meaning-coupled, no import edge — check both sides agree):");
+    for (const pair of capture.semanticPairs) {
+      lines.push(`  - ${pair}`);
+    }
   }
   return lines.join("\n");
 }
@@ -893,12 +966,6 @@ function normalizeSeverity(raw: string): ReviewSeverity {
   return "medium";
 }
 
-function normalizePass(raw: string): string {
-  const passes = ["Trace", "Contracts", "State", "Runtime", "CodeShape", "Tests"];
-  const match = passes.find((pass) => pass.toLowerCase() === raw.trim().toLowerCase());
-  return match ?? "Review";
-}
-
 function deriveVerdict(blockerCount: number, highCount: number, total: number): string {
   if (blockerCount > 0 || highCount > 0) {
     return "request_changes";
@@ -939,15 +1006,23 @@ const REVIEW_SYSTEM_PROMPT =
   `- listNeighbors {} — list dependency-wetted neighbor files.\n` +
   `- readNeighbor {path} — read a neighbor/impact file on demand (read-only).\n` +
   `- readTorus {} — DAG metrics, risk surfaces, hottest program-shape samples.\n` +
-  `- recordFinding {severity, passName, filePath, line?, title, finding, evidence[], suggestedFix?, confidence} ` +
-  `   — severity is blocker|high|medium|low|note; passName is Trace|Contracts|State|Runtime|CodeShape|Tests.\n` +
+  `- recordFinding {severity, gate, filePath, line?, title, finding, evidence[], suggestedFix?, confidence} ` +
+  `   — severity is blocker|high|medium|low|note; gate is Target|Constrain|Sanitize|Review|Test|Confirm.\n` +
   `- complete {verdict, summary} — finish the review.\n\n` +
   `Each turn respond with STRICT JSON only:\n` +
   `{"phase":"<TCSRTC gate>","reasoning":"<brief>","toolCalls":[{"tool":"<name>","args":{...},"reason":"<why>"}],` +
   `"done":false}\n` +
   `When you have enough evidence, include a complete tool call (or set "done":true with "verdict" and ` +
   `"summary"). Record every defect via recordFinding before completing. Do not invent file paths; only ` +
-  `reference paths returned by listChangedFiles/listNeighbors. Keep tool calls focused — a few per turn.`;
+  `reference paths returned by listChangedFiles/listNeighbors. Keep tool calls focused — a few per turn.\n\n` +
+  `Coverage discipline (non-negotiable):\n` +
+  `- The Confirm gate is illegitimate while hot paths remain unexamined. Read the diff of every ` +
+  `hot path (your context lists coverage each cycle) or record a finding explaining the specific ` +
+  `risk you are waiving and why.\n` +
+  `- Semantic siblings (files coupled by meaning without an import edge) are prime drift sites: ` +
+  `when one side of a pair changed, check the other side still agrees with it.\n` +
+  `- Scale effort with the PR: a large review that ends quickly with zero findings is a failed ` +
+  `review, not a clean one. Bland approval without per-file evidence is the worst outcome.`;
 
 const REVIEW_REPORT_PROMPT =
   `You write the final Capillary code-review report as GitHub-flavored Markdown. Use exactly these ` +
@@ -974,12 +1049,20 @@ function buildPlannerUserMessage(
   recordedFindings: readonly ReviewFinding[],
   cycle: number,
   budget: number,
+  coverage: { hot: number; examined: number; unexamined: string[] },
 ): string {
   const recentObservations = observations.slice(-12);
   const lines: string[] = [];
   lines.push(`Pull request: ${capture.title}`);
   lines.push(`Summary: ${capture.summary}`);
   lines.push(`Cycle ${cycle} of ${budget}. Findings recorded so far: ${recordedFindings.length}.`);
+  if (coverage.hot > 0) {
+    const remaining = coverage.unexamined.slice(0, 6).join(", ");
+    lines.push(
+      `Hot-path coverage: ${coverage.examined}/${coverage.hot}` +
+        (remaining ? ` — unexamined: ${remaining}` : " — all examined."),
+    );
+  }
   lines.push("");
   lines.push("Changed files in scope:");
   lines.push(listFiles(capture.changedFiles));
@@ -1004,6 +1087,7 @@ function buildReportUserMessage(
   findings: readonly ReviewFinding[],
   verdict: string,
   summary: string,
+  unexaminedHotPaths: string[] = [],
 ): string {
   const lines: string[] = [];
   lines.push(`Pull request: ${capture.title}`);
@@ -1012,20 +1096,25 @@ function buildReportUserMessage(
     lines.push(`Reviewer summary: ${summary}`);
   }
   lines.push(`Changed files: ${capture.changedFiles.length}; risk surfaces: ${capture.riskSurfaces.length}.`);
+  if (unexaminedHotPaths.length > 0) {
+    lines.push(
+      `Unexamined hot paths (MUST appear in the report as explicit follow-ups): ` +
+        unexaminedHotPaths.join(", "),
+    );
+  }
   lines.push("");
-  lines.push("Findings (JSON):");
+  lines.push("Findings (compact JSON):");
+  // Single-line JSON, no nulls: every byte here is model input.
   lines.push(JSON.stringify(
     findings.map((finding) => ({
       severity: finding.severity,
-      pass: finding.passName,
+      gate: finding.passName,
       filePath: finding.filePath,
-      line: finding.line,
+      ...(finding.line ? { line: finding.line } : {}),
       title: finding.title,
       finding: finding.finding,
-      suggestedFix: finding.suggestedFix,
+      ...(finding.suggestedFix ? { suggestedFix: finding.suggestedFix } : {}),
     })),
-    null,
-    2,
   ));
   lines.push("");
   lines.push("Risk surfaces:");
@@ -1038,6 +1127,7 @@ function buildDeterministicReport(
   findings: readonly ReviewFinding[],
   verdict: string,
   summary: string,
+  unexaminedHotPaths: string[] = [],
 ): string {
   const lines: string[] = [];
   lines.push("# Code Review Report");
@@ -1088,6 +1178,13 @@ function buildDeterministicReport(
   } else {
     for (const surface of capture.riskSurfaces) {
       lines.push(`- **${surface.kind}** \`${surface.path}\`: ${surface.reason}`);
+    }
+  }
+  if (unexaminedHotPaths.length > 0) {
+    lines.push("");
+    lines.push("### Unexamined hot paths — require manual review");
+    for (const path of unexaminedHotPaths) {
+      lines.push(`- \`${path}\``);
     }
   }
   lines.push("");
