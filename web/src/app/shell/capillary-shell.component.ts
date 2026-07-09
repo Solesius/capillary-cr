@@ -27,7 +27,16 @@ import { MarkdownPipe } from "./markdown.pipe";
         <div class="cap-appbar-row">
           <section class="cap-appbar-left">
             <div class="cap-brand">
-              <img class="cap-brand-logo" src="assets/capillary-logo.png" alt="Capillary" />
+              <svg class="cap-brand-mark" viewBox="0 0 44 40" aria-hidden="true">
+                <ellipse cx="22" cy="20" rx="17" ry="9.5" fill="none" stroke="rgb(45, 212, 191)" stroke-width="2.4" />
+                <ellipse cx="22" cy="20" rx="7.5" ry="3.4" fill="none" stroke="rgb(45, 212, 191)" stroke-width="1.6" opacity="0.75" />
+                <circle cx="34.5" cy="14.5" r="2.8" fill="#ffd400" />
+                <circle cx="11" cy="26" r="1.8" fill="currentColor" opacity="0.55" />
+              </svg>
+              <div class="cap-brand-text">
+                <span class="cap-brand-name">CAPILLARY</span>
+                <span class="cap-brand-sub">agentic code review</span>
+              </div>
             </div>
           </section>
 

@@ -165,11 +165,32 @@ html[data-theme="dark"] .cap-appbar {
   min-width: 0;
 }
 
-.cap-brand-logo {
+.cap-brand-mark {
+  width: 38px;
   height: 34px;
-  width: auto;
   display: block;
-  border-radius: 6px;
+  color: var(--cap-text);
+}
+
+.cap-brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.cap-brand-name {
+  font-weight: 800;
+  font-size: 0.95rem;
+  letter-spacing: 0.3em;
+  line-height: 1;
+}
+
+.cap-brand-sub {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--cap-muted);
 }
 
 .cap-appbar-right {
