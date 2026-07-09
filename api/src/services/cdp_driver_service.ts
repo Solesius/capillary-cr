@@ -563,6 +563,23 @@ export class CdpDriverService {
 
     await connection.send("Page.navigate", { url });
     await this.waitForDocumentReady(connection, waitUntil, timeoutMs);
+
+    // Chrome lands on chrome-error://chromewebdata/ when the target could
+    // not be loaded (connection refused, DNS failure). Surface that as an
+    // actionable failure instead of letting the agent read an error page —
+    // the classic cause in Docker is a `localhost` URL that points at the
+    // container itself rather than the host.
+    const landedUrl = await this.evaluateExpression(connection, "location.href", true);
+    if (typeof landedUrl === "string" && landedUrl.startsWith("chrome-error://")) {
+      throw new AppError(
+        "navigation_unreachable",
+        502,
+        `navigation_unreachable: ${url} did not load (browser landed on ${landedUrl}). ` +
+          `Running in Docker? "localhost" is the container itself — use ` +
+          `http://host.docker.internal:<port> for host services, or ` +
+          `http://127.0.0.1:8080 for Capillary's own UI.`,
+      );
+    }
   }
 
   private async waitForDocumentReady(
