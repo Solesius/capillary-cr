@@ -20,7 +20,14 @@ const repository = new InMemoryReviewRepository();
 // on boot. Otherwise run purely in-memory (graceful fallback).
 const storageDir = Deno.env.get("CAPILLARY_STORAGE_DIR");
 if (storageDir) {
-  const durable = await DurableReviewStore.tryOpen({ path: storageDir });
+  // One retry: opening an existing database can transiently fail right at
+  // boot (e.g. WAL recovery after an unclean container stop) and a single
+  // miss must not silently demote the process to in-memory for its lifetime.
+  let durable = await DurableReviewStore.tryOpen({ path: storageDir });
+  if (!durable) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    durable = await DurableReviewStore.tryOpen({ path: storageDir });
+  }
   if (durable) {
     await repository.attachDurableStore(durable);
     console.log(`durable review storage enabled at ${storageDir}`);

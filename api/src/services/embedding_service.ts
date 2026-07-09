@@ -84,8 +84,16 @@ export class MiniLmEmbeddingService implements FileEmbeddingProvider {
             model?: string,
             options?: Record<string, unknown>,
           ) => Promise<unknown>;
-          env: { backends?: { onnx?: { wasm?: { numThreads?: number } } } };
+          env: {
+            allowLocalModels?: boolean;
+            backends?: { onnx?: { wasm?: { numThreads?: number } } };
+          };
         };
+        // Outside a browser the "local model" probe resolves bare filesystem
+        // paths the web bundle cannot fetch ("Invalid URL: /models/..."),
+        // logging noise on every load. Hub download + cache is the only path
+        // we use.
+        env.allowLocalModels = false;
         // Single wasm thread: Deno lacks the worker shims the
         // multi-threaded path expects.
         if (env.backends?.onnx?.wasm) {

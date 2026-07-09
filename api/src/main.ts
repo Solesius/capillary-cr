@@ -76,6 +76,11 @@ app.use(async (ctx, next) => {
 	await next();
 });
 
+// Error middleware sits ahead of the login gate: an unauthenticated poll is
+// an expected 401 response, not an uncaught application error with a stack
+// trace in the container logs.
+app.use(errorMiddleware());
+
 app.use(async (ctx, next) => {
 	if (
 		requireGithubLogin &&
@@ -91,7 +96,6 @@ app.use(async (ctx, next) => {
 	await next();
 });
 
-app.use(errorMiddleware());
 app.use(routes().routes());
 app.use(routes().allowedMethods());
 
