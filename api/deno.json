@@ -1,4 +1,14 @@
 {
+  "imports": {
+    "worker_threads": "node:worker_threads",
+    "module": "node:module",
+    "path": "node:path",
+    "fs": "node:fs",
+    "url": "node:url",
+    "os": "node:os",
+    "crypto": "node:crypto",
+    "perf_hooks": "node:perf_hooks"
+  },
   "tasks": {
     "dev": "deno run --watch --allow-net --allow-env --allow-run --allow-read --allow-write --allow-ffi src/main.ts",
     "start": "deno run --allow-net --allow-env --allow-run --allow-read --allow-write --allow-ffi src/main.ts",
