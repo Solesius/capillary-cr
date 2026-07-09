@@ -207,8 +207,19 @@ export class AgenticReviewService {
 
     const dag = this.diffDagService.buildDiffDag(pullRequestId, repositoryId);
     this.diffDagService.expandDependencyWetting(dag.id);
-    this.repository.appendReviewEvent(runId, `dag:built:nodes=${dag.nodeCount}:edges=${dag.edgeCount}`);
+    const semanticEdgeCount = await this.diffDagService.enrichSemanticEdges(dag.id);
+    this.repository.appendReviewEvent(
+      runId,
+      `dag:built:nodes=${dag.nodeCount}:edges=${dag.edgeCount}:semantic=${semanticEdgeCount}`,
+    );
     emit({ type: "graph", nodeCount: dag.nodeCount, edgeCount: dag.edgeCount });
+    if (semanticEdgeCount > 0) {
+      emit({
+        type: "log",
+        level: "info",
+        message: `Semantic pass — ${semanticEdgeCount} meaning edge${semanticEdgeCount === 1 ? "" : "s"} joined the graph.`,
+      });
+    }
 
     // Phase: program_shape — derive risk surfaces that drive agentic planning.
     this.repository.updateReviewRun(runId, (current) => ({

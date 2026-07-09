@@ -12,6 +12,7 @@ import {
   TcsrctPass,
 } from "../domain/entities.ts";
 import { AppError } from "../domain/errors.ts";
+import { lensToGate } from "../domain/review_phase.ts";
 import { enforceDefensiveInput } from "../lib/validation.ts";
 import { ReviewRepository } from "../repositories/review_repository.ts";
 
@@ -113,7 +114,8 @@ export class TcsrctReviewService {
         const patchSignals = collectPatchSignals(sourceDiff?.patch);
 
         const titleTarget = entryNode?.name || basenamePath(normalizedFilePath) || "entry-node";
-        const passName = passForSurface(surface.surfaceKind, packet.tcsrctPasses);
+        // Findings speak the TCSRTC gate formalism; the lens rotation stays internal.
+        const passName = lensToGate(passForSurface(surface.surfaceKind, packet.tcsrctPasses));
         const line = estimateLineFromPatch(
           sourceDiff?.patch,
           buildLineAnchor(surface.surfaceKind, entryNode?.name, sourceDiff?.path),

@@ -114,6 +114,11 @@ completed`.
 1. **diff DAG** — the PR diff becomes a dependency DAG
    ([diff_dag_service.ts](api/src/services/diff_dag_service.ts)).
 2. **dependency wetting** — changed nodes propagate influence to neighbors.
+   After wetting, **semantic enrichment** embeds each changed file's diff
+   (CPU MiniLM, see [embedding_service.ts](api/src/services/embedding_service.ts))
+   and adds `semantic` edges between meaning-coupled files the import graph
+   does not join — so risk propagates through meaning as well as structure.
+   Best-effort: offline or `CAPILLARY_EMBEDDINGS=0` skips it cleanly.
 3. **torus shape projection** — nodes are embedded on a torus of revolution
    (R = 2.4, r = 0.8) by
    [graph_math_service.ts](api/src/services/graph_math_service.ts) using real
@@ -147,20 +152,25 @@ Decision logic is pure and unit-tested
 Each cycle the planner targets the next uncovered **TCSRTC gate**, narrates
 its reasoning (streamed live as `thinking` events with gate attribution),
 calls read-only tools (each call carries a `reason`, streamed as `tool`
-events), and records findings. Findings are categorized under the six
-**TCSRCT analysis lenses** — Trace, Contracts, State, Runtime, CodeShape,
-Tests — which are orthogonal to the gates: gates are *where the agent is in
-the process*, lenses are *what kind of defect a finding is*. `cycle` events
-report gate coverage, which drives frontend progress.
+events), and records findings under the gate that raised them. `cycle`
+events report gate coverage, which drives frontend progress.
+
+**Coverage enforcement (anti-LGTM):** every planner turn carries a hot-path
+coverage line (top risk surfaces examined vs. remaining), the cycle budget
+scales with the number of changed files, and an `approve` verdict with
+unexamined hot paths is deterministically downgraded to `comment` — the
+report lists the unexamined files as explicit follow-ups. Semantic sibling
+pairs (meaning-coupled files with no import edge) ride in the planner
+context so the agent chases cross-module drift.
 
 ```mermaid
 flowchart TD
-    OBS[observe: diff DAG + program shape] --> PLAN[plan: target next TCSRTC gate\nnarrate reasoning]
+    OBS[observe: diff DAG + program shape\n+ semantic siblings] --> PLAN[plan: target next TCSRTC gate\nnarrate reasoning]
     PLAN --> EXEC[execute: read-only tools\nreadFile / readDiff / readNeighbor / readTorus]
-    EXEC --> FIND[recordFinding\ncategorized by TCSRCT lens]
-    FIND --> CYCLE{all gates covered\nor budget spent?}
+    EXEC --> FIND[recordFinding\nunder the active gate]
+    FIND --> CYCLE{all gates covered,\nhot paths examined,\nor budget spent?}
     CYCLE -- no --> PLAN
-    CYCLE -- yes --> REPORT[always emit markdown report]
+    CYCLE -- yes --> REPORT[report + coverage accounting]
     REPORT --> PERSIST[(persist run record)]
 ```
 

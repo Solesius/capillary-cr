@@ -22,18 +22,20 @@ This is not decoration, and the geometry is real. A node's major-ring angle is a
 
 ## Why TCSRTC
 
-Static diff review asks one question: does this code look right? Capillary's agent instead walks six process gates — **Target → Constrain → Sanitize → Review → Test → Confirm** — narrating its reasoning at each gate as it reads files, diffs, neighbors, and the torus. What it finds is categorized under six TCSRCT analysis lenses, each asking a harder question than "does it look right":
+Static diff review asks one question: does this code look right? Capillary's agent instead walks six process gates — the TCSRTC formalism — and every finding is raised under the gate that produced it:
 
-| Lens | Question |
+| Gate | Question it must answer |
 |---|---|
-| **Trace** | Does this change preserve the runtime traversal paths that callers depend on? |
-| **Contracts** | Do the API and type contracts still hold across the boundary? |
-| **State** | Are state transitions still valid? Can you reach an illegal state now that you couldn't before? |
-| **Runtime** | Are there new hazards at runtime — nulls, races, unbounded allocations, error paths that don't terminate? |
-| **CodeShape** | Has the structural complexity drifted? Are abstractions holding or collapsing? |
-| **Tests** | Where is the regression coverage thin? What changed that isn't tested? |
+| **Target** | What actually changed, and what is the true blast radius? |
+| **Constrain** | What boundaries and contracts must this change respect — and does it? |
+| **Sanitize** | Are inputs at system boundaries, auth, and persistence still safe? |
+| **Review** | Line by line, hot path by hot path: is this correct? |
+| **Test** | Where is regression coverage thin? What changed that isn't tested? |
+| **Confirm** | Has every hot path been examined? Only then is a verdict legitimate. |
 
-The review runs as an agentic loop where each cycle targets the next uncovered gate based on what the previous cycles found. It isn't a linear batch; it accumulates risk and focuses attention. Thinking, tool calls, and findings stream over SSE as the agent works, and a completed run can be posted back to the PR as a summary comment — gated behind an explicit button, never automatic.
+The gates have teeth. The agent's context tracks hot-path coverage every cycle, the cycle budget scales with the size of the change, and an approval that skipped hot paths is automatically downgraded with the unexamined files listed in the report. On a 100-file PR you don't get "LGTM" — you get a coverage-accounted verdict and an artifact you can action: what was checked, what was found, and exactly what still deserves a human read.
+
+The review runs as an agentic loop, narrating its reasoning at each gate over SSE as it reads files, diffs, neighbors, and the graph. A completed run can be posted back to the PR as a summary comment — gated behind an explicit button, never automatic.
 
 ---
 
@@ -56,7 +58,7 @@ It drives Chrome and tells you whether it worked, where it got stuck, and why. T
 - **API** — Deno + Oak (TypeScript). Single process on `:8080`.
 - **Frontend** — Angular 20. Standalone components, signals and `computed`, `OnPush` throughout. No NGXS.
 - **Graph** — Three.js. WebGL torus rendered on canvas. Orbit controls, raycasting for hover.
-- **Review engine** — TCSRTC-gated agentic loop with typed SSE events; findings categorized under TCSRCT analysis lenses.
+- **Review engine** — TCSRTC-gated agentic loop with typed SSE events, hot-path coverage enforcement, and CPU semantic embeddings (MiniLM over wasm) relating files by meaning before any LLM call.
 - **LLM providers** — Anthropic, Gemini, OpenRouter, AWS Bedrock, GitHub Copilot, Codex. Server-side only; keys never touch the client.
 - **Durable storage** — `celer-mem` SQLite FFI (optional write-through mirror; in-memory repository is source of truth).
 - **Browser agent** — Chrome DevTools Protocol. Auto-detects a local Chrome binary or connects to an existing CDP endpoint.

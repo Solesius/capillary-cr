@@ -36,8 +36,10 @@ export const REVIEW_PHASE_ORDER: Readonly<Record<ReviewPhase, number>> = {
 };
 
 /**
- * The six TCSRCT review passes, in canonical RETV order. The agentic
- * planner selects which uncovered pass to surface next each cycle.
+ * INTERNAL analysis rotation for the deterministic baseline machinery only.
+ * These names never surface to users, prompts, findings, or reports — the
+ * public formalism is the TCSRTC gates. Convert at the boundary with
+ * lensToGate().
  */
 export const REVIEW_PASSES = [
   "Trace",
@@ -49,6 +51,25 @@ export const REVIEW_PASSES = [
 ] as const;
 
 export type ReviewPass = typeof REVIEW_PASSES[number];
+
+/**
+ * Map an internal analysis lens to the TCSRTC gate its findings belong to.
+ * Trace answers "what is actually affected" (Target); Contracts polices
+ * boundaries and invariants (Constrain); Tests is Test; the remaining
+ * lenses are Review-gate work.
+ */
+export function lensToGate(lens: string): TcsrtcGate {
+  switch (lens.trim().toLowerCase()) {
+    case "trace":
+      return "Target";
+    case "contracts":
+      return "Constrain";
+    case "tests":
+      return "Test";
+    default:
+      return "Review";
+  }
+}
 
 /**
  * The six TCSRTC Feature Process gates, in canonical order:

@@ -54,6 +54,81 @@ Deno.test("should_compute_unit_cosine_for_identical_vectors", () => {
   assertEquals(Math.abs(cosineSimilarity(v, v) - 1) < 1e-6, true);
 });
 
+Deno.test("should_add_semantic_edges_between_meaning_neighbors_only", async () => {
+  const { InMemoryReviewRepository } = await import("../src/repositories/review_repository.ts");
+  const { DiffDagService } = await import("../src/services/diff_dag_service.ts");
+  const { GraphMathService } = await import("../src/services/graph_math_service.ts");
+
+  const repository = new InMemoryReviewRepository();
+  const diffFile = (path: string) => ({
+    path,
+    status: "modified" as const,
+    additions: 10,
+    deletions: 2,
+    patch: `+++ ${path}`,
+    language: "TypeScript",
+    isTest: false,
+    isConfig: false,
+    isGenerated: false,
+  });
+  repository.savePullRequestDiff("r1", "p1", [
+    diffFile("auth_service.ts"),
+    diffFile("auth_middleware.ts"),
+    diffFile("torus_math.ts"),
+  ]);
+
+  const node = (id: string, path: string) => ({
+    id,
+    kind: "file" as const,
+    path,
+    name: path,
+    language: "TypeScript",
+    changed: true,
+    weight: 1,
+  });
+  repository.saveGraphSnapshot("dag1", {
+    dag: {
+      id: "dag1",
+      repositoryId: "r1",
+      pullRequestId: "p1",
+      baseSha: "b",
+      headSha: "h",
+      nodeCount: 3,
+      edgeCount: 0,
+      changedNodeCount: 3,
+      saturation: 0,
+      torusVariance: 0,
+      flowCompleteness: 1,
+      completenessNotes: [],
+    },
+    nodes: [
+      node("n1", "auth_service.ts"),
+      node("n2", "auth_middleware.ts"),
+      node("n3", "torus_math.ts"),
+    ],
+    edges: [],
+    shapeSamples: [],
+    surfaces: [],
+  });
+
+  const provider = fakeProvider({
+    "auth_service.ts": [1, 0.95, 0],
+    "auth_middleware.ts": [0.95, 1, 0],
+    "torus_math.ts": [0, 0.05, 1],
+  });
+  const service = new DiffDagService(repository, new GraphMathService(), provider);
+
+  const added = await service.enrichSemanticEdges("dag1");
+  assertEquals(added, 1);
+
+  const snapshot = repository.getGraphSnapshot("dag1");
+  const semantic = snapshot.edges.filter((edge) => edge.kind === "semantic");
+  assertEquals(semantic.length, 1);
+  const pair = [semantic[0].fromNodeId, semantic[0].toNodeId].sort().join("-");
+  assertEquals(pair, "n1-n2");
+  assertEquals(snapshot.dag.edgeCount, 1);
+});
+
 // Real-model integration test: downloads the quantized MiniLM on first run
 // (~30MB, cached afterwards), so it is opt-in. Run with:
 //   CAPILLARY_EMBEDDING_TESTS=1 deno test --allow-all tests/embedding_service_test.ts

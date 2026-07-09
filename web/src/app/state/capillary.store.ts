@@ -2144,7 +2144,7 @@ export class CapillaryStore {
       }
 
       if (section === "findings") {
-        const match = /^- \[(blocker|high|medium|low|note)\]\s+(.+?)\s+\((.+?):(\d+|n\/a)\)(?:\s+\[pass=(.+?);\s*confidence=([0-9]*\.?[0-9]+)\])?$/.exec(line);
+        const match = /^- \[(blocker|high|medium|low|note)\]\s+(.+?)\s+\((.+?):(\d+|n\/a)\)(?:\s+\[(?:gate|pass)=(.+?);\s*confidence=([0-9]*\.?[0-9]+)\])?$/.exec(line);
         if (!match) {
           continue;
         }

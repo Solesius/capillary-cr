@@ -113,6 +113,7 @@ export function toReviewPhase(raw: string | null | undefined): ReviewPhase {
 export interface ReviewFinding {
   id: string;
   severity: "blocker" | "high" | "medium" | "low" | "note";
+  /** TCSRTC gate the finding was raised under (field name is legacy). */
   passName: string;
   filePath: string;
   line?: number;
@@ -130,20 +131,9 @@ export interface ReviewChecklistItem {
   completed: boolean;
 }
 
-export const REVIEW_PASSES = [
-  "Trace",
-  "Contracts",
-  "State",
-  "Runtime",
-  "CodeShape",
-  "Tests",
-] as const;
-
-export type ReviewPass = (typeof REVIEW_PASSES)[number];
-
 /**
  * The six TCSRTC Feature Process gates the review agent walks, in order.
- * Distinct from REVIEW_PASSES (the analysis lenses findings are filed under).
+ * Findings are raised under these gates — the single public formalism.
  */
 export const TCSRTC_GATES = [
   "Target",
@@ -173,13 +163,14 @@ export interface ReviewProgress {
   coveredPasses: number;
   totalPasses: number;
   findingCount: number;
-  nextPass: ReviewPass | null;
+  nextPass: string | null;
   goalAchieved: boolean;
 }
 
 export interface ReviewCycleSummary {
   cycle: number;
-  pass: ReviewPass;
+  /** TCSRTC gate the cycle ran under. */
+  pass: string;
   reason: string;
   findingCount: number;
   progress: ReviewProgress;

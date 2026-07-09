@@ -341,7 +341,7 @@ function toIteration(
   const decision = decide(surface, index, total, graphCompleteness, evidence.length, policy);
   const iterationId = `retv_${index + 1}`;
   const reasoningSummary = `Prioritize ${surface.surfaceKind} due to risk ${surface.riskScore.toFixed(3)} on entry ${surface.entryNodeId}`;
-  const observationSummary = `TCSRCT pass ${passName} validates evidence for ${surface.surfaceKind}`;
+  const observationSummary = `TCSRTC ${tcsrtcGate} gate validates evidence for ${surface.surfaceKind}`;
 
   const phases: RetvObservation[] = [
     {

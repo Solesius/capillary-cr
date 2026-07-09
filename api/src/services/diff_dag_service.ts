@@ -16,9 +16,21 @@ import {
   TORUS_RADIUS_MAJOR,
   TORUS_RADIUS_MINOR,
 } from "./graph_math_service.ts";
+import {
+  cosineSimilarity,
+  FileEmbeddingProvider,
+  MiniLmEmbeddingService,
+} from "./embedding_service.ts";
 
 function createId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().slice(0, 8)}`;
+}
+
+const SEMANTIC_EDGE_MIN_SIMILARITY = 0.45;
+const SEMANTIC_EDGE_TOP_K = 3;
+
+function defaultEmbeddingProvider(): FileEmbeddingProvider | null {
+  return Deno.env.get("CAPILLARY_EMBEDDINGS") === "0" ? null : new MiniLmEmbeddingService();
 }
 
 const TOKEN_RE = /[A-Za-z_][A-Za-z0-9_]*/g;
@@ -65,7 +77,106 @@ export class DiffDagService {
   constructor(
     private readonly repository: ReviewRepository,
     private readonly math: GraphMathService,
+    private readonly embeddings: FileEmbeddingProvider | null = defaultEmbeddingProvider(),
   ) {}
+
+  /**
+   * Add `semantic` edges between changed files whose diffs are close in
+   * meaning (MiniLM cosine over path + patch), independent of import edges.
+   * Semantic edges feed the same degree statistics as structural edges, so
+   * meaning-coupling flows into disturbance (theta) and risk with no extra
+   * plumbing. Best-effort: embedding failures (offline model fetch,
+   * CAPILLARY_EMBEDDINGS=0) leave the graph unchanged.
+   */
+  async enrichSemanticEdges(diffDagId: string): Promise<number> {
+    if (!this.embeddings) {
+      return 0;
+    }
+    const snapshot = this.repository.getGraphSnapshot(diffDagId);
+    const fileNodes = snapshot.nodes.filter((node) => node.changed && node.kind !== "symbol");
+    if (fileNodes.length < 2) {
+      return 0;
+    }
+
+    const repositoryId = snapshot.dag.repositoryId ||
+      this.repository.findPullRequestRepositoryId(snapshot.dag.pullRequestId);
+    if (!repositoryId) {
+      return 0;
+    }
+    const patchByPath = new Map(
+      this.repository.getPullRequestDiff(repositoryId, snapshot.dag.pullRequestId)
+        .map((file) => [normalizePath(file.path), file.patch || ""]),
+    );
+
+    let vectors: Map<string, Float32Array>;
+    try {
+      vectors = await this.embeddings.embed(fileNodes.map((node) => ({
+        path: node.path,
+        content: patchByPath.get(node.path) || "",
+      })));
+    } catch (error) {
+      console.log(
+        `[embeddings] semantic edges skipped: ${error instanceof Error ? error.message : error}`,
+      );
+      return 0;
+    }
+
+    const connected = buildAdjacency(snapshot.edges);
+    const semanticEdges: ModuleEdge[] = [];
+    for (let left = 0; left < fileNodes.length; left += 1) {
+      const leftVector = vectors.get(fileNodes[left].path);
+      if (!leftVector || leftVector.length === 0) {
+        continue;
+      }
+      // Top-K per node keeps the graph sparse on 100+ file reviews.
+      const scored: { index: number; similarity: number }[] = [];
+      for (let right = 0; right < fileNodes.length; right += 1) {
+        if (right === left) {
+          continue;
+        }
+        const rightVector = vectors.get(fileNodes[right].path);
+        if (!rightVector || rightVector.length === 0) {
+          continue;
+        }
+        const similarity = cosineSimilarity(leftVector, rightVector);
+        if (similarity >= SEMANTIC_EDGE_MIN_SIMILARITY) {
+          scored.push({ index: right, similarity });
+        }
+      }
+      scored.sort((a, b) => b.similarity - a.similarity);
+      for (const { index, similarity } of scored.slice(0, SEMANTIC_EDGE_TOP_K)) {
+        // Undirected: materialize left<right only (no mirrored pairs), and
+        // skip pairs the structural graph already connects directly.
+        if (index < left || connected.get(fileNodes[left].id)?.has(fileNodes[index].id)) {
+          continue;
+        }
+        semanticEdges.push({
+          id: createId("edge"),
+          fromNodeId: fileNodes[left].id,
+          toNodeId: fileNodes[index].id,
+          kind: "semantic",
+          directed: false,
+          weight: Math.min(0.9, 0.3 + similarity * 0.5),
+        });
+      }
+    }
+
+    if (semanticEdges.length === 0) {
+      return 0;
+    }
+
+    const edges = [...snapshot.edges, ...semanticEdges];
+    this.repository.saveGraphSnapshot(diffDagId, {
+      ...snapshot,
+      dag: {
+        ...snapshot.dag,
+        edgeCount: edges.length,
+        saturation: calculateSaturation(snapshot.nodes.length, edges.length),
+      },
+      edges,
+    });
+    return semanticEdges.length;
+  }
 
   buildDiffDag(pullRequestId: string, repositoryId?: string): DiffDag {
     enforceDefensiveInput(pullRequestId, "pull_request_id");

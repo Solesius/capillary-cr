@@ -24,7 +24,8 @@ export type EdgeKind =
   | "authenticates"
   | "mentions"
   | "owns"
-  | "changed_with";
+  | "changed_with"
+  | "semantic";
 
 export type ReviewSeverity = "blocker" | "high" | "medium" | "low" | "note";
 export type ReviewRunStatus =

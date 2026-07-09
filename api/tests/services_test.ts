@@ -125,7 +125,8 @@ function createMockGitHubFetch(): typeof fetch {
 function buildFixture() {
   const repository = new InMemoryReviewRepository();
   const graphMath = new GraphMathService();
-  const diffDagService = new DiffDagService(repository, graphMath);
+  // null embeddings: unit tests stay hermetic (no model download/inference).
+  const diffDagService = new DiffDagService(repository, graphMath, null);
   const tcsrctService = new TcsrctReviewService(repository);
   const artifactService = new ArtifactService(repository);
   const clickClackService = new ClickClackCoordinationService(repository);
@@ -527,8 +528,10 @@ Deno.test("should_export_markdown_review_when_run_is_complete", async () => {
   const markdown = artifactService.exportMarkdownReview(run.id);
   assertEquals(markdown.includes("# Capillary Review"), true);
   assertEquals(markdown.includes("## LLM Stage"), true);
-  assertEquals(markdown.includes("## Findings (TCSRCT Structured)"), true);
-  assertEquals(markdown.includes("### Runtime Pass"), true);
+  assertEquals(markdown.includes("## Findings (TCSRTC Gates)"), true);
+  // Findings surface under TCSRTC gates, never internal analysis lenses.
+  assertEquals(/### (Target|Constrain|Sanitize|Review|Test|Confirm) Gate/.test(markdown), true);
+  assertEquals(/### (Trace|Contracts|State|Runtime|CodeShape|Tests) Pass/.test(markdown), false);
   assertEquals(/\([^\):]+:\d+\)/.test(markdown), true);
 });
 
