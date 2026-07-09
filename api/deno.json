@@ -14,6 +14,7 @@
     "start": "deno run --allow-net --allow-env --allow-run --allow-read --allow-write --allow-ffi src/main.ts",
     "mcp": "deno run --allow-net --allow-env --allow-run src/mcp/server.ts",
     "cdp:retv": "deno run --allow-net --allow-env --allow-read scripts/cdp_retv_pipeline.ts",
+    "review": "deno run --allow-net --allow-env --allow-run --allow-read --allow-write --allow-ffi scripts/review_cli.ts",
     "test": "deno test --allow-env --allow-net",
     "check": "deno check src/main.ts"
   },

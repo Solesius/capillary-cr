@@ -86,6 +86,7 @@ It drives Chrome and tells you whether it worked, where it got stuck, and why. T
 - **Frontend** — Angular 20. Standalone components, signals and `computed`, `OnPush` throughout. No NGXS.
 - **Graph** — Three.js. WebGL torus rendered on canvas. Orbit controls, raycasting for hover.
 - **Review engine** — TCSRTC-gated agentic loop with typed SSE events, hot-path coverage enforcement, and CPU semantic embeddings (MiniLM over wasm) relating files by meaning before any LLM call.
+- **Sessions** — reviews run as durable server-side sessions: bounce between screens or reload, re-attach with a full narrative replay; run several concurrently (with a token-cost warning before each additional session).
 - **LLM providers** — Anthropic, Gemini, OpenRouter, AWS Bedrock, GitHub Copilot, Codex. Server-side only; keys never touch the client.
 - **Durable storage** — `celer-mem` SQLite FFI (optional write-through mirror; in-memory repository is source of truth).
 - **Browser agent** — Chrome DevTools Protocol. Auto-detects a local Chrome binary or connects to an existing CDP endpoint.
@@ -141,6 +142,19 @@ ANTHROPIC_API_KEY=...                  # or whichever provider you use
 ```
 
 Full variable reference in [`.env.example`](.env.example).
+
+---
+
+## Agent CLI
+
+Run a full review from a terminal, CI job, or another agent — no server needed:
+
+```bash
+cd api
+GITHUB_TOKEN=ghp_... deno task review --repo owner/name --pr 123
+```
+
+Live gate narration streams to stderr; the report lands on stdout (`--json` for the full run record). Exit codes are stable for automation: `0` approve/comment, `1` request_changes, `2` error. The model provider resolves exactly as the server does — Codex/Claude CLI logins, ws bridges, or provider keys.
 
 ---
 

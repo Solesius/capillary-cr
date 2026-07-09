@@ -131,6 +131,15 @@ export interface ReviewChecklistItem {
   completed: boolean;
 }
 
+/** A durable server-side review run clients attach to and detach from. */
+export interface ReviewSessionSummary {
+  runId: string;
+  pullRequestId: string;
+  active: boolean;
+  startedAt: string;
+  eventCount: number;
+}
+
 /**
  * The six TCSRTC Feature Process gates the review agent walks, in order.
  * Findings are raised under these gates — the single public formalism.

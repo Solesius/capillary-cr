@@ -20,6 +20,7 @@ import {
   ReviewRun,
   ReviewChecklistItem,
   ReviewFinding,
+  ReviewSessionSummary,
 } from "../models";
 
 @Injectable({ providedIn: "root" })
@@ -103,6 +104,24 @@ export class ApiClientService {
 
   async postReviewSummaryToPr(runId: string): Promise<{ posted: boolean; url: string }> {
     return this.post(`/api/review/runs/${runId}/pr-comment`, {});
+  }
+
+  async createReviewSession(request: {
+    pullRequestId: string;
+    repositoryId: string;
+    maxCycles?: number;
+    trace?: boolean;
+  }): Promise<ReviewSessionSummary> {
+    return this.post("/api/review/sessions", request);
+  }
+
+  async listReviewSessions(): Promise<ReviewSessionSummary[]> {
+    const response = await this.get<{ sessions: ReviewSessionSummary[] }>("/api/review/sessions");
+    return response.sessions;
+  }
+
+  buildSessionStreamUrl(runId: string): string {
+    return `${this.baseUrl}/api/review/sessions/${runId}/stream`;
   }
 
   async listReviewAgentRuns(): Promise<ReviewAgentRunListItem[]> {

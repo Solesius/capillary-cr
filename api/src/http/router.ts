@@ -86,6 +86,57 @@ router.post("/api/review/runs/async", async (ctx) => {
   ctx.response.body = run;
 });
 
+// --- durable review sessions -------------------------------------------------
+// Runs execute detached from any connection; clients attach for replay + tail.
+
+router.post("/api/review/sessions", async (ctx) => {
+  const body = await ctx.request.body.json();
+  const maxCycles = Number(body.maxCycles);
+  const session = await deps.reviewSessionHub.start({
+    pullRequestId: String(body.pullRequestId || ""),
+    repositoryId: body.repositoryId ? String(body.repositoryId) : undefined,
+    maxCycles: Number.isFinite(maxCycles) && maxCycles > 0 ? maxCycles : undefined,
+    trace: body.trace === true,
+  });
+  ctx.response.status = 201;
+  ctx.response.body = session;
+});
+
+router.get("/api/review/sessions", (ctx) => {
+  ctx.response.body = { sessions: deps.reviewSessionHub.list() };
+});
+
+router.get("/api/review/sessions/:runId/stream", async (ctx) => {
+  const runId = ctx.params.runId || "";
+  if (!deps.reviewSessionHub.has(runId)) {
+    ctx.response.status = 404;
+    ctx.response.body = { error: "session_not_found" };
+    return;
+  }
+
+  const target = await ctx.sendEvents();
+  let detach: (() => void) | null = null;
+  const close = () => {
+    detach?.();
+    target.close().catch(() => {});
+  };
+
+  detach = deps.reviewSessionHub.attach(runId, (event) => {
+    try {
+      target.dispatchMessage(JSON.stringify(event));
+      if (event.type === "done") {
+        close();
+      }
+    } catch {
+      close();
+    }
+  });
+  if (!deps.reviewSessionHub.isActive(runId)) {
+    // Finished session: full replay delivered above; close after flush.
+    close();
+  }
+});
+
 router.get("/api/review/runs/stream", async (ctx) => {
   const params = ctx.request.url.searchParams;
   const pullRequestId = params.get("pullRequestId") || "";

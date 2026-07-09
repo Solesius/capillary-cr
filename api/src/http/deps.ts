@@ -10,6 +10,7 @@ import { GraphMathService } from "../services/graph_math_service.ts";
 import { LlmProviderService } from "../services/llm_provider_service.ts";
 import { CdpRetvAgentService } from "../services/cdp_retv_agent_service.ts";
 import { AgenticReviewService } from "../services/agentic_review_orchestrator_service.ts";
+import { ReviewSessionHub } from "../services/review_session_hub.ts";
 import { TcsrctReviewService } from "../services/tcsrct_review_service.ts";
 import { DurableReviewStore } from "../services/storage/celer_review_store.ts";
 
@@ -47,11 +48,17 @@ const reviewService = new AgenticReviewService(
 );
 const cdpDriverService = new CdpDriverService();
 const cdpRetvAgentService = new CdpRetvAgentService(repository, cdpDriverService);
+// Durable review sessions: runs execute detached from any client connection;
+// browsers, the CLI, and agents attach for a full replay + live tail.
+const reviewSessionHub = new ReviewSessionHub((request, onEvent) =>
+  reviewService.runReviewStream(request, onEvent)
+);
 
 export const deps = {
   repository,
   githubService,
   reviewService,
+  reviewSessionHub,
   artifactService,
   cdpDriverService,
   cdpRetvAgentService,
