@@ -591,6 +591,9 @@ export class CdpRetvAgentService {
 
       if (progress.completedMilestones > completedMilestones) {
         roundsWithoutProgress = 0;
+        // Forward progress is the opposite of drift: decay accumulated
+        // warnings so early-run turbulence cannot pause a recovering run.
+        driftWarnings = 0;
       } else {
         roundsWithoutProgress += 1;
       }
@@ -2306,7 +2309,7 @@ function safeOrigin(url: string): string {
  */
 function resolveAllowedOrigins(startUrl: string, extra?: string[]): Set<string> {
   const origins = new Set<string>();
-  const startOrigin = safeOrigin(startUrl);
+  const startOrigin = canonicalOrigin(startUrl);
   if (startOrigin) {
     origins.add(startOrigin);
   }
@@ -2322,7 +2325,7 @@ function resolveAllowedOrigins(startUrl: string, extra?: string[]): Set<string> 
     }
     const origin = normalizeOriginToken(token);
     if (origin) {
-      origins.add(origin);
+      origins.add(canonicalOrigin(origin) || origin);
     }
   }
 
@@ -2340,8 +2343,31 @@ function normalizeOriginToken(token: string): string {
   return withScheme;
 }
 
-function isDrift(url: string, allowedOrigins: Set<string>): boolean {
-  const current = safeOrigin(url);
+// localhost, 127.0.0.1, and host.docker.internal are the same machine seen
+// from different network namespaces — the CDP driver's loopback auto-rewrite
+// moves between them mid-run, and that must never read as scope drift.
+const LOOPBACK_EQUIVALENT_HOSTS = new Set([
+  "localhost",
+  "127.0.0.1",
+  "[::1]",
+  "0.0.0.0",
+  "host.docker.internal",
+]);
+
+export function canonicalOrigin(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (LOOPBACK_EQUIVALENT_HOSTS.has(parsed.hostname)) {
+      parsed.hostname = "localhost";
+    }
+    return parsed.origin;
+  } catch {
+    return "";
+  }
+}
+
+export function isDrift(url: string, allowedOrigins: Set<string>): boolean {
+  const current = canonicalOrigin(url);
   if (allowedOrigins.has("*") || allowedOrigins.size === 0 || !current) {
     return false;
   }
