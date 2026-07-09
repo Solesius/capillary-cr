@@ -106,6 +106,26 @@ interface CdpSessionState extends CdpSessionSummary {
   connection: CdpConnection;
 }
 
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]", "0.0.0.0"]);
+
+/**
+ * Loopback target -> host-gateway variant, or null when the URL is not a
+ * rewrite candidate. Used as a one-shot retry after a failed navigation:
+ * inside a container, a user's "localhost" almost always means the host.
+ */
+export function rewriteLoopbackToHostGateway(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    if (!LOOPBACK_HOSTNAMES.has(parsed.hostname) && !LOOPBACK_HOSTNAMES.has(`[${parsed.hostname}]`)) {
+      return null;
+    }
+    parsed.hostname = "host.docker.internal";
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
 const DEFAULT_CHROME_CANDIDATES = [
   "google-chrome",
   "google-chrome-stable",
@@ -563,6 +583,37 @@ export class CdpDriverService {
 
     await connection.send("Page.navigate", { url });
     await this.waitForDocumentReady(connection, waitUntil, timeoutMs);
+    if (!(await this.landedOnErrorPage(connection))) {
+      return;
+    }
+
+    // Chrome lands on chrome-error://chromewebdata/ when the target could
+    // not be loaded. Inside a container the overwhelmingly common cause is
+    // a loopback URL that means "the host" to the user but "this container"
+    // to the browser — so retry once with the host gateway swapped in. On
+    // bare metal host.docker.internal simply doesn't resolve and the retry
+    // fails in milliseconds, so no environment detection is needed.
+    const rewritten = rewriteLoopbackToHostGateway(url);
+    if (rewritten) {
+      await connection.send("Page.navigate", { url: rewritten });
+      await this.waitForDocumentReady(connection, waitUntil, timeoutMs);
+      if (!(await this.landedOnErrorPage(connection))) {
+        console.log(`[cdp] ${url} unreachable from browser context; rewrote to ${rewritten}`);
+        return;
+      }
+    }
+
+    throw new AppError(
+      "navigation_unreachable",
+      502,
+      `navigation_unreachable: target did not load` +
+        (rewritten ? ` (tried ${url} and ${rewritten})` : ` (${url})`),
+    );
+  }
+
+  private async landedOnErrorPage(connection: CdpConnection): Promise<boolean> {
+    const landedUrl = await this.evaluateExpression(connection, "location.href", true);
+    return typeof landedUrl === "string" && landedUrl.startsWith("chrome-error://");
   }
 
   private async waitForDocumentReady(
