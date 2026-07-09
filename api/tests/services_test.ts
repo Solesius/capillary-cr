@@ -329,6 +329,45 @@ Deno.test("should_reject_github_connection_when_token_is_missing", async () => {
   }
 });
 
+Deno.test("should_floor_milestone_progress_with_clean_cycle_evidence", async () => {
+  const { reconcileCompletedMilestones } = await import(
+    "../src/services/cdp_retv_agent_service.ts"
+  );
+  const base = { allowAutoAdvance: true, totalMilestones: 4 };
+
+  // Weak planner under-reports (says 2) while the cycle succeeded: evidence wins.
+  assertEquals(
+    reconcileCompletedMilestones({ ...base, plannerReported: 2, prior: 2, cycleSucceeded: true }),
+    3,
+  );
+  // Planner ahead of the floor is trusted.
+  assertEquals(
+    reconcileCompletedMilestones({ ...base, plannerReported: 4, prior: 1, cycleSucceeded: true }),
+    4,
+  );
+  // Failed cycle: no advance, and a low planner claim cannot regress progress.
+  assertEquals(
+    reconcileCompletedMilestones({ ...base, plannerReported: 1, prior: 3, cycleSucceeded: false }),
+    3,
+  );
+  // Planner silent + clean cycle: auto-advance, capped at total.
+  assertEquals(
+    reconcileCompletedMilestones({ ...base, plannerReported: undefined, prior: 4, cycleSucceeded: true }),
+    4,
+  );
+  // Unreachable planner disables auto-advance.
+  assertEquals(
+    reconcileCompletedMilestones({
+      plannerReported: undefined,
+      prior: 1,
+      cycleSucceeded: true,
+      allowAutoAdvance: false,
+      totalMilestones: 4,
+    }),
+    1,
+  );
+});
+
 Deno.test("should_treat_loopback_equivalent_hosts_as_one_origin_for_drift", async () => {
   const { canonicalOrigin, isDrift } = await import("../src/services/cdp_retv_agent_service.ts");
 

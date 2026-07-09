@@ -1394,12 +1394,13 @@ export class CdpRetvAgentService {
     driftWarnings: number,
   ): RetvCdpProgress {
     const totalMilestones = Math.max(1, structuredPlan.milestones.length);
-    const plannerCompleted = plannerProgress?.completedMilestones;
-    const nextCompleted = Number.isFinite(plannerCompleted)
-      ? Math.max(0, Math.min(totalMilestones, Number(plannerCompleted)))
-      : allowAutoAdvance && cycleSucceeded
-      ? Math.min(totalMilestones, completedMilestones + 1)
-      : completedMilestones;
+    const nextCompleted = reconcileCompletedMilestones({
+      plannerReported: plannerProgress?.completedMilestones,
+      prior: completedMilestones,
+      cycleSucceeded,
+      allowAutoAdvance,
+      totalMilestones,
+    });
 
     const percentFromPlanner = plannerProgress?.percent;
     const percent = Number.isFinite(percentFromPlanner)
@@ -2353,6 +2354,31 @@ const LOOPBACK_EQUIVALENT_HOSTS = new Set([
   "0.0.0.0",
   "host.docker.internal",
 ]);
+
+/**
+ * Milestone accounting that trusts evidence over bookkeeping. Weak planner
+ * models chronically under-report their own milestone counts (prose says
+ * "successful", JSON still says 2 of 4), which starved progress and killed
+ * runs with no_progress_pause. A clean cycle (every step succeeded, planner
+ * reachable) always advances at least one milestone; a planner reporting
+ * AHEAD of that is trusted; progress never regresses; capped at total.
+ */
+export function reconcileCompletedMilestones(input: {
+  plannerReported: number | undefined;
+  prior: number;
+  cycleSucceeded: boolean;
+  allowAutoAdvance: boolean;
+  totalMilestones: number;
+}): number {
+  const { plannerReported, prior, cycleSucceeded, allowAutoAdvance, totalMilestones } = input;
+  const plannerCount = Number.isFinite(plannerReported)
+    ? Math.max(0, Math.min(totalMilestones, Number(plannerReported)))
+    : 0;
+  const evidenceFloor = allowAutoAdvance && cycleSucceeded
+    ? Math.min(totalMilestones, prior + 1)
+    : prior;
+  return Math.max(plannerCount, evidenceFloor, prior);
+}
 
 export function canonicalOrigin(url: string): string {
   try {
