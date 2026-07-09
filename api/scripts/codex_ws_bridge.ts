@@ -24,13 +24,43 @@
 const port = Number(Deno.env.get("CODEX_BRIDGE_PORT") || 7899);
 const hostname = Deno.env.get("CODEX_BRIDGE_HOST") || "0.0.0.0";
 
+function isExecutableFile(path: string): boolean {
+  try {
+    return Deno.statSync(path).isFile;
+  } catch {
+    return false;
+  }
+}
+
+// Resolve an absolute path to the codex binary: service/daemon PATHs often
+// miss per-user install dirs (~/.local/bin), and a bare name then fails with
+// "entity not found".
+function resolveCodexBin(): string {
+  const home = Deno.env.get("HOME") || "";
+  const searchDirs = (Deno.env.get("PATH") || "").split(":");
+  if (home) {
+    searchDirs.push(`${home}/.local/bin`, `${home}/.npm-global/bin`, `${home}/bin`);
+  }
+  searchDirs.push("/usr/local/bin", "/usr/bin");
+  for (const dir of searchDirs) {
+    if (!dir) {
+      continue;
+    }
+    const candidate = `${dir.replace(/\/+$/, "")}/codex`;
+    if (isExecutableFile(candidate)) {
+      return candidate;
+    }
+  }
+  return "codex";
+}
+
 function resolveCommand(): { command: string; args: string[] } {
   const override = Deno.env.get("CODEX_APP_SERVER_CMD")?.trim();
   if (override) {
     const parts = override.split(/\s+/);
     return { command: parts[0], args: parts.slice(1) };
   }
-  return { command: "codex", args: ["app-server"] };
+  return { command: resolveCodexBin(), args: ["app-server"] };
 }
 
 function log(...parts: unknown[]): void {
