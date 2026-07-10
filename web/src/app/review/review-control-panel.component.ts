@@ -2,6 +2,7 @@
 // Copyright 2026 Khalil Warren — capillary
 import { ChangeDetectionStrategy, Component, computed, inject } from "@angular/core";
 import { CommonModule } from "@angular/common";
+import { ApiClientService } from "../services/api-client.service";
 import { CapillaryStore } from "../state/capillary.store";
 import { ReviewPhase, TCSRTC_GATES, toReviewPhase } from "../models";
 import { MarkdownPipe } from "../shell/markdown.pipe";
@@ -30,7 +31,7 @@ import { MarkdownPipe } from "../shell/markdown.pipe";
           }
         </div>
 
-        <div class="cap-progress" style="margin-top: 12px;">
+        <div class="cap-progress" [class.working]="agentWorking()" style="margin-top: 12px;">
           <span [style.width.%]="store.progress()"></span>
         </div>
         <div class="cap-row" style="margin-top: 8px;">
@@ -41,7 +42,8 @@ import { MarkdownPipe } from "../shell/markdown.pipe";
         <div class="cap-row" style="margin-top: 14px;">
           <button
             class="cap-button cap-button-primary"
-            [disabled]="!store.canBegin()"
+            [class.busy]="starting()"
+            [disabled]="!store.canBegin() || starting()"
             (click)="beginReview()">
             Begin Review
           </button>
@@ -110,7 +112,12 @@ import { MarkdownPipe } from "../shell/markdown.pipe";
               }
               <span class="cap-live-chip" [class.active]="agentWorking()">
                 <span class="cap-live-dot"></span>
-                {{ agentWorking() ? 'cycling' : 'idle' }}
+                @if (agentWorking()) {
+                  cycling
+                  <span class="cap-thinking-dots"><i></i><i></i><i></i></span>
+                } @else {
+                  idle
+                }
               </span>
             </div>
           </div>
@@ -417,6 +424,8 @@ import { MarkdownPipe } from "../shell/markdown.pipe";
 })
 export class ReviewControlPanelComponent {
   readonly store = inject(CapillaryStore);
+  private readonly api = inject(ApiClientService);
+  readonly starting = computed(() => this.api.inFlight() > 0 && this.store.status() !== "reviewing");
   readonly gates = TCSRTC_GATES;
 
   // Live phase readout — show the active gate + cycle while running, not "idle".

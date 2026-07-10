@@ -35,12 +35,22 @@ import { CapillaryStore } from "../state/capillary.store";
               <span>or use a personal access token</span>
             </div>
 
+            <div class="cap-pat-warning">
+              <span class="cap-pat-warning-icon" aria-hidden="true">!</span>
+              <span>
+                Prefer <code>CAPILLARY_GITHUB_TOKEN</code> in the server environment — it never
+                travels through the browser and reaches org/private repos. Pasting a token here
+                keeps it only in memory, but the env token is the recommended path for anything
+                beyond a quick local trial.
+              </span>
+            </div>
+
             <input
               id="tokenInput"
               type="password"
               class="cap-input"
               autocomplete="off"
-              placeholder="ghp_ ..."
+              placeholder="ghp_ / github_pat_ ..."
               [value]="githubToken()"
               (input)="githubToken.set($any($event.target).value)" />
             <button
@@ -97,6 +107,38 @@ import { CapillaryStore } from "../state/capillary.store";
       display: flex;
       flex-direction: column;
       gap: 10px;
+    }
+    .cap-pat-warning {
+      display: flex;
+      gap: 8px;
+      padding: 9px 11px;
+      border: 1px solid rgba(234, 179, 8, 0.4);
+      border-left: 3px solid #eab308;
+      border-radius: var(--cap-radius-sm, 3px);
+      background: rgba(234, 179, 8, 0.08);
+      font-size: 0.76rem;
+      line-height: 1.45;
+      color: var(--cap-text-dim);
+    }
+    .cap-pat-warning code {
+      font-family: var(--cap-mono, monospace);
+      font-size: 0.72rem;
+      background: var(--cap-surface-raised);
+      padding: 1px 4px;
+      border-radius: 2px;
+    }
+    .cap-pat-warning-icon {
+      flex-shrink: 0;
+      width: 16px;
+      height: 16px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: #eab308;
+      color: #1a1400;
+      font-weight: 800;
+      font-size: 0.7rem;
+      margin-top: 1px;
     }
     .cap-button-full {
       width: 100%;
