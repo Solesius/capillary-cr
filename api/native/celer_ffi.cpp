@@ -108,11 +108,22 @@ std::string encode_pairs(const std::vector<KVPair>& pairs) {
 extern "C" {
 
 // Open the global store. `schema` is a newline-delimited list of
-// "scope\ttable" descriptors. Only the "sqlite" backend is wired here.
+// "scope\ttable" descriptors. `backend` selects the storage engine; an empty
+// value or "auto" resolves to the best engine this library was built with —
+// RocksDB when compiled in, otherwise SQLite. Resolving here (rather than in
+// the caller) guarantees the runtime default always matches the compiled
+// backend, so a SQLite-only build never fails by being asked for RocksDB.
 char* celer_open(const char* backend, const char* path, const char* schema, std::int32_t schema_len) {
   std::lock_guard<std::mutex> lock(g_lifecycle_mu);
 
-  const std::string kind = backend != nullptr ? std::string(backend) : std::string("sqlite");
+  std::string kind = backend != nullptr ? std::string(backend) : std::string{};
+  if (kind.empty() || kind == "auto") {
+#if CELER_HAS_ROCKSDB
+    kind = "rocksdb";
+#else
+    kind = "sqlite";
+#endif
+  }
 #if CELER_HAS_ROCKSDB
   const bool kind_supported = (kind == "sqlite" || kind == "rocksdb");
 #else

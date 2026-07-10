@@ -183,7 +183,10 @@ export class CelerStore {
     try {
       const response = await store.#invoke(
         lib.symbols.celer_open,
-        cstr(options.backend ?? "sqlite"),
+        // "auto" lets the native layer pick the best backend it was built
+        // with (RocksDB when compiled in, else SQLite), so the runtime default
+        // always matches the compiled engine.
+        cstr(options.backend ?? "auto"),
         cstr(options.path),
         buf(schema),
         schema.length,
