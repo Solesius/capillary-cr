@@ -324,7 +324,10 @@ export class GitHubOakService {
       throw new AppError("invalid_oauth_state", 401, "invalid_oauth_state");
     }
 
-    const resolvedToken = token?.trim() || Deno.env.get("GITHUB_TOKEN")?.trim() || null;
+    const resolvedToken = token?.trim() ||
+      Deno.env.get("CAPILLARY_GITHUB_TOKEN")?.trim() ||
+      Deno.env.get("GITHUB_TOKEN")?.trim() ||
+      null;
     if (!resolvedToken) {
       throw new AppError("github_token_required", 401, "github_token_required");
     }
