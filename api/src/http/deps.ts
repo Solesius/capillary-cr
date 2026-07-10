@@ -43,6 +43,21 @@ const tcsrctService = new TcsrctReviewService(repository);
 const artifactService = new ArtifactService(repository);
 const clickClackService = new ClickClackCoordinationService(repository);
 const githubService = new GitHubOakService(repository);
+
+// Connect a GitHub identity at boot from an env token when present. A PAT
+// (classic with repo scope, or fine-grained scoped to the org) surfaces org
+// and private repos that device flow against the built-in OAuth app cannot —
+// so a containerized deploy with CAPILLARY_GITHUB_TOKEN set just works, no
+// UI login step.
+if (Deno.env.get("CAPILLARY_GITHUB_TOKEN")?.trim() || Deno.env.get("GITHUB_TOKEN")?.trim()) {
+  try {
+    const identity = await githubService.connectGithub("valid");
+    console.log(`GitHub identity connected from environment token: ${identity.login}`);
+  } catch {
+    console.warn("CAPILLARY_GITHUB_TOKEN/GITHUB_TOKEN set but GitHub connection failed; connect via the UI.");
+  }
+}
+
 const llmProviderService = new LlmProviderService(repository);
 const reviewService = new AgenticReviewService(
   repository,
