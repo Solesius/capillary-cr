@@ -135,6 +135,8 @@ export interface ReviewAgentPassInput {
   baselineFindings: ReviewFinding[];
   maxCycles?: number;
   trace: boolean;
+  /** Encourage the agent to emit committable suggestions on findings. */
+  suggest?: boolean;
   emit: (event: ReviewRunEvent) => void;
 }
 
@@ -495,9 +497,12 @@ export class ReviewAgentService {
         budget,
         { hot: hotPaths.length, examined: hotPaths.length - unexamined.length, unexamined },
       );
-      const reply = await plannerChat(config, REVIEW_SYSTEM_PROMPT, userMessage, {
+      const systemPrompt = input.suggest
+        ? `${REVIEW_SYSTEM_PROMPT}\n\n${SUGGESTION_DIRECTIVE}`
+        : REVIEW_SYSTEM_PROMPT;
+      const reply = await plannerChat(config, systemPrompt, userMessage, {
         runContextId: input.runId,
-        maxOutputTokens: 1800,
+        maxOutputTokens: input.suggest ? 2400 : 1800,
       });
 
       if (!reply.ok || !reply.value) {
@@ -1000,6 +1005,15 @@ function deriveSummary(capture: ReviewCapture, findings: readonly ReviewFinding[
     `node(s). Surfaced ${findings.length} finding(s) (${blockers} blocker, ${highs} high) ` +
     `over ${capture.riskSurfaces.length} risk surface(s).`;
 }
+
+const SUGGESTION_DIRECTIVE =
+  `Suggestions are ENABLED for this review. Whenever a finding has a concrete, ` +
+  `mechanical fix, attach a suggestion object to recordFinding: ` +
+  `{startLine, endLine, code} — the 1-indexed inclusive line range in filePath ` +
+  `to replace and the exact replacement text (match the file's existing indentation). ` +
+  `Read the file/diff first so the line range and replacement are exactly right; a ` +
+  `wrong range produces a broken GitHub suggestion. Only attach a suggestion when ` +
+  `you are confident; a prose suggestedFix is fine when the fix is not a precise edit.`;
 
 const REVIEW_SYSTEM_PROMPT =
   `You are the Capillary code-review agent. You operate the TCSRTC Feature Process to produce an ` +

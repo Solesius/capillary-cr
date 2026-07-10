@@ -40,6 +40,8 @@ export interface AgenticReviewRequest {
   maxCycles?: number;
   /** When true, retain the full tool trace + capture manifest and gate bundle export. */
   trace?: boolean;
+  /** When true, ask the agent to emit committable code suggestions on findings. */
+  suggest?: boolean;
 }
 
 type EmitFn = (event: ReviewRunEvent) => void;
@@ -120,6 +122,7 @@ export class AgenticReviewService {
         emit,
         request.maxCycles,
         request.trace ?? false,
+        request.suggest ?? false,
       );
     } catch (error) {
       this.failRun(runId, error);
@@ -193,6 +196,7 @@ export class AgenticReviewService {
     emit: EmitFn,
     maxCycles?: number,
     trace = false,
+    suggest = false,
   ): Promise<ReviewRunResult> {
     emit({ type: "run_start", runId, pullRequestId, phase: "queued" });
 
@@ -263,6 +267,7 @@ export class AgenticReviewService {
       baselineFindings: this.repository.getFindings(runId),
       maxCycles,
       trace,
+      suggest,
       emit,
     });
     this.tcsrct.produceAuthorChecklist(runId);

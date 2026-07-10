@@ -61,6 +61,14 @@ import { MarkdownPipe } from "../shell/markdown.pipe";
           <span class="cap-muted">Trace this review (retain tool trace + capture; enables bundle export)</span>
         </label>
 
+        <label class="cap-row cap-trace-toggle" style="margin-top: 8px; gap: 8px; cursor: pointer;">
+          <input
+            type="checkbox"
+            [checked]="store.reviewSuggestEnabled()"
+            (change)="onSuggestToggle($event)" />
+          <span class="cap-muted">Enable suggestions (agent emits committable code fixes; uses more tokens)</span>
+        </label>
+
         @if (store.selectedPullRequest()) {
           <div class="cap-card" style="margin-top: 14px;">
             <p class="cap-stat-label">Selected Pull Request</p>
@@ -432,6 +440,10 @@ export class ReviewControlPanelComponent {
 
   onTraceToggle(event: Event): void {
     this.store.toggleReviewTrace((event.target as HTMLInputElement).checked);
+  }
+
+  onSuggestToggle(event: Event): void {
+    this.store.toggleReviewSuggest((event.target as HTMLInputElement).checked);
   }
 
   postToPr(): void {
