@@ -20,8 +20,9 @@
     "@angular/platform-browser": "20.3.25",
     "@angular/platform-browser-dynamic": "20.3.25",
     "@angular/router": "20.3.25",
+    "@types/zdog": "^1.1.7",
     "rxjs": "^7.8.1",
-    "three": "^0.177.0",
+    "zdog": "^1.1.3",
     "zone.js": "^0.15.0"
   },
   "devDependencies": {
@@ -31,7 +32,6 @@
     "@playwright/test": "^1.54.0",
     "@types/chai": "^5.2.2",
     "@types/mocha": "^10.0.10",
-    "@types/three": "^0.177.0",
     "chai": "^5.2.1",
     "mocha": "^11.4.0",
     "ts-node": "^10.9.2",

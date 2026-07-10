@@ -33,10 +33,10 @@ interface ReviewStageDef {
 
 const REVIEW_STAGE_DEFS: readonly ReviewStageDef[] = [
   { key: "queued", label: "Queued", entersAt: "queued" },
-  { key: "graph", label: "Graph", entersAt: "diff_dag" },
-  { key: "wetting", label: "Wetting", entersAt: "program_shape" },
-  { key: "tcsrct", label: "TCSRCT", entersAt: "tcsrct" },
-  { key: "llm", label: "LLM", entersAt: "llm_provider" },
+  { key: "graph", label: "Change Map", entersAt: "diff_dag" },
+  { key: "wetting", label: "Impact", entersAt: "program_shape" },
+  { key: "tcsrct", label: "Review", entersAt: "tcsrct" },
+  { key: "llm", label: "Report", entersAt: "llm_provider" },
   { key: "complete", label: "Complete", entersAt: "completed" },
 ];
 
