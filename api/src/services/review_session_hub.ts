@@ -37,7 +37,7 @@ const MAX_EVENTS_PER_SESSION = 4000;
 const MAX_FINISHED_SESSIONS = 12;
 
 export type RunStarter = (
-  request: { pullRequestId: string; repositoryId?: string; maxCycles?: number; trace?: boolean },
+  request: { pullRequestId: string; repositoryId?: string; maxCycles?: number; trace?: boolean; suggest?: boolean },
   onEvent: (event: ReviewRunEvent) => void,
 ) => Promise<unknown>;
 
@@ -51,7 +51,7 @@ export class ReviewSessionHub {
    * an id (the `run_start` event), never waits for the review itself.
    */
   start(
-    request: { pullRequestId: string; repositoryId?: string; maxCycles?: number; trace?: boolean },
+    request: { pullRequestId: string; repositoryId?: string; maxCycles?: number; trace?: boolean; suggest?: boolean },
   ): Promise<ReviewSessionSummary> {
     return new Promise((resolve, reject) => {
       let session: SessionState | null = null;

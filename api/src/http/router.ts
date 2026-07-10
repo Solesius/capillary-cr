@@ -97,6 +97,7 @@ router.post("/api/review/sessions", async (ctx) => {
     repositoryId: body.repositoryId ? String(body.repositoryId) : undefined,
     maxCycles: Number.isFinite(maxCycles) && maxCycles > 0 ? maxCycles : undefined,
     trace: body.trace === true,
+    suggest: body.suggest === true,
   });
   ctx.response.status = 201;
   ctx.response.body = session;

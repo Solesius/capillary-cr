@@ -113,6 +113,10 @@ export class CapillaryStore {
   readonly prCommentState = signal<"idle" | "posting" | "posted" | "failed">("idle");
   readonly prCommentUrl = signal<string | null>(null);
   readonly reviewTraceEnabled = signal(false);
+  readonly reviewSuggestEnabled = signal(false);
+  toggleReviewSuggest(on: boolean): void {
+    this.reviewSuggestEnabled.set(on);
+  }
   readonly reviewRunHistory = signal<ReviewAgentRunListItem[]>([]);
   readonly selectedReviewRunId = signal<string | null>(null);
   readonly selectedReviewTraceEnabled = signal(false);
@@ -872,6 +876,7 @@ export class CapillaryStore {
         pullRequestId,
         repositoryId,
         trace: this.reviewTraceEnabled(),
+        suggest: this.reviewSuggestEnabled(),
       });
       await this.refreshReviewSessions();
       this.attachToSession(session.runId);

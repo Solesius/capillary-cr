@@ -508,13 +508,28 @@ import { MarkdownPipe } from "./markdown.pipe";
 
                   <div class="cap-list">
                     <label class="cap-muted" for="retvModel">Model</label>
-                    <input
-                      id="retvModel"
-                      class="cap-input"
-                      [value]="setupModelInput()"
-                      [readonly]="!setupAllowsEndpointOverride()"
-                      (input)="setupModelInput.set($any($event.target).value)"
-                      placeholder="local model id" />
+                    @if (setupModelChoices().length > 0) {
+                      <select
+                        id="retvModel"
+                        class="cap-select"
+                        [value]="setupModelInput()"
+                        (change)="setupModelInput.set($any($event.target).value)">
+                        @for (m of setupModelChoices(); track m) {
+                          <option [value]="m">{{ m }}</option>
+                        }
+                        @if (!setupModelChoices().includes(setupModelInput())) {
+                          <option [value]="setupModelInput()">{{ setupModelInput() }} (custom)</option>
+                        }
+                      </select>
+                    } @else {
+                      <input
+                        id="retvModel"
+                        class="cap-input"
+                        [value]="setupModelInput()"
+                        (input)="setupModelInput.set($any($event.target).value)"
+                        placeholder="model id" />
+                    }
+                    <p class="cap-muted">Model is switchable for every provider; the endpoint stays pinned unless local.</p>
                   </div>
 
                   <p class="cap-muted">
@@ -703,6 +718,20 @@ export class CapillaryShellComponent {
     const defaults = this.setupProviderDefaults[providerKind];
     this.setupModelInput.set(defaults.model);
     this.setupEndpointInput.set(defaults.baseUrl);
+  }
+
+  // Known-good model ids per provider, so Codex/Claude offer a picker instead
+  // of a locked field. A typed value not in the list still saves (custom).
+  private readonly setupModelChoicesByKind: Partial<Record<RetvPlannerProviderKind, string[]>> = {
+    codex_app_server: ["gpt-5.4-mini", "gpt-5.4", "gpt-5.4-codex", "o4-mini"],
+    claude_code: ["sonnet", "opus", "haiku"],
+    anthropic: ["claude-sonnet-4-20250514", "claude-opus-4-20250514"],
+    github_copilot: ["openai/gpt-4.1", "openai/gpt-4o", "anthropic/claude-sonnet-4"],
+    gemini: ["gemini-2.5-pro", "gemini-2.5-flash"],
+  };
+
+  setupModelChoices(): string[] {
+    return this.setupModelChoicesByKind[this.setupProviderKindInput()] ?? [];
   }
 
   /**

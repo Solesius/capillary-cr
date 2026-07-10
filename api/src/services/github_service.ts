@@ -144,6 +144,25 @@ type GithubOAuthPollResult =
 
 type PullRequestStateFilter = "open" | "closed";
 
+/**
+ * GitHub returns a JSON error body ({message, errors[]}) explaining WHY a
+ * write failed (missing scope, invalid line range, etc). Surface it so the UI
+ * shows the real cause instead of an opaque code.
+ */
+async function describeGithubError(response: Response, fallback: string): Promise<string> {
+  try {
+    const payload = await response.json() as {
+      message?: string;
+      errors?: Array<{ message?: string; field?: string }>;
+    };
+    const detail = payload.errors?.map((e) => e.message || e.field).filter(Boolean).join("; ");
+    const base = payload.message ? `${fallback}: ${payload.message}` : fallback;
+    return detail ? `${base} (${detail})` : base;
+  } catch {
+    return `${fallback} (HTTP ${response.status})`;
+  }
+}
+
 export class GitHubOakService {
   readonly #pendingOAuthStates = new Map<string, PendingGithubOAuthState>();
   readonly #pendingDeviceSessions = new Map<string, PendingGithubDeviceSession>();
@@ -564,7 +583,7 @@ export class GitHubOakService {
     );
 
     if (!response.ok) {
-      throw new AppError("github_comment_failed", response.status, "github_comment_failed");
+      throw new AppError("github_comment_failed", response.status, await describeGithubError(response, "github_comment_failed"));
     }
 
     const dto = await response.json() as { html_url?: string };
@@ -631,7 +650,7 @@ export class GitHubOakService {
     );
 
     if (!response.ok) {
-      throw new AppError("github_suggestion_failed", response.status, "github_suggestion_failed");
+      throw new AppError("github_suggestion_failed", response.status, await describeGithubError(response, "github_suggestion_failed"));
     }
 
     const dto = await response.json() as { html_url?: string };

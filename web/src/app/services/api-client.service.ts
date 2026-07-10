@@ -115,6 +115,7 @@ export class ApiClientService {
     repositoryId: string;
     maxCycles?: number;
     trace?: boolean;
+    suggest?: boolean;
   }): Promise<ReviewSessionSummary> {
     return this.post("/api/review/sessions", request);
   }
