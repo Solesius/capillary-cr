@@ -60,6 +60,22 @@ import { CapillaryStore } from "../state/capillary.store";
             @if (finding.evidence?.length) {
               <p class="cap-muted" style="margin-top: 8px;">Evidence: {{ finding.evidence[0] }}</p>
             }
+            @if (finding.line) {
+              <div class="cap-finding-actions">
+                @if (store.commentState()[finding.id] === 'posted') {
+                  <a class="cap-button cap-button-ghost cap-button-sm" [href]="store.commentUrl()[finding.id]" target="_blank" rel="noopener">Commented ✓ — view on GitHub</a>
+                } @else {
+                  <button
+                    class="cap-button cap-button-sm"
+                    type="button"
+                    [class.busy]="store.commentState()[finding.id] === 'posting'"
+                    [disabled]="store.commentState()[finding.id] === 'posting'"
+                    (click)="postComment(finding.id)">
+                    {{ store.commentState()[finding.id] === 'failed' ? 'Retry — post inline comment' : 'Post inline comment' }}
+                  </button>
+                }
+              </div>
+            }
             @if (finding.suggestion; as sug) {
               <div class="cap-suggestion">
                 <div class="cap-suggestion-head">
@@ -97,6 +113,10 @@ export class ReviewFindingsPanelComponent {
 
   postSuggestion(findingId: string): void {
     void this.store.postFindingSuggestion(findingId);
+  }
+
+  postComment(findingId: string): void {
+    void this.store.postFindingComment(findingId);
   }
 
   readonly filteredFindings = computed(() => {

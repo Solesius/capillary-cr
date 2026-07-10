@@ -240,6 +240,38 @@ router.post("/api/review/runs/:runId/findings/:findingId/suggestion", async (ctx
   ctx.response.body = { posted: true, url: result.htmlUrl };
 });
 
+// Human-initiated: post one finding as a plain inline review comment at its
+// file:line. Works for any finding (no code suggestion required).
+router.post("/api/review/runs/:runId/findings/:findingId/comment", async (ctx) => {
+  const runId = ctx.params.runId || "";
+  const findingId = ctx.params.findingId || "";
+  const record = deps.reviewService.getReviewAgentRun(runId);
+  if (!record) {
+    ctx.response.status = 404;
+    ctx.response.body = { message: "review_run_not_found" };
+    return;
+  }
+  const finding = record.findings.find((item) => item.id === findingId);
+  if (!finding || !finding.line) {
+    ctx.response.status = 404;
+    ctx.response.body = { message: "finding_not_commentable" };
+    return;
+  }
+  const severity = finding.severity.toUpperCase();
+  const fix = finding.suggestedFix ? `\n\n**Suggested fix:** ${finding.suggestedFix}` : "";
+  const result = await deps.githubService.postPullRequestInlineComment(
+    record.repositoryId,
+    record.pullRequestId,
+    {
+      path: finding.filePath,
+      line: finding.line,
+      body: `**[${severity}] ${finding.title}**\n\n${finding.finding}${fix}`,
+    },
+  );
+  ctx.response.status = 201;
+  ctx.response.body = { posted: true, url: result.htmlUrl };
+});
+
 router.post("/api/review/runs/:runId/cancel", (ctx) => {
   const runId = ctx.params.runId || "";
   ctx.response.body = {

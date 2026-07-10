@@ -8,7 +8,7 @@ import {
   RiskHint,
 } from "../domain/entities.ts";
 import { AppError, unauthorized } from "../domain/errors.ts";
-import { enforceDefensiveInput } from "../lib/validation.ts";
+import { enforceDefensiveInput, enforceTextBody } from "../lib/validation.ts";
 import { ReviewRepository } from "../repositories/review_repository.ts";
 
 interface GitHubUserDto {
@@ -565,7 +565,7 @@ export class GitHubOakService {
   ): Promise<{ htmlUrl: string }> {
     this.validateRepositoryId(repositoryId);
     this.validatePullRequestId(pullRequestId);
-    enforceDefensiveInput(body, "comment_body");
+    enforceTextBody(body, "comment_body");
     const token = this.requireGithubToken();
 
     const pull = await this.getPullRequest(repositoryId, pullRequestId);
@@ -587,6 +587,56 @@ export class GitHubOakService {
 
     if (!response.ok) {
       throw new AppError("github_comment_failed", response.status, await describeGithubError(response, "github_comment_failed"));
+    }
+
+    const dto = await response.json() as { html_url?: string };
+    return { htmlUrl: String(dto.html_url || pull.htmlUrl) };
+  }
+
+  /**
+   * Post a plain inline review comment on a specific line of a file in the PR
+   * head commit. Works for any finding (no code fix required) — the actionable
+   * counterpart to the full-report summary comment.
+   */
+  async postPullRequestInlineComment(
+    repositoryId: string,
+    pullRequestId: string,
+    input: { path: string; line: number; body: string },
+  ): Promise<{ htmlUrl: string }> {
+    this.validateRepositoryId(repositoryId);
+    this.validatePullRequestId(pullRequestId);
+    enforceDefensiveInput(input.path, "comment_path");
+    enforceTextBody(input.body, "comment_body");
+    const token = this.requireGithubToken();
+
+    const pull = await this.getPullRequest(repositoryId, pullRequestId);
+    const repo = await this.findRepositoryById(repositoryId, token);
+    if (!pull.headSha) {
+      throw new AppError("github_pull_head_unknown", 409, "github_pull_head_unknown");
+    }
+
+    const response = await this.fetcher(
+      `https://api.github.com/repos/${repo.full_name}/pulls/${pull.number}/comments`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: "application/vnd.github+json",
+          "content-type": "application/json",
+          "x-github-api-version": "2022-11-28",
+        },
+        body: JSON.stringify({
+          commit_id: pull.headSha,
+          path: input.path,
+          side: "RIGHT",
+          line: Math.max(1, Math.floor(input.line)),
+          body: `${input.body}\n\n<sub>Flagged by Capillary</sub>`,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new AppError("github_inline_comment_failed", response.status, await describeGithubError(response, "github_inline_comment_failed"));
     }
 
     const dto = await response.json() as { html_url?: string };

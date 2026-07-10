@@ -1161,6 +1161,26 @@ export class CapillaryStore {
     }
   }
 
+  // Per-finding inline-comment posting, tracked separately from suggestions.
+  readonly commentState = signal<Record<string, "idle" | "posting" | "posted" | "failed">>({});
+  readonly commentUrl = signal<Record<string, string>>({});
+
+  async postFindingComment(findingId: string): Promise<void> {
+    const runId = this.selectedReviewRunId() ?? this.reviewRun()?.id;
+    if (!runId || this.commentState()[findingId] === "posting") {
+      return;
+    }
+    this.commentState.update((map) => ({ ...map, [findingId]: "posting" }));
+    try {
+      const result = await this.api.postFindingComment(runId, findingId);
+      this.commentUrl.update((map) => ({ ...map, [findingId]: result.url }));
+      this.commentState.update((map) => ({ ...map, [findingId]: "posted" }));
+    } catch (error) {
+      this.commentState.update((map) => ({ ...map, [findingId]: "failed" }));
+      this.lastError.set(`Posting comment failed: ${toMessage(error)}`);
+    }
+  }
+
   async cancelReview(): Promise<void> {
     this.stopReviewStream();
     const runId = this.reviewRun()?.id;
