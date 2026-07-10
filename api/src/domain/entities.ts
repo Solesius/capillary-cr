@@ -64,6 +64,8 @@ export interface PullRequest {
   title: string;
   author: string;
   sourceBranch: string;
+  /** Head commit sha — required to anchor GitHub suggestion comments. */
+  headSha?: string;
   targetBranch: string;
   state: PullRequestState;
   htmlUrl: string;
@@ -210,7 +212,21 @@ export interface ReviewFinding {
   finding: string;
   evidence: string[];
   suggestedFix?: string;
+  /**
+   * Optional committable code suggestion. When present the UI renders a
+   * "Post suggested change" action that posts a GitHub ```suggestion block
+   * on the exact lines — human-initiated, never automatic.
+   */
+  suggestion?: ReviewSuggestion;
   confidence: number;
+}
+
+export interface ReviewSuggestion {
+  /** 1-indexed inclusive line range in filePath the suggestion replaces. */
+  startLine: number;
+  endLine: number;
+  /** Exact replacement text for those lines (no fences; the API wraps it). */
+  code: string;
 }
 
 export interface ReviewChecklistItem {

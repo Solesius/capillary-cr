@@ -26,6 +26,7 @@ import {
   ReviewAgentTraceCycle,
   ReviewAgentTraceStep,
   ReviewFinding,
+  ReviewSuggestion,
   ReviewPacket,
   ReviewSeverity,
 } from "../domain/entities.ts";
@@ -772,6 +773,7 @@ export class ReviewAgentService {
       finding,
       evidence,
       suggestedFix: args.suggestedFix ? String(args.suggestedFix) : undefined,
+      suggestion: parseSuggestion(args.suggestion),
       confidence: Number.isFinite(confidenceRaw) ? Math.min(1, Math.max(0, confidenceRaw)) : 0.6,
     };
   }
@@ -955,6 +957,21 @@ function clamp(value: string, max: number): string {
   return `${value.slice(0, max)}\n…[truncated ${value.length - max} chars]`;
 }
 
+function parseSuggestion(raw: unknown): ReviewSuggestion | undefined {
+  if (!raw || typeof raw !== "object") {
+    return undefined;
+  }
+  const candidate = raw as Record<string, unknown>;
+  const startLine = Math.floor(Number(candidate.startLine));
+  const endLineRaw = Math.floor(Number(candidate.endLine));
+  const code = typeof candidate.code === "string" ? candidate.code : "";
+  if (!Number.isFinite(startLine) || startLine < 1 || code.length === 0) {
+    return undefined;
+  }
+  const endLine = Number.isFinite(endLineRaw) && endLineRaw >= startLine ? endLineRaw : startLine;
+  return { startLine, endLine, code };
+}
+
 function normalizeSeverity(raw: string): ReviewSeverity {
   const value = raw.trim().toLowerCase();
   if (value === "blocker" || value === "high" || value === "medium" || value === "low" || value === "note") {
@@ -1006,7 +1023,11 @@ const REVIEW_SYSTEM_PROMPT =
   `- listNeighbors {} — list dependency-wetted neighbor files.\n` +
   `- readNeighbor {path} — read a neighbor/impact file on demand (read-only).\n` +
   `- readTorus {} — DAG metrics, risk surfaces, hottest program-shape samples.\n` +
-  `- recordFinding {severity, gate, filePath, line?, title, finding, evidence[], suggestedFix?, confidence} ` +
+  `- recordFinding {severity, gate, filePath, line?, title, finding, evidence[], suggestedFix?, ` +
+  `suggestion?, confidence} — suggestion is an OPTIONAL committable code fix: ` +
+  `{startLine, endLine, code} where startLine/endLine are the 1-indexed inclusive ` +
+  `lines in filePath to replace and code is the exact replacement text. Only include ` +
+  `suggestion when you are confident of the precise replacement; omit it otherwise. ` +
   `   — severity is blocker|high|medium|low|note; gate is Target|Constrain|Sanitize|Review|Test|Confirm.\n` +
   `- complete {verdict, summary} — finish the review.\n\n` +
   `Each turn respond with STRICT JSON only:\n` +

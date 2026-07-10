@@ -207,6 +207,38 @@ router.post("/api/review/runs/:runId/pr-comment", async (ctx) => {
   ctx.response.body = { posted: true, url: result.htmlUrl };
 });
 
+// Human-initiated: post one finding's committable suggestion to the PR as a
+// GitHub ```suggestion block. Never batched, never automatic.
+router.post("/api/review/runs/:runId/findings/:findingId/suggestion", async (ctx) => {
+  const runId = ctx.params.runId || "";
+  const findingId = ctx.params.findingId || "";
+  const record = deps.reviewService.getReviewAgentRun(runId);
+  if (!record) {
+    ctx.response.status = 404;
+    ctx.response.body = { message: "review_run_not_found" };
+    return;
+  }
+  const finding = record.findings.find((item) => item.id === findingId);
+  if (!finding || !finding.suggestion) {
+    ctx.response.status = 404;
+    ctx.response.body = { message: "suggestion_not_found" };
+    return;
+  }
+  const result = await deps.githubService.postPullRequestSuggestion(
+    record.repositoryId,
+    record.pullRequestId,
+    {
+      path: finding.filePath,
+      startLine: finding.suggestion.startLine,
+      endLine: finding.suggestion.endLine,
+      code: finding.suggestion.code,
+      note: `**${finding.title}** — ${finding.finding}`,
+    },
+  );
+  ctx.response.status = 201;
+  ctx.response.body = { posted: true, url: result.htmlUrl };
+});
+
 router.post("/api/review/runs/:runId/cancel", (ctx) => {
   const runId = ctx.params.runId || "";
   ctx.response.body = {

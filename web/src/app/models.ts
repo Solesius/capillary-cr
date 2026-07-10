@@ -122,6 +122,13 @@ export interface ReviewFinding {
   confidence: number;
   evidence?: string[];
   suggestedFix?: string;
+  suggestion?: ReviewSuggestion;
+}
+
+export interface ReviewSuggestion {
+  startLine: number;
+  endLine: number;
+  code: string;
 }
 
 export interface ReviewChecklistItem {

@@ -60,6 +60,29 @@ import { CapillaryStore } from "../state/capillary.store";
             @if (finding.evidence?.length) {
               <p class="cap-muted" style="margin-top: 8px;">Evidence: {{ finding.evidence[0] }}</p>
             }
+            @if (finding.suggestion; as sug) {
+              <div class="cap-suggestion">
+                <div class="cap-suggestion-head">
+                  <span class="cap-suggestion-tag">Suggested change</span>
+                  <span class="cap-muted">{{ finding.filePath }}:{{ sug.startLine }}{{ sug.endLine > sug.startLine ? '–' + sug.endLine : '' }}</span>
+                </div>
+                <pre class="cap-suggestion-code"><code>{{ sug.code }}</code></pre>
+                <div class="cap-suggestion-actions">
+                  @if (store.suggestionState()[finding.id] === 'posted') {
+                    <a class="cap-button cap-button-ghost cap-button-sm" [href]="store.suggestionUrl()[finding.id]" target="_blank" rel="noopener">Posted ✓ — view on GitHub</a>
+                  } @else {
+                    <button
+                      class="cap-button cap-button-sm"
+                      type="button"
+                      [class.busy]="store.suggestionState()[finding.id] === 'posting'"
+                      [disabled]="store.suggestionState()[finding.id] === 'posting'"
+                      (click)="postSuggestion(finding.id)">
+                      {{ store.suggestionState()[finding.id] === 'failed' ? 'Retry — post suggestion' : 'Post suggested change to PR' }}
+                    </button>
+                  }
+                </div>
+              </div>
+            }
           </article>
         }
       </div>
@@ -71,6 +94,10 @@ export class ReviewFindingsPanelComponent {
   readonly store = inject(CapillaryStore);
   readonly severityFilter = signal<"all" | "blocker" | "high" | "medium" | "low" | "note">("all");
   readonly sortMode = signal<"severity" | "confidence">("severity");
+
+  postSuggestion(findingId: string): void {
+    void this.store.postFindingSuggestion(findingId);
+  }
 
   readonly filteredFindings = computed(() => {
     const filter = this.severityFilter();
