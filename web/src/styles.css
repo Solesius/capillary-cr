@@ -1110,6 +1110,46 @@ html[data-theme="dark"] .cap-select {
   padding-right: 4px;
 }
 
+/* Committable code suggestion card under a finding. */
+.cap-suggestion {
+  margin-top: 12px;
+  border: 1px solid var(--cap-border);
+  border-radius: var(--cap-radius-sm, 12px);
+  overflow: hidden;
+  background: var(--cap-surface-raised);
+}
+.cap-suggestion-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--cap-border);
+  font-size: 0.72rem;
+}
+.cap-suggestion-tag {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--cap-ok);
+}
+.cap-suggestion-code {
+  margin: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  background: rgba(15, 118, 110, 0.06);
+  font-family: var(--cap-mono, monospace);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  white-space: pre;
+}
+.cap-suggestion-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 12px;
+  border-top: 1px solid var(--cap-border);
+}
+
 .cap-check-item {
   display: flex;
   gap: 10px;

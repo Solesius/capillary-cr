@@ -40,6 +40,7 @@ interface GitHubPullRequestListDto {
   };
   head: {
     ref: string;
+    sha?: string;
   };
   base: {
     ref: string;
@@ -378,6 +379,7 @@ export class GitHubOakService {
       title: pull.title,
       author: pull.user.login,
       sourceBranch: pull.head.ref,
+      headSha: pull.head.sha,
       targetBranch: pull.base.ref,
       state: pull.merged_at ? "merged" : pull.draft ? "draft" : (pull.state as PullRequest["state"]),
       htmlUrl: pull.html_url,
@@ -418,6 +420,7 @@ export class GitHubOakService {
       title: pull.title,
       author: pull.user.login,
       sourceBranch: pull.head.ref,
+      headSha: pull.head.sha,
       targetBranch: pull.base.ref,
       state: pull.draft ? "draft" : (pull.state as PullRequest["state"]),
       htmlUrl: pull.html_url,
@@ -562,6 +565,73 @@ export class GitHubOakService {
 
     if (!response.ok) {
       throw new AppError("github_comment_failed", response.status, "github_comment_failed");
+    }
+
+    const dto = await response.json() as { html_url?: string };
+    return { htmlUrl: String(dto.html_url || pull.htmlUrl) };
+  }
+
+  /**
+   * Post a committable GitHub suggested change on specific lines of a file in
+   * the PR head commit. Human-initiated (one finding at a time). The body is
+   * a ```suggestion block GitHub renders with a "Commit suggestion" button.
+   */
+  async postPullRequestSuggestion(
+    repositoryId: string,
+    pullRequestId: string,
+    input: {
+      path: string;
+      startLine: number;
+      endLine: number;
+      code: string;
+      note: string;
+    },
+  ): Promise<{ htmlUrl: string }> {
+    this.validateRepositoryId(repositoryId);
+    this.validatePullRequestId(pullRequestId);
+    enforceDefensiveInput(input.path, "suggestion_path");
+    const token = this.requireGithubToken();
+
+    const pull = await this.getPullRequest(repositoryId, pullRequestId);
+    const repo = await this.findRepositoryById(repositoryId, token);
+    if (!pull.headSha) {
+      throw new AppError("github_pull_head_unknown", 409, "github_pull_head_unknown");
+    }
+
+    const startLine = Math.max(1, Math.floor(input.startLine));
+    const endLine = Math.max(startLine, Math.floor(input.endLine));
+    const body = `${input.note.trim()}\n\n\`\`\`suggestion\n${input.code.replace(/\n$/, "")}\n\`\`\`` +
+      `\n\n<sub>Suggested by [Capillary](https://github.com/Solesius/capillary-cr)</sub>`;
+
+    // Multi-line suggestions carry start_line; single-line ones omit it.
+    const payload: Record<string, unknown> = {
+      commit_id: pull.headSha,
+      path: input.path,
+      side: "RIGHT",
+      line: endLine,
+      body,
+    };
+    if (endLine > startLine) {
+      payload.start_line = startLine;
+      payload.start_side = "RIGHT";
+    }
+
+    const response = await this.fetcher(
+      `https://api.github.com/repos/${repo.full_name}/pulls/${pull.number}/comments`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: "application/vnd.github+json",
+          "content-type": "application/json",
+          "x-github-api-version": "2022-11-28",
+        },
+        body: JSON.stringify(payload),
+      },
+    );
+
+    if (!response.ok) {
+      throw new AppError("github_suggestion_failed", response.status, "github_suggestion_failed");
     }
 
     const dto = await response.json() as { html_url?: string };

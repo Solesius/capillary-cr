@@ -1135,6 +1135,27 @@ export class CapillaryStore {
     }
   }
 
+  // Per-finding suggestion posting: state keyed by finding id so each card
+  // tracks its own idle/posting/posted/failed independently.
+  readonly suggestionState = signal<Record<string, "idle" | "posting" | "posted" | "failed">>({});
+  readonly suggestionUrl = signal<Record<string, string>>({});
+
+  async postFindingSuggestion(findingId: string): Promise<void> {
+    const runId = this.selectedReviewRunId() ?? this.reviewRun()?.id;
+    if (!runId || this.suggestionState()[findingId] === "posting") {
+      return;
+    }
+    this.suggestionState.update((map) => ({ ...map, [findingId]: "posting" }));
+    try {
+      const result = await this.api.postFindingSuggestion(runId, findingId);
+      this.suggestionUrl.update((map) => ({ ...map, [findingId]: result.url }));
+      this.suggestionState.update((map) => ({ ...map, [findingId]: "posted" }));
+    } catch (error) {
+      this.suggestionState.update((map) => ({ ...map, [findingId]: "failed" }));
+      this.lastError.set(`Posting suggestion failed: ${toMessage(error)}`);
+    }
+  }
+
   async cancelReview(): Promise<void> {
     this.stopReviewStream();
     const runId = this.reviewRun()?.id;
