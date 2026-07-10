@@ -54,6 +54,13 @@ const DEFAULT_MAX_CYCLES = 12;
 const READ_TOOLS = new Set(["readDiff", "readFile", "readFileSlice", "readNeighbor"]);
 const MAX_TOOL_OUTPUT_CHARS = 6_000;
 const MAX_FILE_CHARS = 20_000;
+// Per-read content the planner sees next turn, and how many recent reads to
+// carry at full length. Sized so the model reasons over real diffs/files
+// instead of stubs, while bounding context growth.
+const MAX_READ_FEEDBACK_CHARS = 7_000;
+const MAX_RECENT_RESULTS = 4;
+// After this many reads of the same path, tell the planner to stop and decide.
+const REREAD_LIMIT = 2;
 
 const SEVERITY_ORDER: Record<ReviewSeverity, number> = {
   blocker: 0,
@@ -472,6 +479,12 @@ export class ReviewAgentService {
     const budget = Math.max(1, Math.min(HARD_CYCLE_CAP, input.maxCycles ?? scaledCycles));
     const fileCache = new Map<string, string>();
     const observations: string[] = [];
+    // Full (generously-capped) content of the most recent read results — this
+    // is the channel the planner actually reasons over, so a diff the agent
+    // read is visible next turn instead of a 400-char stub.
+    const recentResults: { cycle: number; tool: string; path: string; output: string }[] = [];
+    // How many times each path has been read — used to stop re-read loops.
+    const readCounts = new Map<string, number>();
     const coveredGates = new Set<TcsrtcGate>();
     // Hot paths the agent is obliged to examine before Confirm is legitimate.
     const hotPaths = [...new Set(capture.riskSurfaces.map((surface) => surface.path))].slice(0, 10);
@@ -489,13 +502,17 @@ export class ReviewAgentService {
       }
 
       const unexamined = hotPaths.filter((path) => !examinedPaths.has(path));
+      const overRead = [...readCounts.entries()]
+        .filter(([, count]) => count > REREAD_LIMIT)
+        .map(([path]) => path);
       const userMessage = buildPlannerUserMessage(
         capture,
         observations,
+        recentResults,
         recordedFindings,
         cycle,
         budget,
-        { hot: hotPaths.length, examined: hotPaths.length - unexamined.length, unexamined },
+        { hot: hotPaths.length, examined: hotPaths.length - unexamined.length, unexamined, overRead },
       );
       const systemPrompt = input.suggest
         ? `${REVIEW_SYSTEM_PROMPT}\n\n${SUGGESTION_DIRECTIVE}`
@@ -554,9 +571,11 @@ export class ReviewAgentService {
           : {};
         const stepStart = Date.now();
 
+        const argPath = typeof args.path === "string" ? args.path.trim() : "";
         const result = await this.executeTool(input, capture, fileCache, recordedFindings, tool, args);
-        if (result.ok && typeof args.path === "string" && READ_TOOLS.has(tool)) {
-          examinedPaths.add(args.path.trim());
+        if (result.ok && argPath && READ_TOOLS.has(tool)) {
+          examinedPaths.add(argPath);
+          readCounts.set(argPath, (readCounts.get(argPath) ?? 0) + 1);
         }
         if (result.findingTitle) {
           cycleFindings.push(result.findingTitle);
@@ -567,7 +586,15 @@ export class ReviewAgentService {
         }
 
         const output = clamp(result.output, MAX_TOOL_OUTPUT_CHARS);
-        observations.push(`cycle ${cycle} ${tool}: ${clamp(result.output, 400)}`);
+        // Keep full read content available to the planner next turn (the real
+        // reasoning channel); a short older-history line stays in observations.
+        if (READ_TOOLS.has(tool) && result.ok) {
+          recentResults.push({ cycle, tool, path: argPath, output: clamp(result.output, MAX_READ_FEEDBACK_CHARS) });
+          while (recentResults.length > MAX_RECENT_RESULTS) {
+            recentResults.shift();
+          }
+        }
+        observations.push(`cycle ${cycle} ${tool}${argPath ? ` ${argPath}` : ""}: ${clamp(result.output, 200)}`);
         steps.push({
           index: stepIndex,
           tool,
@@ -1023,12 +1050,25 @@ const REVIEW_SYSTEM_PROMPT =
   `2. Constrain — bound the review to the changed files; expand to a neighbor ONLY when a ` +
   `   contract/state/runtime dependency forces it (token-efficient: do not read the whole repo).\n` +
   `3. Sanitize — check inputs at system boundaries, auth, persistence, and untrusted data paths.\n` +
-  `4. Review — Plan review, Diff review, Risk review, and Author-validation notes.\n` +
+  `4. Review — read each changed hunk and actively hunt for the defect classes below.\n` +
   `5. Test — confirm tests cover the change; flag missing/weak coverage as findings.\n` +
   `6. Confirm — reach a verdict (approve | request_changes | comment) with justification.\n\n` +
-  `Large-PR risk triggers (raise findings when present): many files, customer-visible flow, ` +
-  `shared service/state change, expensive endpoint, routing/load/edit/detail change, no author ` +
-  `validation. Agent speed does not remove developer responsibility — be precise and evidence-backed.\n\n` +
+  `Hunt for these defect classes in every changed hunk — for each one you spot, call recordFinding:\n` +
+  `- Correctness: off-by-one, wrong operator/comparison, inverted condition, wrong variable, ` +
+  `missing return, unhandled branch, promise not awaited.\n` +
+  `- Null/undefined: unchecked access, missing optional-chaining, assuming a value is present.\n` +
+  `- Errors: swallowed exceptions, unhandled rejection, error path that leaves inconsistent state, ` +
+  `missing cleanup.\n` +
+  `- Boundaries/security: unvalidated input at a boundary, injection, path traversal, authz gaps, ` +
+  `secrets in code/logs.\n` +
+  `- Resources/perf: leaks (handles, listeners, subscriptions), unbounded allocation, N+1, work in ` +
+  `a hot path, blocking calls.\n` +
+  `- Concurrency/state: races, unsynchronized shared state, reachable illegal states, stale cache.\n` +
+  `- Contracts/API: changed signature/return/shape that breaks callers, type mismatch, removed field ` +
+  `a consumer relies on.\n` +
+  `- Tests: new logic with no test, a changed branch left uncovered, an assertion that can't fail.\n` +
+  `A defect need not be a blocker to be worth recording — use note/low for minor issues, ` +
+  `medium/high/blocker for real risk. Be specific, cite the line, back it with evidence.\n\n` +
   `You work by calling tools. Available tools:\n` +
   `- listChangedFiles {} — list changed files in scope.\n` +
   `- readDiff {path} — read the unified diff for a changed file.\n` +
@@ -1050,14 +1090,19 @@ const REVIEW_SYSTEM_PROMPT =
   `When you have enough evidence, include a complete tool call (or set "done":true with "verdict" and ` +
   `"summary"). Record every defect via recordFinding before completing. Do not invent file paths; only ` +
   `reference paths returned by listChangedFiles/listNeighbors. Keep tool calls focused — a few per turn.\n\n` +
-  `Coverage discipline (non-negotiable):\n` +
-  `- The Confirm gate is illegitimate while hot paths remain unexamined. Read the diff of every ` +
-  `hot path (your context lists coverage each cycle) or record a finding explaining the specific ` +
-  `risk you are waiving and why.\n` +
+  `Coverage discipline:\n` +
+  `- Read the diff of every changed file and every hot path once, and scrutinize each hunk against ` +
+  `the defect classes above — do not skim. Once you have read a file its full content is provided ` +
+  `back each turn; reason over it, do NOT read the same file again.\n` +
+  `- Before you Confirm, you must have examined every changed file's diff. A verdict of approve on a ` +
+  `PR whose diffs you did not read is invalid.\n` +
+  `- Reaching Confirm does not require finding defects — but it does require having genuinely looked. ` +
+  `If you examined the changes hunk by hunk and no real defect exists, that is a valid clean review: ` +
+  `complete with approve and name the files that most warrant a human read.\n` +
   `- Semantic siblings (files coupled by meaning without an import edge) are prime drift sites: ` +
   `when one side of a pair changed, check the other side still agrees with it.\n` +
-  `- Scale effort with the PR: a large review that ends quickly with zero findings is a failed ` +
-  `review, not a clean one. Bland approval without per-file evidence is the worst outcome.`;
+  `- Do not stall by re-reading; but do not rush to a clean verdict either — surface the note/low ` +
+  `issues too, not only blockers.`;
 
 const REVIEW_REPORT_PROMPT =
   `You write the final Capillary code-review report as GitHub-flavored Markdown. Use exactly these ` +
@@ -1089,12 +1134,12 @@ const REVIEW_REPORT_PROMPT =
 function buildPlannerUserMessage(
   capture: ReviewCapture,
   observations: readonly string[],
+  recentResults: readonly { cycle: number; tool: string; path: string; output: string }[],
   recordedFindings: readonly ReviewFinding[],
   cycle: number,
   budget: number,
-  coverage: { hot: number; examined: number; unexamined: string[] },
+  coverage: { hot: number; examined: number; unexamined: string[]; overRead: string[] },
 ): string {
-  const recentObservations = observations.slice(-12);
   const lines: string[] = [];
   lines.push(`Pull request: ${capture.title}`);
   lines.push(`Summary: ${capture.summary}`);
@@ -1106,21 +1151,39 @@ function buildPlannerUserMessage(
         (remaining ? ` — unexamined: ${remaining}` : " — all examined."),
     );
   }
+  if (coverage.overRead.length > 0) {
+    lines.push(
+      `Already read enough — do NOT read again: ${coverage.overRead.join(", ")}. ` +
+        `Record a finding on it or move on.`,
+    );
+  }
   lines.push("");
   lines.push("Changed files in scope:");
   lines.push(listFiles(capture.changedFiles));
   lines.push("");
   lines.push("Torus snapshot:");
   lines.push(describeTorus(capture));
-  if (recentObservations.length > 0) {
+  // Full content of recent reads — reason over THIS, not the short history.
+  if (recentResults.length > 0) {
     lines.push("");
-    lines.push("Recent tool observations:");
-    lines.push(recentObservations.join("\n"));
+    lines.push("Recent tool results (full content):");
+    for (const result of recentResults) {
+      lines.push(`--- ${result.tool} ${result.path} (cycle ${result.cycle}) ---`);
+      lines.push(result.output);
+    }
+  }
+  const olderObservations = observations.slice(-16, -4);
+  if (olderObservations.length > 0) {
+    lines.push("");
+    lines.push("Earlier tool history (summaries):");
+    lines.push(olderObservations.join("\n"));
   }
   lines.push("");
   lines.push(
-    "Decide the next TCSRTC step. Read diffs/files/slices/neighbors as needed, record any defects, " +
-      "then complete when the review is operationally sound. Respond with strict JSON only.",
+    "Decide the next TCSRTC step. The full content above is what you have already read — reason " +
+      "over it directly; do not re-read a file you can already see. Record any defect via " +
+      "recordFinding, then complete. If you have examined the hot paths and no line-level defects " +
+      "exist, that is a valid clean result: complete with approve or comment. Respond with strict JSON only.",
   );
   return lines.join("\n");
 }
