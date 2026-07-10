@@ -1617,29 +1617,38 @@ textarea {
   border-radius: 2px;
 }
 
-/* Live token meter — tabular mono numerics, instrument-panel feel. */
+/* Live token meter — input / output / total, delineated, mono tabular. */
 .cap-token-meter {
   display: inline-flex;
-  align-items: baseline;
-  gap: 3px;
-  padding: 3px 8px;
+  align-items: stretch;
   border: 1px solid var(--cap-border);
   border-radius: 3px;
   background: var(--cap-surface-raised);
   font-family: var(--cap-mono);
+  overflow: hidden;
 }
-.cap-token-value {
-  font-size: 0.78rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--cap-text);
+.cap-token-seg {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 3px 8px;
+  border-right: 1px solid var(--cap-border-soft);
 }
-.cap-token-unit {
-  font-size: 0.6rem;
+.cap-token-seg:last-child { border-right: 0; }
+.cap-token-total { background: rgba(var(--cap-accent-rgb), 0.08); }
+.cap-token-label {
+  font-size: 0.56rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--cap-muted);
 }
+.cap-token-value {
+  font-size: 0.76rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--cap-text);
+}
+.cap-token-total .cap-token-value { color: var(--cap-accent); }
 
 /* Status chip — color-coded by run state instead of a raw enum shout. */
 .cap-chip[data-state="reviewing"],

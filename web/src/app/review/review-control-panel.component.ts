@@ -102,9 +102,10 @@ import { MarkdownPipe } from "../shell/markdown.pipe";
             <strong>Live Review Output</strong>
             <div class="cap-row" style="gap: 10px;">
               @if (store.reviewTokensUsed() > 0) {
-                <span class="cap-token-meter" title="Model tokens consumed by this run">
-                  <span class="cap-token-value">{{ store.reviewTokensUsed() | number }}</span>
-                  <span class="cap-token-unit">tok</span>
+                <span class="cap-token-meter" title="Model tokens — input / output / total for this run">
+                  <span class="cap-token-seg"><span class="cap-token-label">in</span><span class="cap-token-value">{{ store.reviewInputTokens() | number }}</span></span>
+                  <span class="cap-token-seg"><span class="cap-token-label">out</span><span class="cap-token-value">{{ store.reviewOutputTokens() | number }}</span></span>
+                  <span class="cap-token-seg cap-token-total"><span class="cap-token-label">total</span><span class="cap-token-value">{{ store.reviewTokensUsed() | number }}</span></span>
                 </span>
               }
               <span class="cap-live-chip" [class.active]="agentWorking()">

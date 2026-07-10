@@ -114,8 +114,10 @@ export class CapillaryStore {
   readonly prCommentUrl = signal<string | null>(null);
   readonly reviewTraceEnabled = signal(false);
   readonly reviewSuggestEnabled = signal(false);
-  /** Cumulative model tokens for the active run, streamed live. */
+  /** Cumulative model tokens for the active run (input + output). */
   readonly reviewTokensUsed = signal(0);
+  readonly reviewInputTokens = signal(0);
+  readonly reviewOutputTokens = signal(0);
   /** Current agent cycle number, streamed live. */
   readonly reviewCycle = signal(0);
   toggleReviewSuggest(on: boolean): void {
@@ -942,6 +944,8 @@ export class CapillaryStore {
     this.progress.set(4);
     this.lastError.set(null);
     this.reviewTokensUsed.set(0);
+    this.reviewInputTokens.set(0);
+    this.reviewOutputTokens.set(0);
     this.reviewCycle.set(0);
     this.reviewEvents.set(["phase:queued"]);
     this.findings.set([]);
@@ -1078,6 +1082,8 @@ export class CapillaryStore {
         this.reviewCycle.set(event.cycle);
         if (event.tokensUsed > 0) {
           this.reviewTokensUsed.set(event.tokensUsed);
+          this.reviewInputTokens.set(event.inputTokens);
+          this.reviewOutputTokens.set(event.outputTokens);
         }
         this.reviewEvents.update((events) =>
           events.concat(`gate:${event.gate}:cycle=${event.cycle}:tools=${event.toolCount}:findings=${event.findingCount}`)

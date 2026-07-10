@@ -508,28 +508,20 @@ import { MarkdownPipe } from "./markdown.pipe";
 
                   <div class="cap-list">
                     <label class="cap-muted" for="retvModel">Model</label>
-                    @if (setupModelChoices().length > 0) {
-                      <select
-                        id="retvModel"
-                        class="cap-select"
-                        [value]="setupModelInput()"
-                        (change)="setupModelInput.set($any($event.target).value)">
-                        @for (m of setupModelChoices(); track m) {
-                          <option [value]="m">{{ m }}</option>
-                        }
-                        @if (!setupModelChoices().includes(setupModelInput())) {
-                          <option [value]="setupModelInput()">{{ setupModelInput() }} (custom)</option>
-                        }
-                      </select>
-                    } @else {
-                      <input
-                        id="retvModel"
-                        class="cap-input"
-                        [value]="setupModelInput()"
-                        (input)="setupModelInput.set($any($event.target).value)"
-                        placeholder="model id" />
-                    }
-                    <p class="cap-muted">Model is switchable for every provider; the endpoint stays pinned unless local.</p>
+                    <input
+                      id="retvModel"
+                      class="cap-input"
+                      list="retvModelChoices"
+                      autocomplete="off"
+                      [value]="setupModelInput()"
+                      (input)="setupModelInput.set($any($event.target).value)"
+                      placeholder="type any model id" />
+                    <datalist id="retvModelChoices">
+                      @for (m of setupModelChoices(); track m) {
+                        <option [value]="m"></option>
+                      }
+                    </datalist>
+                    <p class="cap-muted">Type any model id, or pick a suggestion. The endpoint stays pinned unless local.</p>
                   </div>
 
                   <p class="cap-muted">
