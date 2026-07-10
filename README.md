@@ -8,6 +8,9 @@
 
 Capillary is a code review system built around that premise. It takes a pull request, builds a dependency graph from the diff, projects changed and affected nodes onto a torus, and runs an agentic review through six TCSRTC gates — Target → Constrain → Sanitize → Review → Test → Confirm — streaming its reasoning and findings in real time. A second agent drives a real browser over CDP to run natural-language functional tests against your running app.
 
+<img width="1401" height="1074" alt="image" src="https://github.com/user-attachments/assets/c26fac88-2135-41bd-8fd2-8269d4c1799a" />
+
+
 ---
 
 ## Quick start — Docker
