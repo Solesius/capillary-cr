@@ -110,6 +110,10 @@ export class ApiClientService {
     return this.post(`/api/review/runs/${runId}/findings/${findingId}/suggestion`, {});
   }
 
+  async postFindingComment(runId: string, findingId: string): Promise<{ posted: boolean; url: string }> {
+    return this.post(`/api/review/runs/${runId}/findings/${findingId}/comment`, {});
+  }
+
   async createReviewSession(request: {
     pullRequestId: string;
     repositoryId: string;

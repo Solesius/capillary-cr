@@ -35,3 +35,21 @@ export function enforceDefensiveInput(value: string, fieldName: string): void {
   rejectControlCharacters(value, fieldName);
   rejectOversizedInput(value, fieldName);
 }
+
+/**
+ * Validate free-text bodies (markdown comments, suggestion notes). Unlike
+ * enforceDefensiveInput this permits the whitespace that real text contains —
+ * tab, newline, carriage return — and only rejects genuinely dangerous
+ * control characters. Sized for GitHub's comment limit.
+ */
+export function enforceTextBody(value: string, fieldName: string, maxLength = 65_536): void {
+  rejectEmptyInput(value, fieldName);
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    const isAllowedWhitespace = code === 9 || code === 10 || code === 13;
+    if ((code < 32 && !isAllowedWhitespace) || code === 127) {
+      throw new AppError(`${fieldName} contains control characters`, 400, `invalid_${fieldName}`);
+    }
+  }
+  rejectOversizedInput(value, fieldName, maxLength);
+}
