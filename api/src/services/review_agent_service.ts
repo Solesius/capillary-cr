@@ -1034,14 +1034,22 @@ const REVIEW_REPORT_PROMPT =
   `file path (and line when known), the issue, and a concrete suggested fix. Under TCSRTC Gates, give ` +
   `one line per gate (Target, Constrain, Sanitize, Review, Test, Confirm). Be concise and operational.\n\n` +
   `Hard rules:\n` +
-  `- Every statement must anchor to a file path a reviewer can open. Never mention internal node ` +
-  `ids, curvature, torsion, saturation, torus variance, or risk-gradient numbers — translate graph ` +
-  `signal into plain language about the named files ("widely depended on", "no test coverage", ` +
-  `"complex control flow").\n` +
-  `- When the findings set is empty, keep the whole report under ~20 lines: say plainly that no ` +
-  `line-level defects were surfaced, list the specific files that most deserve a manual read and ` +
-  `why (one line each), and name any test-coverage gap by file. Do not pad an empty review with ` +
-  `telemetry analysis.`;
+  `- Write in prose. A section is sentences that happen to name files, NOT a list of file paths ` +
+  `followed by a colon. NEVER open a sentence with a comma-joined list of paths (e.g. ` +
+  `"a.ts, b.ts, c.ts: this does X" is banned) — say what changed and why it matters, citing paths ` +
+  `inline with backticks where relevant.\n` +
+  `- Reference each file by its shortest unambiguous name (basename, or dir/basename only if two ` +
+  `share a basename). Never repeat a long path more than once per section. Never cite a symbol ` +
+  `anchor like \`file.ts#SomeType\` — anchor to files only.\n` +
+  `- Never mention internal node ids, curvature, torsion, saturation, torus variance, or ` +
+  `risk-gradient numbers — translate graph signal into plain language ("widely depended on", ` +
+  `"no test coverage", "complex control flow").\n` +
+  `- Target & Scope is ONE or TWO sentences describing what the PR does and its blast radius — ` +
+  `not a file inventory. Risk Surfaces names at most the 3-4 files that most deserve a manual ` +
+  `read, one short sentence each on why.\n` +
+  `- When the findings set is empty, keep the whole report under ~15 lines: state plainly that no ` +
+  `line-level defects were surfaced, name the 2-3 files that most deserve a manual read and why, ` +
+  `and flag any test-coverage gap. Do not pad an empty review.`;
 
 function buildPlannerUserMessage(
   capture: ReviewCapture,
