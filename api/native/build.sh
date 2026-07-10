@@ -73,7 +73,37 @@ fi
 CXX="${CXX:-g++}"
 OUT="${HERE}/libceler_ffi.so"
 
-# Only the sqlite + core dispatch sources are needed; rocksdb/qpdf/s3 are off.
+# Backend policy: RocksDB (LSM, high write throughput) is the default. It is what
+# every container build uses — the Docker image is Linux regardless of host, so a
+# Mac-ARM or Windows Docker host still ships RocksDB and is never on the slow path.
+#
+# The only case that can fall back to SQLite is a *bare-metal* build on macOS,
+# where RocksDB has no default system location. There we still prefer RocksDB if
+# Homebrew has it (`brew install rocksdb`) so native Mac dev isn't stuck slow, and
+# only drop to SQLite when it is genuinely absent. Override with
+# CELER_BACKEND=sqlite|rocksdb.
+UNAME_S="$(uname -s)"
+CELER_BACKEND="${CELER_BACKEND:-}"
+BREW_PREFIX=""
+if [[ -z "${CELER_BACKEND}" ]]; then
+  if [[ "${UNAME_S}" == "Darwin" ]]; then
+    if command -v brew >/dev/null 2>&1 && brew --prefix rocksdb >/dev/null 2>&1; then
+      CELER_BACKEND="rocksdb"
+    else
+      CELER_BACKEND="sqlite"
+      echo "macOS without Homebrew rocksdb — falling back to SQLite backend." >&2
+      echo "  For the fast path: brew install rocksdb" >&2
+    fi
+  else
+    CELER_BACKEND="rocksdb"
+  fi
+fi
+# Homebrew installs headers/libs outside the default search path; add them so
+# -lrocksdb / -lsqlite3 resolve on macOS.
+if [[ "${UNAME_S}" == "Darwin" ]] && command -v brew >/dev/null 2>&1; then
+  BREW_PREFIX="$(brew --prefix)"
+fi
+
 SRCS=(
   "${HERE}/celer_ffi.cpp"
   "${CELER}/src/api/global.cpp"
@@ -81,14 +111,33 @@ SRCS=(
   "${CELER}/src/core/dispatch.cpp"
   "${CELER}/src/core/tree_builder.cpp"
 )
+DEFINES=(-DCELER_FORCE_NO_QPDF=1)
+LIBS=(-lsqlite3)
+
+if [[ "${CELER_BACKEND}" == "rocksdb" ]]; then
+  echo "Backend: rocksdb"
+  SRCS+=("${CELER}/src/backend/rocksdb.cpp")
+  DEFINES+=(-DCELER_HAS_ROCKSDB=1)
+  LIBS+=(-lrocksdb)
+else
+  echo "Backend: sqlite"
+  DEFINES+=(-DCELER_FORCE_NO_ROCKSDB=1)
+fi
+
+INCLUDES=(-I "${CELER}/include")
+LDPATHS=()
+if [[ -n "${BREW_PREFIX}" ]]; then
+  INCLUDES+=(-I "${BREW_PREFIX}/include")
+  LDPATHS+=(-L "${BREW_PREFIX}/lib")
+fi
 
 echo "Building ${OUT} ..."
 "${CXX}" -std=c++23 -O2 -fPIC -shared \
-  -DCELER_FORCE_NO_ROCKSDB=1 \
-  -DCELER_FORCE_NO_QPDF=1 \
-  -I "${CELER}/include" \
+  "${DEFINES[@]}" \
+  "${INCLUDES[@]}" \
   "${SRCS[@]}" \
-  -lsqlite3 \
+  "${LDPATHS[@]}" \
+  "${LIBS[@]}" \
   -o "${OUT}"
 
-echo "✓ Built ${OUT}"
+echo "✓ Built ${OUT} (backend=${CELER_BACKEND})"

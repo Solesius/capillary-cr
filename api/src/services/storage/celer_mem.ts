@@ -56,7 +56,7 @@ export interface CelerTableDescriptor {
 
 export interface CelerStoreOptions {
   /** Backend kind. Only "sqlite" is wired through the shim today. */
-  backend?: "sqlite";
+  backend?: "sqlite" | "rocksdb";
   /** Directory where per-scope SQLite files are created. */
   path: string;
   /** Scope/table pairs to provision on open. */
