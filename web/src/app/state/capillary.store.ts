@@ -114,6 +114,12 @@ export class CapillaryStore {
   readonly prCommentUrl = signal<string | null>(null);
   readonly reviewTraceEnabled = signal(false);
   readonly reviewSuggestEnabled = signal(false);
+  /** Cumulative model tokens for the active run (input + output). */
+  readonly reviewTokensUsed = signal(0);
+  readonly reviewInputTokens = signal(0);
+  readonly reviewOutputTokens = signal(0);
+  /** Current agent cycle number, streamed live. */
+  readonly reviewCycle = signal(0);
   toggleReviewSuggest(on: boolean): void {
     this.reviewSuggestEnabled.set(on);
   }
@@ -937,6 +943,10 @@ export class CapillaryStore {
     this.status.set("queued");
     this.progress.set(4);
     this.lastError.set(null);
+    this.reviewTokensUsed.set(0);
+    this.reviewInputTokens.set(0);
+    this.reviewOutputTokens.set(0);
+    this.reviewCycle.set(0);
     this.reviewEvents.set(["phase:queued"]);
     this.findings.set([]);
     this.checklist.set([]);
@@ -1069,6 +1079,12 @@ export class CapillaryStore {
           ? Math.round((event.gatesCovered / event.gatesTotal) * 100)
           : 0;
         this.progress.set(reviewProgressFromPhase("tcsrct", percent));
+        this.reviewCycle.set(event.cycle);
+        if (event.tokensUsed > 0) {
+          this.reviewTokensUsed.set(event.tokensUsed);
+          this.reviewInputTokens.set(event.inputTokens);
+          this.reviewOutputTokens.set(event.outputTokens);
+        }
         this.reviewEvents.update((events) =>
           events.concat(`gate:${event.gate}:cycle=${event.cycle}:tools=${event.toolCount}:findings=${event.findingCount}`)
         );
@@ -1158,6 +1174,26 @@ export class CapillaryStore {
     } catch (error) {
       this.suggestionState.update((map) => ({ ...map, [findingId]: "failed" }));
       this.lastError.set(`Posting suggestion failed: ${toMessage(error)}`);
+    }
+  }
+
+  // Per-finding inline-comment posting, tracked separately from suggestions.
+  readonly commentState = signal<Record<string, "idle" | "posting" | "posted" | "failed">>({});
+  readonly commentUrl = signal<Record<string, string>>({});
+
+  async postFindingComment(findingId: string): Promise<void> {
+    const runId = this.selectedReviewRunId() ?? this.reviewRun()?.id;
+    if (!runId || this.commentState()[findingId] === "posting") {
+      return;
+    }
+    this.commentState.update((map) => ({ ...map, [findingId]: "posting" }));
+    try {
+      const result = await this.api.postFindingComment(runId, findingId);
+      this.commentUrl.update((map) => ({ ...map, [findingId]: result.url }));
+      this.commentState.update((map) => ({ ...map, [findingId]: "posted" }));
+    } catch (error) {
+      this.commentState.update((map) => ({ ...map, [findingId]: "failed" }));
+      this.lastError.set(`Posting comment failed: ${toMessage(error)}`);
     }
   }
 

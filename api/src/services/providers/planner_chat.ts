@@ -29,7 +29,7 @@ export interface PlannerChatConfig {
 
 export interface PlannerChatResult {
   ok: boolean;
-  value?: { content: string };
+  value?: { content: string; inputTokens?: number; outputTokens?: number };
   error?: { kind: string; message: string };
 }
 
@@ -79,7 +79,7 @@ export async function plannerChat(
     };
   }
 
-  return { ok: true, value: { content: response.value.content } };
+  return { ok: true, value: { content: response.value.content, inputTokens: response.value.inputTokens, outputTokens: response.value.outputTokens } };
 }
 
 /** Streaming planner chat (provider-backed only; OpenAI-compatible falls back to single-shot). */
@@ -124,7 +124,7 @@ export async function plannerChatStream(
     };
   }
 
-  return { ok: true, value: { content: response.value.content } };
+  return { ok: true, value: { content: response.value.content, inputTokens: response.value.inputTokens, outputTokens: response.value.outputTokens } };
 }
 
 async function openAiCompatibleChat(
