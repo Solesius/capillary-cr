@@ -35,6 +35,11 @@ services:
       CAPILLARY_WEB_DIST: "/app/web-dist"
       CAPILLARY_STORAGE_DIR: "/var/lib/capillary"
       CAPILLARY_REQUIRE_GITHUB_LOGIN: "${CAPILLARY_REQUIRE_GITHUB_LOGIN:-1}"
+      # A GitHub token connects an identity at boot — no UI login step, and a
+      # PAT reaches org/private repos that device flow against the built-in
+      # OAuth app cannot. Classic PAT (repo scope) or fine-grained (org owner,
+      # Contents+Metadata read, Pull requests read/write for suggestions).
+      CAPILLARY_GITHUB_TOKEN: "${CAPILLARY_GITHUB_TOKEN:-}"
       GITHUB_OAUTH_CLIENT_ID: "${GITHUB_OAUTH_CLIENT_ID:-}"
       GITHUB_OAUTH_CLIENT_SECRET: "${GITHUB_OAUTH_CLIENT_SECRET:-}"
       GITHUB_OAUTH_REDIRECT_URI: "${GITHUB_OAUTH_REDIRECT_URI:-}"
