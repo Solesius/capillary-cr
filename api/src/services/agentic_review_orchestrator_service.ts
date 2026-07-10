@@ -125,10 +125,10 @@ export class AgenticReviewService {
         request.suggest ?? false,
       );
     } catch (error) {
-      this.failRun(runId, error);
+      await this.failRun(runId, error);
       const message = error instanceof AppError ? error.code : "review_pipeline_failed";
       emit({ type: "log", level: "error", message });
-      const run = this.repository.getReviewRun(runId);
+      const run = await this.repository.getReviewRun(runId);
       const result: ReviewRunResult = {
         runId,
         pullRequestId: request.pullRequestId,
@@ -138,7 +138,11 @@ export class AgenticReviewService {
         findingCount: run.findingCount,
         blockerCount: run.blockerCount,
         highCount: run.highCount,
-        progress: computeReviewProgress({ coveredPasses: [], passRisk: {}, findingCount: run.findingCount }),
+        progress: computeReviewProgress({
+          coveredPasses: [],
+          passRisk: {},
+          findingCount: run.findingCount,
+        }),
         cycles: [],
       };
       emit({ type: "done", result });
@@ -153,7 +157,7 @@ export class AgenticReviewService {
     enforceDefensiveInput(pullRequestId, "pull_request_id");
 
     const resolvedRepositoryId = repositoryId ||
-      this.repository.findPullRequestRepositoryId(pullRequestId);
+      await this.repository.findPullRequestRepositoryId(pullRequestId);
     if (!resolvedRepositoryId) {
       throw new AppError("repository_id_required", 400, "repository_id_required");
     }
@@ -172,21 +176,21 @@ export class AgenticReviewService {
       highCount: 0,
     };
 
-    this.repository.createReviewRun(run);
+    await this.repository.createReviewRun(run);
     this.clickClack.announceReviewRun(run.id);
 
     return { runId: run.id, resolvedRepositoryId };
   }
 
-  private failRun(runId: string, error: unknown): void {
+  private async failRun(runId: string, error: unknown): Promise<void> {
     const message = error instanceof AppError ? error.code : "review_pipeline_failed";
-    this.repository.updateReviewRun(runId, (current) => ({
+    await this.repository.updateReviewRun(runId, (current) => ({
       ...current,
       status: "failed",
       currentPhase: "failed",
       finishedAt: new Date().toISOString(),
     }));
-    this.repository.appendReviewEvent(runId, `phase:failed:${message}`);
+    await this.repository.appendReviewEvent(runId, `phase:failed:${message}`);
   }
 
   private async executeReviewLoop(
@@ -201,7 +205,7 @@ export class AgenticReviewService {
     emit({ type: "run_start", runId, pullRequestId, phase: "queued" });
 
     // Phase: diff_dag — observe the change surface.
-    this.repository.updateReviewRun(runId, (current) => ({
+    await this.repository.updateReviewRun(runId, (current) => ({
       ...current,
       status: "graphing",
       currentPhase: "diff_dag",
@@ -209,10 +213,10 @@ export class AgenticReviewService {
     this.clickClack.recordReviewProgress(runId, "diff_dag");
     emit({ type: "phase", phase: "diff_dag" });
 
-    const dag = this.diffDagService.buildDiffDag(pullRequestId, repositoryId);
-    this.diffDagService.expandDependencyWetting(dag.id);
+    const dag = await this.diffDagService.buildDiffDag(pullRequestId, repositoryId);
+    await this.diffDagService.expandDependencyWetting(dag.id);
     const semanticEdgeCount = await this.diffDagService.enrichSemanticEdges(dag.id);
-    this.repository.appendReviewEvent(
+    await this.repository.appendReviewEvent(
       runId,
       `dag:built:nodes=${dag.nodeCount}:edges=${dag.edgeCount}:semantic=${semanticEdgeCount}`,
     );
@@ -221,12 +225,14 @@ export class AgenticReviewService {
       emit({
         type: "log",
         level: "info",
-        message: `Semantic pass — ${semanticEdgeCount} meaning edge${semanticEdgeCount === 1 ? "" : "s"} joined the graph.`,
+        message: `Semantic pass — ${semanticEdgeCount} meaning edge${
+          semanticEdgeCount === 1 ? "" : "s"
+        } joined the graph.`,
       });
     }
 
     // Phase: program_shape — derive risk surfaces that drive agentic planning.
-    this.repository.updateReviewRun(runId, (current) => ({
+    await this.repository.updateReviewRun(runId, (current) => ({
       ...current,
       status: "wetting",
       currentPhase: "program_shape",
@@ -234,11 +240,11 @@ export class AgenticReviewService {
     this.clickClack.recordReviewProgress(runId, "program_shape");
     emit({ type: "phase", phase: "program_shape" });
 
-    this.diffDagService.computeProgramShape(dag.id);
-    this.diffDagService.deriveRiskSurfaces(dag.id);
+    await this.diffDagService.computeProgramShape(dag.id);
+    await this.diffDagService.deriveRiskSurfaces(dag.id);
 
     // Phase: tcsrct — agentic observe/plan/execute/cycle over the six passes.
-    this.repository.updateReviewRun(runId, (current) => ({
+    await this.repository.updateReviewRun(runId, (current) => ({
       ...current,
       status: "reviewing",
       currentPhase: "tcsrct",
@@ -246,9 +252,12 @@ export class AgenticReviewService {
     this.clickClack.recordReviewProgress(runId, "tcsrct");
     emit({ type: "phase", phase: "tcsrct" });
 
-    const packet = this.tcsrct.buildReviewPacket(runId);
-    const baselineFindings = this.tcsrct.runModifiedTcsrct(runId);
-    this.repository.appendReviewEvent(runId, `tcsrct:baseline_findings=${baselineFindings.length}`);
+    const packet = await this.tcsrct.buildReviewPacket(runId);
+    const baselineFindings = await this.tcsrct.runModifiedTcsrct(runId);
+    await this.repository.appendReviewEvent(
+      runId,
+      `tcsrct:baseline_findings=${baselineFindings.length}`,
+    );
 
     // Baseline pass coverage is computed silently: the TCSRTC agent below is
     // the visible pipeline, and its thinking/tool/cycle events are the live
@@ -264,22 +273,22 @@ export class AgenticReviewService {
       pullRequestId,
       repositoryId,
       packetId: packet.id,
-      baselineFindings: this.repository.getFindings(runId),
+      baselineFindings: await this.repository.getFindings(runId),
       maxCycles,
       trace,
       suggest,
       emit,
     });
-    this.tcsrct.produceAuthorChecklist(runId);
+    await this.tcsrct.produceAuthorChecklist(runId);
 
-    this.artifacts.exportGraphJson(runId);
-    this.artifacts.exportMarkdownReview(runId);
+    await this.artifacts.exportGraphJson(runId);
+    await this.artifacts.exportMarkdownReview(runId);
     this.clickClack.completeReviewRun(runId);
 
-    const finalRun = this.repository.getReviewRun(runId);
+    const finalRun = await this.repository.getReviewRun(runId);
     const finalState: ReviewLoopState = {
       coveredPasses: cycles.map((cycle) => cycle.pass),
-      passRisk: accumulatePassRisk(this.repository.getFindings(runId)),
+      passRisk: accumulatePassRisk(await this.repository.getFindings(runId)),
       findingCount: finalRun.findingCount,
     };
     const progress = computeReviewProgress({
@@ -324,7 +333,11 @@ export class AgenticReviewService {
     let surfacedCount = 0;
 
     for (let cycle = 1; cycle <= budget; cycle += 1) {
-      const state: ReviewLoopState = { coveredPasses: covered, passRisk, findingCount: surfacedCount };
+      const state: ReviewLoopState = {
+        coveredPasses: covered,
+        passRisk,
+        findingCount: surfacedCount,
+      };
       const pass = selectNextReviewPass(state);
       if (!pass) {
         break;
@@ -347,36 +360,45 @@ export class AgenticReviewService {
     return cycles;
   }
 
-  private async applyRetvProviderPass(runId: string, packetId: string, emit: EmitFn): Promise<void> {
+  private async applyRetvProviderPass(
+    runId: string,
+    packetId: string,
+    emit: EmitFn,
+  ): Promise<void> {
     if (!this.llmProvider) {
       return;
     }
 
-    this.repository.updateReviewRun(runId, (current) => ({
+    await this.repository.updateReviewRun(runId, (current) => ({
       ...current,
       status: "reviewing",
       currentPhase: "llm_provider",
     }));
     this.clickClack.recordReviewProgress(runId, "llm_provider");
-    this.repository.appendReviewEvent(runId, "llm:request_dispatched");
+    await this.repository.appendReviewEvent(runId, "llm:request_dispatched");
     emit({ type: "phase", phase: "llm_provider" });
 
     const generated = await this.llmProvider.reviewPacketWithModel(packetId);
-    const enrichedGenerated = this.backfillGeneratedFindingLines(runId, generated);
+    const enrichedGenerated = await this.backfillGeneratedFindingLines(runId, generated);
 
-    this.repository.appendReviewEvent(runId, `llm:response_received:findings=${enrichedGenerated.length}`);
+    await this.repository.appendReviewEvent(
+      runId,
+      `llm:response_received:findings=${enrichedGenerated.length}`,
+    );
     if (enrichedGenerated.length === 0) {
-      this.repository.appendReviewEvent(runId, "llm:response_empty");
+      await this.repository.appendReviewEvent(runId, "llm:response_empty");
       emit({ type: "phase", phase: "llm_merged", detail: "no_model_findings" });
       return;
     }
 
-    const existing = this.repository.getFindings(runId);
+    const existing = await this.repository.getFindings(runId);
     const quality = evaluateGeneratedReviewQuality(enrichedGenerated);
     const shouldReplaceBaseline = quality.shouldReplaceBaseline;
-    this.repository.appendReviewEvent(
+    await this.repository.appendReviewEvent(
       runId,
-      `llm:merge_strategy=${shouldReplaceBaseline ? "replace_baseline" : "augment_baseline"}:actionable=${quality.actionableCount}:passes=${quality.uniquePassCount}`,
+      `llm:merge_strategy=${
+        shouldReplaceBaseline ? "replace_baseline" : "augment_baseline"
+      }:actionable=${quality.actionableCount}:passes=${quality.uniquePassCount}`,
     );
 
     const merged = dedupeFindingsBySignature(
@@ -389,11 +411,11 @@ export class AgenticReviewService {
       ),
     );
 
-    this.repository.saveFindings(runId, merged);
+    await this.repository.saveFindings(runId, merged);
 
     const blockerCount = merged.filter((finding) => finding.severity === "blocker").length;
     const highCount = merged.filter((finding) => finding.severity === "high").length;
-    this.repository.updateReviewRun(runId, (current) => ({
+    await this.repository.updateReviewRun(runId, (current) => ({
       ...current,
       status: "completed",
       findingCount: merged.length,
@@ -405,15 +427,18 @@ export class AgenticReviewService {
     emit({ type: "phase", phase: "llm_merged" });
   }
 
-  private backfillGeneratedFindingLines(runId: string, findings: ReviewFinding[]): ReviewFinding[] {
-    const run = this.repository.getReviewRun(runId);
-    const repositoryId = this.repository.findPullRequestRepositoryId(run.pullRequestId);
+  private async backfillGeneratedFindingLines(
+    runId: string,
+    findings: ReviewFinding[],
+  ): Promise<ReviewFinding[]> {
+    const run = await this.repository.getReviewRun(runId);
+    const repositoryId = await this.repository.findPullRequestRepositoryId(run.pullRequestId);
     if (!repositoryId) {
       return findings;
     }
 
     const diffByPath = new Map(
-      this.repository.getPullRequestDiff(repositoryId, run.pullRequestId)
+      (await this.repository.getPullRequestDiff(repositoryId, run.pullRequestId))
         .map((diff) => [normalizePath(diff.path), diff]),
     );
 
@@ -434,19 +459,19 @@ export class AgenticReviewService {
     });
   }
 
-  getReviewRun(runId: string): ReviewRun {
+  getReviewRun(runId: string): Promise<ReviewRun> {
     enforceDefensiveInput(runId, "run_id");
     return this.repository.getReviewRun(runId);
   }
 
-  streamReviewEvents(runId: string): string[] {
+  streamReviewEvents(runId: string): Promise<string[]> {
     enforceDefensiveInput(runId, "run_id");
     return this.repository.listReviewEvents(runId);
   }
 
-  cancelReview(runId: string): boolean {
+  async cancelReview(runId: string): Promise<boolean> {
     enforceDefensiveInput(runId, "run_id");
-    this.repository.updateReviewRun(runId, (current) => ({
+    await this.repository.updateReviewRun(runId, (current) => ({
       ...current,
       status: "cancelled",
       currentPhase: "cancelled",
@@ -457,18 +482,18 @@ export class AgenticReviewService {
   }
 
   /** List persisted TCSRTC review-agent runs (history rows). */
-  listReviewAgentRuns(): ReviewAgentRunListItem[] {
+  listReviewAgentRuns(): Promise<ReviewAgentRunListItem[]> {
     return this.repository.listReviewAgentRuns();
   }
 
   /** Fetch a persisted review-agent run record (report + optional trace). */
-  getReviewAgentRun(runId: string): ReviewAgentRunRecord | null {
+  getReviewAgentRun(runId: string): Promise<ReviewAgentRunRecord | null> {
     enforceDefensiveInput(runId, "run_id");
     return this.repository.getReviewAgentRun(runId);
   }
 
   /** Build the exportable review bundle; null when the run is missing/untraced. */
-  buildReviewExport(runId: string): Uint8Array | null {
+  buildReviewExport(runId: string): Promise<Uint8Array | null> {
     enforceDefensiveInput(runId, "run_id");
     return this.reviewAgent.buildReviewExport(runId);
   }
@@ -498,7 +523,8 @@ function evaluateGeneratedReviewQuality(findings: ReviewFinding[]): {
   const uniquePassCount = new Set(actionable.map((finding) => finding.passName)).size;
   const likelyFallback = findings.some((finding) => {
     const title = finding.title.toLowerCase();
-    return title.includes("unstructured review narrative") || title.includes("provider unavailable") ||
+    return title.includes("unstructured review narrative") ||
+      title.includes("provider unavailable") ||
       title.includes("provider rate-limited");
   });
 

@@ -1,5 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
+//
+// The review repository. celer-mem is the durable source of truth for review
+// artifacts; this class keeps only a bounded LRU cache in front of it, so
+// resident memory stays flat and low no matter how many reviews accumulate.
+// Every read falls through to the store on a cache miss; every write persists
+// before it resolves. When no durable store is attached (native library
+// unavailable), the caches become the authoritative in-memory store and never
+// evict — preserving a graceful, zero-dependency fallback.
+//
+// Secrets and catalog data (identity, tokens, the runtime LLM config, and the
+// GitHub repo/PR listing) are never persisted: they live only in memory, behind
+// the same async interface for a uniform contract.
 import {
   DiffFile,
   GitHubIdentity,
@@ -16,7 +28,7 @@ import {
   ReviewRun,
 } from "../domain/entities.ts";
 import { notFound } from "../domain/errors.ts";
-import { DurableReviewStore, ReviewStoreSnapshot } from "../services/storage/celer_review_store.ts";
+import { DurableReviewStore } from "../services/storage/celer_review_store.ts";
 
 export interface RuntimeLlmConfig {
   providerKind: string;
@@ -26,320 +38,435 @@ export interface RuntimeLlmConfig {
 }
 
 export interface ReviewRepository {
-  getIdentity(): GitHubIdentity | null;
-  setIdentity(identity: GitHubIdentity): void;
-  getGithubToken(): string | null;
-  setGithubToken(token: string | null): void;
+  getIdentity(): Promise<GitHubIdentity | null>;
+  setIdentity(identity: GitHubIdentity): Promise<void>;
+  getGithubToken(): Promise<string | null>;
+  setGithubToken(token: string | null): Promise<void>;
 
-  replaceRepositories(repositories: GitHubRepository[]): void;
-  replacePullRequests(repositoryId: string, pullRequests: PullRequest[]): void;
-  upsertPullRequest(pullRequest: PullRequest): void;
-  savePullRequestDiff(repositoryId: string, pullRequestId: string, diff: DiffFile[]): void;
-  findPullRequestRepositoryId(pullRequestId: string): string | null;
+  replaceRepositories(repositories: GitHubRepository[]): Promise<void>;
+  replacePullRequests(repositoryId: string, pullRequests: PullRequest[]): Promise<void>;
+  upsertPullRequest(pullRequest: PullRequest): Promise<void>;
+  savePullRequestDiff(repositoryId: string, pullRequestId: string, diff: DiffFile[]): Promise<void>;
+  findPullRequestRepositoryId(pullRequestId: string): Promise<string | null>;
 
-  listRepositories(): GitHubRepository[];
-  listPullRequests(repositoryId: string, stateFilter?: "open" | "closed" | "all"): PullRequest[];
-  getPullRequest(repositoryId: string, pullRequestId: string): PullRequest;
-  getPullRequestDiff(repositoryId: string, pullRequestId: string): DiffFile[];
+  listRepositories(): Promise<GitHubRepository[]>;
+  listPullRequests(
+    repositoryId: string,
+    stateFilter?: "open" | "closed" | "all",
+  ): Promise<PullRequest[]>;
+  getPullRequest(repositoryId: string, pullRequestId: string): Promise<PullRequest>;
+  getPullRequestDiff(repositoryId: string, pullRequestId: string): Promise<DiffFile[]>;
 
-  createReviewRun(run: ReviewRun): void;
-  updateReviewRun(runId: string, mutate: (run: ReviewRun) => ReviewRun): ReviewRun;
-  getReviewRun(runId: string): ReviewRun;
+  createReviewRun(run: ReviewRun): Promise<void>;
+  updateReviewRun(runId: string, mutate: (run: ReviewRun) => ReviewRun): Promise<ReviewRun>;
+  getReviewRun(runId: string): Promise<ReviewRun>;
 
-  appendReviewEvent(runId: string, event: string): void;
-  listReviewEvents(runId: string): string[];
+  appendReviewEvent(runId: string, event: string): Promise<void>;
+  listReviewEvents(runId: string): Promise<string[]>;
 
-  saveGraphSnapshot(diffDagId: string, snapshot: GraphSnapshot): void;
-  
-  
-  getGraphSnapshot(diffDagId: string): GraphSnapshot;
-  findGraphByPullRequest(pullRequestId: string): GraphSnapshot | null;
+  saveGraphSnapshot(diffDagId: string, snapshot: GraphSnapshot): Promise<void>;
+  getGraphSnapshot(diffDagId: string): Promise<GraphSnapshot>;
+  findGraphByPullRequest(pullRequestId: string): Promise<GraphSnapshot | null>;
 
-  saveReviewPacket(packet: ReviewPacket): void;
-  getReviewPacket(packetId: string): ReviewPacket;
+  saveReviewPacket(packet: ReviewPacket): Promise<void>;
+  getReviewPacket(packetId: string): Promise<ReviewPacket>;
 
-  saveFindings(runId: string, findings: ReviewFinding[]): void;
-  getFindings(runId: string): ReviewFinding[];
+  saveFindings(runId: string, findings: ReviewFinding[]): Promise<void>;
+  getFindings(runId: string): Promise<ReviewFinding[]>;
 
-  saveChecklist(runId: string, items: ReviewChecklistItem[]): void;
-  getChecklist(runId: string): ReviewChecklistItem[];
+  saveChecklist(runId: string, items: ReviewChecklistItem[]): Promise<void>;
+  getChecklist(runId: string): Promise<ReviewChecklistItem[]>;
 
-  saveRetvRun(record: RetvCdpRunRecord): void;
-  listRetvRuns(): RetvCdpRunListItem[];
-  getRetvRun(runId: string): RetvCdpRunRecord | null;
+  saveRetvRun(record: RetvCdpRunRecord): Promise<void>;
+  listRetvRuns(): Promise<RetvCdpRunListItem[]>;
+  getRetvRun(runId: string): Promise<RetvCdpRunRecord | null>;
 
-  saveReviewAgentRun(record: ReviewAgentRunRecord): void;
-  listReviewAgentRuns(): ReviewAgentRunListItem[];
-  getReviewAgentRun(runId: string): ReviewAgentRunRecord | null;
+  saveReviewAgentRun(record: ReviewAgentRunRecord): Promise<void>;
+  listReviewAgentRuns(): Promise<ReviewAgentRunListItem[]>;
+  getReviewAgentRun(runId: string): Promise<ReviewAgentRunRecord | null>;
 
-  setRuntimeLlmConfig(config: RuntimeLlmConfig): void;
-  getRuntimeLlmConfig(): RuntimeLlmConfig | null;
+  setRuntimeLlmConfig(config: RuntimeLlmConfig): Promise<void>;
+  getRuntimeLlmConfig(): Promise<RuntimeLlmConfig | null>;
 }
 
-export class InMemoryReviewRepository implements ReviewRepository {
+/**
+ * Bounded LRU cache in front of the durable store. Eviction is off until a
+ * backing store is attached — without one the cache is the source of truth and
+ * must retain everything; with one, evicting is safe because celer still holds
+ * the record and a later read faults it back in.
+ */
+class BoundedCache<V> {
+  readonly #map = new Map<string, V>();
+  readonly #cap: number;
+  #evict = false;
+
+  constructor(cap: number) {
+    this.#cap = cap;
+  }
+
+  enableEviction(): void {
+    this.#evict = true;
+    this.#trim();
+  }
+
+  get(key: string): V | undefined {
+    const value = this.#map.get(key);
+    if (value !== undefined) {
+      // LRU touch: move to the most-recently-used end.
+      this.#map.delete(key);
+      this.#map.set(key, value);
+    }
+    return value;
+  }
+
+  set(key: string, value: V): void {
+    this.#map.delete(key);
+    this.#map.set(key, value);
+    this.#trim();
+  }
+
+  delete(key: string): void {
+    this.#map.delete(key);
+  }
+
+  values(): IterableIterator<V> {
+    return this.#map.values();
+  }
+
+  #trim(): void {
+    if (!this.#evict) return;
+    while (this.#map.size > this.#cap) {
+      const oldest = this.#map.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      this.#map.delete(oldest);
+    }
+  }
+}
+
+// Per-entity cache caps. Large payloads (graphs, diffs, RetV traces) keep small
+// caps so resident memory stays flat; small records can afford more headroom.
+const CAP = {
+  runs: 256,
+  events: 256,
+  findings: 256,
+  packets: 128,
+  graphs: 32,
+  checklists: 256,
+  diffs: 32,
+  retvRuns: 8,
+  reviewAgentRuns: 64,
+} as const;
+
+export class CelerReviewRepository implements ReviewRepository {
+  // In-memory only, never persisted (secrets + GitHub catalog).
   #identity: GitHubIdentity | null = null;
   #githubToken: string | null = null;
-
+  #runtimeLlmConfig: RuntimeLlmConfig | null = null;
   #repositories: GitHubRepository[] = [];
   #pullRequests: PullRequest[] = [];
-  #diffs = new Map<string, DiffFile[]>();
 
-  #runs = new Map<string, ReviewRun>();
-  #runEvents = new Map<string, string[]>();
-  #graphs = new Map<string, GraphSnapshot>();
-  #packets = new Map<string, ReviewPacket>();
-  #findings = new Map<string, ReviewFinding[]>();
-  #checklist = new Map<string, ReviewChecklistItem[]>();
-  #retvRuns = new Map<string, RetvCdpRunRecord>();
-  #reviewAgentRuns = new Map<string, ReviewAgentRunRecord>();
-  #runtimeLlmConfig: RuntimeLlmConfig | null = null;
+  // Bounded caches in front of the durable store.
+  #diffs = new BoundedCache<DiffFile[]>(CAP.diffs);
+  #runs = new BoundedCache<ReviewRun>(CAP.runs);
+  #runEvents = new BoundedCache<string[]>(CAP.events);
+  #graphs = new BoundedCache<GraphSnapshot>(CAP.graphs);
+  #packets = new BoundedCache<ReviewPacket>(CAP.packets);
+  #findings = new BoundedCache<ReviewFinding[]>(CAP.findings);
+  #checklist = new BoundedCache<ReviewChecklistItem[]>(CAP.checklists);
+  #retvRuns = new BoundedCache<RetvCdpRunRecord>(CAP.retvRuns);
+  #reviewAgentRuns = new BoundedCache<ReviewAgentRunRecord>(CAP.reviewAgentRuns);
+
   #durable: DurableReviewStore | null = null;
 
   /**
-   * Attach a durable backing store and replay its snapshot into memory. Safe to
-   * call once at boot; subsequent mutations are mirrored through to the store.
+   * Attach the durable backing store. celer becomes the source of truth and the
+   * caches begin bounding themselves — nothing is replayed into memory, so boot
+   * is instant and resident memory starts (and stays) flat.
    */
-  async attachDurableStore(store: DurableReviewStore): Promise<void> {
-    this.#rehydrate(await store.loadSnapshot());
+  attachDurableStore(store: DurableReviewStore): void {
     this.#durable = store;
-  }
-
-  #rehydrate(snapshot: ReviewStoreSnapshot): void {
-    for (const run of snapshot.runs) {
-      this.#runs.set(run.id, run);
-      if (!this.#runEvents.has(run.id)) {
-        this.#runEvents.set(run.id, []);
-      }
-    }
-    for (const [runId, events] of snapshot.events) {
-      this.#runEvents.set(runId, events.slice());
-    }
-    for (const [runId, findings] of snapshot.findings) {
-      this.#findings.set(runId, findings.slice());
-    }
-    for (const packet of snapshot.packets) {
-      this.#packets.set(packet.id, packet);
-    }
-    for (const [diffDagId, graph] of snapshot.graphs) {
-      this.#graphs.set(diffDagId, graph);
-    }
-    for (const [runId, items] of snapshot.checklists) {
-      this.#checklist.set(runId, items.slice());
-    }
-    for (const record of snapshot.retvRuns) {
-      this.#retvRuns.set(record.runId, record);
-    }
-    for (const record of snapshot.reviewAgentRuns) {
-      this.#reviewAgentRuns.set(record.runId, record);
+    for (
+      const cache of [
+        this.#diffs,
+        this.#runs,
+        this.#runEvents,
+        this.#graphs,
+        this.#packets,
+        this.#findings,
+        this.#checklist,
+        this.#retvRuns,
+        this.#reviewAgentRuns,
+      ]
+    ) {
+      cache.enableEviction();
     }
   }
 
-  getIdentity(): GitHubIdentity | null {
-    return this.#identity;
+  // --- identity / secrets (memory only) ---
+  getIdentity(): Promise<GitHubIdentity | null> {
+    return Promise.resolve(this.#identity);
   }
-
-  setIdentity(identity: GitHubIdentity): void {
+  setIdentity(identity: GitHubIdentity): Promise<void> {
     this.#identity = identity;
+    return Promise.resolve();
   }
-
-  getGithubToken(): string | null {
-    return this.#githubToken;
+  getGithubToken(): Promise<string | null> {
+    return Promise.resolve(this.#githubToken);
   }
-
-  setGithubToken(token: string | null): void {
+  setGithubToken(token: string | null): Promise<void> {
     this.#githubToken = token;
+    return Promise.resolve();
   }
 
-  replaceRepositories(repositories: GitHubRepository[]): void {
+  // --- GitHub catalog (memory only) ---
+  replaceRepositories(repositories: GitHubRepository[]): Promise<void> {
     this.#repositories = repositories.slice();
+    return Promise.resolve();
   }
 
-  replacePullRequests(repositoryId: string, pullRequests: PullRequest[]): void {
+  replacePullRequests(repositoryId: string, pullRequests: PullRequest[]): Promise<void> {
     this.#pullRequests = this.#pullRequests.filter((pr) => pr.repositoryId !== repositoryId)
       .concat(pullRequests.map((pr) => ({ ...pr, repositoryId })));
+    return Promise.resolve();
   }
 
-  upsertPullRequest(pullRequest: PullRequest): void {
+  upsertPullRequest(pullRequest: PullRequest): Promise<void> {
     const index = this.#pullRequests.findIndex((item) =>
       item.repositoryId === pullRequest.repositoryId && item.id === pullRequest.id
     );
-
     if (index === -1) {
       this.#pullRequests.push(pullRequest);
-      return;
+    } else {
+      this.#pullRequests[index] = pullRequest;
     }
-
-    this.#pullRequests[index] = pullRequest;
+    return Promise.resolve();
   }
 
-  savePullRequestDiff(repositoryId: string, pullRequestId: string, diff: DiffFile[]): void {
-    this.#diffs.set(`${repositoryId}:${pullRequestId}`, diff.slice());
+  findPullRequestRepositoryId(pullRequestId: string): Promise<string | null> {
+    return Promise.resolve(
+      this.#pullRequests.find((item) => item.id === pullRequestId)?.repositoryId || null,
+    );
   }
 
-  findPullRequestRepositoryId(pullRequestId: string): string | null {
-    return this.#pullRequests.find((item) => item.id === pullRequestId)?.repositoryId || null;
+  listRepositories(): Promise<GitHubRepository[]> {
+    return Promise.resolve(this.#repositories.slice());
   }
 
-  listRepositories(): GitHubRepository[] {
-    return this.#repositories.slice();
-  }
-
-  listPullRequests(repositoryId: string, stateFilter: "open" | "closed" | "all" = "all"): PullRequest[] {
-    return this.#pullRequests.filter((pr) => {
+  listPullRequests(
+    repositoryId: string,
+    stateFilter: "open" | "closed" | "all" = "all",
+  ): Promise<PullRequest[]> {
+    return Promise.resolve(this.#pullRequests.filter((pr) => {
       if (pr.repositoryId !== repositoryId) {
         return false;
       }
-
       if (stateFilter === "all") {
         return true;
       }
-
       if (stateFilter === "closed") {
         return pr.state === "closed" || pr.state === "merged";
       }
-
       return pr.state === "open" || pr.state === "draft";
-    });
+    }));
   }
 
-  getPullRequest(repositoryId: string, pullRequestId: string): PullRequest {
-    const pr = this.#pullRequests.find((item) => item.repositoryId === repositoryId && item.id === pullRequestId);
+  getPullRequest(repositoryId: string, pullRequestId: string): Promise<PullRequest> {
+    const pr = this.#pullRequests.find((item) =>
+      item.repositoryId === repositoryId && item.id === pullRequestId
+    );
     if (!pr) {
       throw notFound("pull_request_not_found");
     }
-    return pr;
+    return Promise.resolve(pr);
   }
 
-  getPullRequestDiff(repositoryId: string, pullRequestId: string): DiffFile[] {
+  // --- diffs (durable) ---
+  async savePullRequestDiff(
+    repositoryId: string,
+    pullRequestId: string,
+    diff: DiffFile[],
+  ): Promise<void> {
     const key = `${repositoryId}:${pullRequestId}`;
-    const diff = this.#diffs.get(key);
-    if (!diff) {
+    this.#diffs.set(key, diff.slice());
+    await this.#durable?.saveDiff(key, diff);
+  }
+
+  async getPullRequestDiff(repositoryId: string, pullRequestId: string): Promise<DiffFile[]> {
+    const key = `${repositoryId}:${pullRequestId}`;
+    const cached = this.#diffs.get(key);
+    if (cached) {
+      return cached.slice();
+    }
+    const loaded = (await this.#durable?.getDiff(key)) ?? null;
+    if (!loaded) {
       throw notFound("diff_not_found");
     }
-    return diff.slice();
+    this.#diffs.set(key, loaded);
+    return loaded.slice();
   }
 
-  createReviewRun(run: ReviewRun): void {
+  // --- review runs (durable) ---
+  async createReviewRun(run: ReviewRun): Promise<void> {
     this.#runs.set(run.id, run);
     this.#runEvents.set(run.id, []);
-    void this.#durable?.saveRun(run);
+    await this.#durable?.saveRun(run);
   }
 
-  updateReviewRun(runId: string, mutate: (run: ReviewRun) => ReviewRun): ReviewRun {
-    const current = this.#runs.get(runId);
-    if (!current) {
-      throw notFound("review_run_not_found");
-    }
+  async updateReviewRun(runId: string, mutate: (run: ReviewRun) => ReviewRun): Promise<ReviewRun> {
+    const current = await this.getReviewRun(runId);
     const updated = mutate(current);
     this.#runs.set(runId, updated);
-    void this.#durable?.saveRun(updated);
+    await this.#durable?.saveRun(updated);
     return updated;
   }
 
-  getReviewRun(runId: string): ReviewRun {
-    const run = this.#runs.get(runId);
-    if (!run) {
+  async getReviewRun(runId: string): Promise<ReviewRun> {
+    const cached = this.#runs.get(runId);
+    if (cached) {
+      return cached;
+    }
+    const loaded = (await this.#durable?.getRun(runId)) ?? null;
+    if (!loaded) {
       throw notFound("review_run_not_found");
     }
-    return run;
+    this.#runs.set(runId, loaded);
+    return loaded;
   }
 
-  appendReviewEvent(runId: string, event: string): void {
-    const events = this.#runEvents.get(runId);
-    if (!events) {
-      throw notFound("review_run_not_found");
+  // --- events (durable) ---
+  async #loadEvents(runId: string): Promise<string[]> {
+    const cached = this.#runEvents.get(runId);
+    if (cached) {
+      return cached;
     }
+    const loaded = (await this.#durable?.getEvents(runId)) ?? null;
+    if (loaded) {
+      this.#runEvents.set(runId, loaded);
+      return loaded;
+    }
+    // No events row yet — confirm the run exists, else this is a genuine miss.
+    await this.getReviewRun(runId);
+    const empty: string[] = [];
+    this.#runEvents.set(runId, empty);
+    return empty;
+  }
+
+  async appendReviewEvent(runId: string, event: string): Promise<void> {
+    const events = await this.#loadEvents(runId);
     events.push(event);
     this.#runEvents.set(runId, events);
-    void this.#durable?.saveEvents(runId, events);
+    await this.#durable?.saveEvents(runId, events);
   }
 
-  listReviewEvents(runId: string): string[] {
-    const events = this.#runEvents.get(runId);
-    if (!events) {
-      throw notFound("review_run_not_found");
-    }
+  async listReviewEvents(runId: string): Promise<string[]> {
+    const events = await this.#loadEvents(runId);
     return events.slice();
   }
 
-  saveGraphSnapshot(diffDagId: string, snapshot: GraphSnapshot): void {
+  // --- graphs (durable) ---
+  async saveGraphSnapshot(diffDagId: string, snapshot: GraphSnapshot): Promise<void> {
     this.#graphs.set(diffDagId, snapshot);
-    void this.#durable?.saveGraph(diffDagId, snapshot);
+    await this.#durable?.saveGraph(diffDagId, snapshot);
   }
 
-  getGraphSnapshot(diffDagId: string): GraphSnapshot {
-    const snapshot = this.#graphs.get(diffDagId);
-    if (!snapshot) {
+  async getGraphSnapshot(diffDagId: string): Promise<GraphSnapshot> {
+    const cached = this.#graphs.get(diffDagId);
+    if (cached) {
+      return cached;
+    }
+    const loaded = (await this.#durable?.getGraph(diffDagId)) ?? null;
+    if (!loaded) {
       throw notFound("diff_dag_not_found");
     }
-    return snapshot;
+    this.#graphs.set(diffDagId, loaded);
+    return loaded;
   }
 
-  findGraphByPullRequest(pullRequestId: string): GraphSnapshot | null {
+  async findGraphByPullRequest(pullRequestId: string): Promise<GraphSnapshot | null> {
     for (const snapshot of this.#graphs.values()) {
       if (snapshot.dag.pullRequestId === pullRequestId) {
         return snapshot;
       }
     }
+    if (this.#durable) {
+      for (const snapshot of await this.#durable.listGraphs()) {
+        if (snapshot.dag.pullRequestId === pullRequestId) {
+          this.#graphs.set(snapshot.dag.id, snapshot);
+          return snapshot;
+        }
+      }
+    }
     return null;
   }
 
-  saveReviewPacket(packet: ReviewPacket): void {
+  // --- packets (durable) ---
+  async saveReviewPacket(packet: ReviewPacket): Promise<void> {
     this.#packets.set(packet.id, packet);
-    void this.#durable?.savePacket(packet);
+    await this.#durable?.savePacket(packet);
   }
 
-  getReviewPacket(packetId: string): ReviewPacket {
-    const packet = this.#packets.get(packetId);
-    if (!packet) {
+  async getReviewPacket(packetId: string): Promise<ReviewPacket> {
+    const cached = this.#packets.get(packetId);
+    if (cached) {
+      return cached;
+    }
+    const loaded = (await this.#durable?.getPacket(packetId)) ?? null;
+    if (!loaded) {
       throw notFound("review_packet_not_found");
     }
-    return packet;
+    this.#packets.set(packetId, loaded);
+    return loaded;
   }
 
-  saveFindings(runId: string, findings: ReviewFinding[]): void {
+  // --- findings (durable) ---
+  async saveFindings(runId: string, findings: ReviewFinding[]): Promise<void> {
     this.#findings.set(runId, findings);
-    void this.#durable?.saveFindings(runId, findings);
+    await this.#durable?.saveFindings(runId, findings);
   }
 
-  getFindings(runId: string): ReviewFinding[] {
-    return (this.#findings.get(runId) || []).slice();
-  }
-
-  saveChecklist(runId: string, items: ReviewChecklistItem[]): void {
-    this.#checklist.set(runId, items);
-    void this.#durable?.saveChecklist(runId, items);
-  }
-
-  getChecklist(runId: string): ReviewChecklistItem[] {
-    return (this.#checklist.get(runId) || []).slice();
-  }
-
-  saveRetvRun(record: RetvCdpRunRecord): void {
-    this.#retvRuns.set(record.runId, record);
-    void this.#durable?.saveRetvRun(record);
-    this.#pruneHeavyTraces();
-  }
-
-  /**
-   * Trace payloads (base64 screenshots especially) are the dominant resident
-   * memory after a day of dogfooding — a traced RetV run holds megabytes of
-   * screenshots, forever. Keep full payloads for only the most recent traced
-   * runs in memory; the durable store already received the complete record
-   * (written above, before pruning), so nothing is lost on disk.
-   */
-  #pruneHeavyTraces(): void {
-    const MAX_TRACED_IN_MEMORY = 3;
-    const traced = [...this.#retvRuns.values()]
-      .filter((run) => run.trace)
-      .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-    for (const run of traced.slice(MAX_TRACED_IN_MEMORY)) {
-      this.#retvRuns.set(run.runId, { ...run, trace: undefined });
+  async getFindings(runId: string): Promise<ReviewFinding[]> {
+    const cached = this.#findings.get(runId);
+    if (cached) {
+      return cached.slice();
     }
+    const loaded = (await this.#durable?.getFindings(runId)) ?? null;
+    if (!loaded) {
+      return [];
+    }
+    this.#findings.set(runId, loaded);
+    return loaded.slice();
   }
 
-  listRetvRuns(): RetvCdpRunListItem[] {
-    return [...this.#retvRuns.values()]
+  // --- checklists (durable) ---
+  async saveChecklist(runId: string, items: ReviewChecklistItem[]): Promise<void> {
+    this.#checklist.set(runId, items);
+    await this.#durable?.saveChecklist(runId, items);
+  }
+
+  async getChecklist(runId: string): Promise<ReviewChecklistItem[]> {
+    const cached = this.#checklist.get(runId);
+    if (cached) {
+      return cached.slice();
+    }
+    const loaded = (await this.#durable?.getChecklist(runId)) ?? null;
+    if (!loaded) {
+      return [];
+    }
+    this.#checklist.set(runId, loaded);
+    return loaded.slice();
+  }
+
+  // --- RetV runs (durable; lists scan celer) ---
+  async saveRetvRun(record: RetvCdpRunRecord): Promise<void> {
+    this.#retvRuns.set(record.runId, record);
+    await this.#durable?.saveRetvRun(record);
+  }
+
+  async listRetvRuns(): Promise<RetvCdpRunListItem[]> {
+    const records = this.#durable
+      ? await this.#durable.listRetvRuns()
+      : [...this.#retvRuns.values()];
+    return records
       .map((record) => ({
         runId: record.runId,
         goal: record.goal,
@@ -358,17 +485,29 @@ export class InMemoryReviewRepository implements ReviewRepository {
       .sort((a, b) => b.finishedAt.localeCompare(a.finishedAt));
   }
 
-  getRetvRun(runId: string): RetvCdpRunRecord | null {
-    return this.#retvRuns.get(runId) ?? null;
+  async getRetvRun(runId: string): Promise<RetvCdpRunRecord | null> {
+    const cached = this.#retvRuns.get(runId);
+    if (cached) {
+      return cached;
+    }
+    const loaded = (await this.#durable?.getRetvRun(runId)) ?? null;
+    if (loaded) {
+      this.#retvRuns.set(runId, loaded);
+    }
+    return loaded;
   }
 
-  saveReviewAgentRun(record: ReviewAgentRunRecord): void {
+  // --- review-agent runs (durable; lists scan celer) ---
+  async saveReviewAgentRun(record: ReviewAgentRunRecord): Promise<void> {
     this.#reviewAgentRuns.set(record.runId, record);
-    void this.#durable?.saveReviewAgentRun(record);
+    await this.#durable?.saveReviewAgentRun(record);
   }
 
-  listReviewAgentRuns(): ReviewAgentRunListItem[] {
-    return [...this.#reviewAgentRuns.values()]
+  async listReviewAgentRuns(): Promise<ReviewAgentRunListItem[]> {
+    const records = this.#durable
+      ? await this.#durable.listReviewAgentRuns()
+      : [...this.#reviewAgentRuns.values()];
+    return records
       .map((record) => ({
         runId: record.runId,
         pullRequestId: record.pullRequestId,
@@ -388,29 +527,38 @@ export class InMemoryReviewRepository implements ReviewRepository {
       .sort((a, b) => b.finishedAt.localeCompare(a.finishedAt));
   }
 
-  getReviewAgentRun(runId: string): ReviewAgentRunRecord | null {
-    return this.#reviewAgentRuns.get(runId) ?? null;
+  async getReviewAgentRun(runId: string): Promise<ReviewAgentRunRecord | null> {
+    const cached = this.#reviewAgentRuns.get(runId);
+    if (cached) {
+      return cached;
+    }
+    const loaded = (await this.#durable?.getReviewAgentRun(runId)) ?? null;
+    if (loaded) {
+      this.#reviewAgentRuns.set(runId, loaded);
+    }
+    return loaded;
   }
 
-  setRuntimeLlmConfig(config: RuntimeLlmConfig): void {
+  // --- runtime LLM config (memory only) ---
+  setRuntimeLlmConfig(config: RuntimeLlmConfig): Promise<void> {
     this.#runtimeLlmConfig = {
       providerKind: config.providerKind,
       model: config.model,
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
     };
+    return Promise.resolve();
   }
 
-  getRuntimeLlmConfig(): RuntimeLlmConfig | null {
+  getRuntimeLlmConfig(): Promise<RuntimeLlmConfig | null> {
     if (!this.#runtimeLlmConfig) {
-      return null;
+      return Promise.resolve(null);
     }
-
-    return {
+    return Promise.resolve({
       providerKind: this.#runtimeLlmConfig.providerKind,
       model: this.#runtimeLlmConfig.model,
       baseUrl: this.#runtimeLlmConfig.baseUrl,
       apiKey: this.#runtimeLlmConfig.apiKey,
-    };
+    });
   }
 }

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
 import { assert, assertEquals, assertThrows } from "jsr:@std/assert";
-import { InMemoryReviewRepository } from "../src/repositories/review_repository.ts";
+import { CelerReviewRepository } from "../src/repositories/review_repository.ts";
 import { CdpDriverService } from "../src/services/cdp_driver_service.ts";
 import { CdpRetvAgentService } from "../src/services/cdp_retv_agent_service.ts";
 
-function makeService(): { repo: InMemoryReviewRepository; service: CdpRetvAgentService } {
-  const repo = new InMemoryReviewRepository();
+function makeService(): { repo: CelerReviewRepository; service: CdpRetvAgentService } {
+  const repo = new CelerReviewRepository();
   const driver = new CdpDriverService();
   const service = new CdpRetvAgentService(repo, driver, { kind: "anthropic" });
   return { repo, service };

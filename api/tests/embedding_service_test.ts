@@ -55,11 +55,11 @@ Deno.test("should_compute_unit_cosine_for_identical_vectors", () => {
 });
 
 Deno.test("should_add_semantic_edges_between_meaning_neighbors_only", async () => {
-  const { InMemoryReviewRepository } = await import("../src/repositories/review_repository.ts");
+  const { CelerReviewRepository } = await import("../src/repositories/review_repository.ts");
   const { DiffDagService } = await import("../src/services/diff_dag_service.ts");
   const { GraphMathService } = await import("../src/services/graph_math_service.ts");
 
-  const repository = new InMemoryReviewRepository();
+  const repository = new CelerReviewRepository();
   const diffFile = (path: string) => ({
     path,
     status: "modified" as const,
@@ -71,7 +71,7 @@ Deno.test("should_add_semantic_edges_between_meaning_neighbors_only", async () =
     isConfig: false,
     isGenerated: false,
   });
-  repository.savePullRequestDiff("r1", "p1", [
+  await repository.savePullRequestDiff("r1", "p1", [
     diffFile("auth_service.ts"),
     diffFile("auth_middleware.ts"),
     diffFile("torus_math.ts"),
@@ -86,7 +86,7 @@ Deno.test("should_add_semantic_edges_between_meaning_neighbors_only", async () =
     changed: true,
     weight: 1,
   });
-  repository.saveGraphSnapshot("dag1", {
+  await repository.saveGraphSnapshot("dag1", {
     dag: {
       id: "dag1",
       repositoryId: "r1",
@@ -121,7 +121,7 @@ Deno.test("should_add_semantic_edges_between_meaning_neighbors_only", async () =
   const added = await service.enrichSemanticEdges("dag1");
   assertEquals(added, 1);
 
-  const snapshot = repository.getGraphSnapshot("dag1");
+  const snapshot = await repository.getGraphSnapshot("dag1");
   const semantic = snapshot.edges.filter((edge) => edge.kind === "semantic");
   assertEquals(semantic.length, 1);
   const pair = [semantic[0].fromNodeId, semantic[0].toNodeId].sort().join("-");
@@ -142,15 +142,18 @@ Deno.test({
     const files: FileForEmbedding[] = [
       {
         path: "auth_token_service.ts",
-        content: "export class AuthTokenService { refreshAccessToken(refreshToken) { /* oauth */ } }",
+        content:
+          "export class AuthTokenService { refreshAccessToken(refreshToken) { /* oauth */ } }",
       },
       {
         path: "auth_middleware.ts",
-        content: "export function requireAccessToken(ctx) { validate bearer authorization header token }",
+        content:
+          "export function requireAccessToken(ctx) { validate bearer authorization header token }",
       },
       {
         path: "torus_math.ts",
-        content: "export function geodesicTorsion(theta, alpha) { return curvature * Math.sin(alpha) * Math.cos(alpha); }",
+        content:
+          "export function geodesicTorsion(theta, alpha) { return curvature * Math.sin(alpha) * Math.cos(alpha); }",
       },
     ];
 

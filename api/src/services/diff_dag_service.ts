@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
 import {
-  DiffFile,
   DiffDag,
+  DiffFile,
   ModuleEdge,
   ModuleNode,
   ProgramShapeSample,
@@ -11,11 +11,7 @@ import {
 import { AppError } from "../domain/errors.ts";
 import { enforceDefensiveInput } from "../lib/validation.ts";
 import { ReviewRepository } from "../repositories/review_repository.ts";
-import {
-  GraphMathService,
-  TORUS_RADIUS_MAJOR,
-  TORUS_RADIUS_MINOR,
-} from "./graph_math_service.ts";
+import { GraphMathService, TORUS_RADIUS_MAJOR, TORUS_RADIUS_MINOR } from "./graph_math_service.ts";
 import {
   cosineSimilarity,
   FileEmbeddingProvider,
@@ -92,19 +88,19 @@ export class DiffDagService {
     if (!this.embeddings) {
       return 0;
     }
-    const snapshot = this.repository.getGraphSnapshot(diffDagId);
+    const snapshot = await this.repository.getGraphSnapshot(diffDagId);
     const fileNodes = snapshot.nodes.filter((node) => node.changed && node.kind !== "symbol");
     if (fileNodes.length < 2) {
       return 0;
     }
 
     const repositoryId = snapshot.dag.repositoryId ||
-      this.repository.findPullRequestRepositoryId(snapshot.dag.pullRequestId);
+      await this.repository.findPullRequestRepositoryId(snapshot.dag.pullRequestId);
     if (!repositoryId) {
       return 0;
     }
     const patchByPath = new Map(
-      this.repository.getPullRequestDiff(repositoryId, snapshot.dag.pullRequestId)
+      (await this.repository.getPullRequestDiff(repositoryId, snapshot.dag.pullRequestId))
         .map((file) => [normalizePath(file.path), file.patch || ""]),
     );
 
@@ -166,7 +162,7 @@ export class DiffDagService {
     }
 
     const edges = [...snapshot.edges, ...semanticEdges];
-    this.repository.saveGraphSnapshot(diffDagId, {
+    await this.repository.saveGraphSnapshot(diffDagId, {
       ...snapshot,
       dag: {
         ...snapshot.dag,
@@ -178,16 +174,17 @@ export class DiffDagService {
     return semanticEdges.length;
   }
 
-  buildDiffDag(pullRequestId: string, repositoryId?: string): DiffDag {
+  async buildDiffDag(pullRequestId: string, repositoryId?: string): Promise<DiffDag> {
     enforceDefensiveInput(pullRequestId, "pull_request_id");
 
-    const resolvedRepositoryId = repositoryId || this.repository.findPullRequestRepositoryId(pullRequestId);
+    const resolvedRepositoryId = repositoryId ||
+      await this.repository.findPullRequestRepositoryId(pullRequestId);
     if (!resolvedRepositoryId) {
       throw new AppError("pull_request_not_found", 404, "pull_request_not_found");
     }
 
-    const pullRequest = this.repository.getPullRequest(resolvedRepositoryId, pullRequestId);
-    const diffFiles = this.repository.getPullRequestDiff(resolvedRepositoryId, pullRequestId);
+    const pullRequest = await this.repository.getPullRequest(resolvedRepositoryId, pullRequestId);
+    const diffFiles = await this.repository.getPullRequestDiff(resolvedRepositoryId, pullRequestId);
     if (diffFiles.length === 0) {
       throw new AppError("pull_request_diff_empty", 422, "pull_request_diff_empty");
     }
@@ -318,7 +315,7 @@ export class DiffDagService {
       completenessNotes: completeness.notes,
     };
 
-    this.repository.saveGraphSnapshot(dag.id, {
+    await this.repository.saveGraphSnapshot(dag.id, {
       dag,
       nodes,
       edges: dedupedEdges,
@@ -329,16 +326,20 @@ export class DiffDagService {
     return dag;
   }
 
-  expandDependencyWetting(diffDagId: string): DiffDag {
+  async expandDependencyWetting(diffDagId: string): Promise<DiffDag> {
     enforceDefensiveInput(diffDagId, "diff_dag_id");
-    const snapshot = this.repository.getGraphSnapshot(diffDagId);
+    const snapshot = await this.repository.getGraphSnapshot(diffDagId);
 
-    const repositoryId = snapshot.dag.repositoryId || this.repository.findPullRequestRepositoryId(snapshot.dag.pullRequestId);
+    const repositoryId = snapshot.dag.repositoryId ||
+      await this.repository.findPullRequestRepositoryId(snapshot.dag.pullRequestId);
     if (!repositoryId) {
       throw new AppError("pull_request_not_found", 404, "pull_request_not_found");
     }
 
-    const diffFiles = this.repository.getPullRequestDiff(repositoryId, snapshot.dag.pullRequestId);
+    const diffFiles = await this.repository.getPullRequestDiff(
+      repositoryId,
+      snapshot.dag.pullRequestId,
+    );
     const referencesByFile = collectReferencesByFile(diffFiles);
 
     const existingNodes = snapshot.nodes.slice();
@@ -355,7 +356,11 @@ export class DiffDagService {
       }
 
       for (const reference of referencesByFile.get(sourcePath) || []) {
-        const resolvedChangedPath = resolveReferenceToChangedPath(sourcePath, reference, pathToNodeId);
+        const resolvedChangedPath = resolveReferenceToChangedPath(
+          sourcePath,
+          reference,
+          pathToNodeId,
+        );
         if (resolvedChangedPath) {
           continue;
         }
@@ -407,7 +412,7 @@ export class DiffDagService {
       completenessNotes: completeness.notes,
     };
 
-    this.repository.saveGraphSnapshot(diffDagId, {
+    await this.repository.saveGraphSnapshot(diffDagId, {
       ...snapshot,
       dag,
       nodes: existingNodes,
@@ -417,9 +422,9 @@ export class DiffDagService {
     return dag;
   }
 
-  computeProgramShape(diffDagId: string): ProgramShapeSample[] {
+  async computeProgramShape(diffDagId: string): Promise<ProgramShapeSample[]> {
     enforceDefensiveInput(diffDagId, "diff_dag_id");
-    const snapshot = this.repository.getGraphSnapshot(diffDagId);
+    const snapshot = await this.repository.getGraphSnapshot(diffDagId);
 
     const nodeFlowStats = buildNodeFlowStats(snapshot.nodes, snapshot.edges);
     let maxDegree = 1;
@@ -473,7 +478,7 @@ export class DiffDagService {
 
     const torusVariance = computeTorusVariance(samples);
 
-    this.repository.saveGraphSnapshot(diffDagId, {
+    await this.repository.saveGraphSnapshot(diffDagId, {
       ...snapshot,
       dag: {
         ...snapshot.dag,
@@ -485,12 +490,12 @@ export class DiffDagService {
     return samples;
   }
 
-  deriveRiskSurfaces(diffDagId: string): RiskSurface[] {
+  async deriveRiskSurfaces(diffDagId: string): Promise<RiskSurface[]> {
     enforceDefensiveInput(diffDagId, "diff_dag_id");
-    const snapshot = this.repository.getGraphSnapshot(diffDagId);
+    const snapshot = await this.repository.getGraphSnapshot(diffDagId);
 
     if (snapshot.shapeSamples.length === 0) {
-      this.repository.saveGraphSnapshot(diffDagId, {
+      await this.repository.saveGraphSnapshot(diffDagId, {
         ...snapshot,
         surfaces: [],
       });
@@ -503,7 +508,10 @@ export class DiffDagService {
     const adjacency = buildAdjacency(snapshot.edges);
     const edgeWeightByPair = buildEdgeWeightMap(snapshot.edges);
 
-    const targetSurfaceCount = Math.min(12, Math.max(5, Math.ceil(snapshot.dag.changedNodeCount * 0.75)));
+    const targetSurfaceCount = Math.min(
+      12,
+      Math.max(5, Math.ceil(snapshot.dag.changedNodeCount * 0.75)),
+    );
     const candidateNodeIds = selectRiskSurfaceNodeIds(
       snapshot.nodes,
       snapshot.shapeSamples,
@@ -563,23 +571,24 @@ export class DiffDagService {
         .map((surface) => samplesByNodeId.get(surface.entryNodeId))
         .filter((sample): sample is ProgramShapeSample => Boolean(sample))
         .find((sample) => {
-        const node = nodesById.get(sample.nodeId);
-        return !isConfigPath(node?.path) && node?.kind !== "config";
-      }) || samplesByNodeId.get(surfaces[0].entryNodeId);
+          const node = nodesById.get(sample.nodeId);
+          return !isConfigPath(node?.path) && node?.kind !== "config";
+        }) || samplesByNodeId.get(surfaces[0].entryNodeId);
 
       if (entryNode) {
-      surfaces.push({
-        id: createId("surface"),
-        pullRequestId: snapshot.dag.pullRequestId,
-        surfaceKind: "runtime",
-        entryNodeId: entryNode.nodeId,
-        riskScore: clamp01(0.54 + (1 - snapshot.dag.flowCompleteness) * 0.42),
-        reason: snapshot.dag.completenessNotes[0] || "DAG flow completeness is below target for app-flow validation",
-      });
+        surfaces.push({
+          id: createId("surface"),
+          pullRequestId: snapshot.dag.pullRequestId,
+          surfaceKind: "runtime",
+          entryNodeId: entryNode.nodeId,
+          riskScore: clamp01(0.54 + (1 - snapshot.dag.flowCompleteness) * 0.42),
+          reason: snapshot.dag.completenessNotes[0] ||
+            "DAG flow completeness is below target for app-flow validation",
+        });
       }
     }
 
-    this.repository.saveGraphSnapshot(diffDagId, {
+    await this.repository.saveGraphSnapshot(diffDagId, {
       ...snapshot,
       surfaces,
     });
@@ -603,7 +612,10 @@ function selectRiskSurfaceNodeIds(
   // `foo.ts#PlacedNode` and read as noise in the report.
   const rankedSeeds = shapeSamples
     .filter((sample) => nodesById.get(sample.nodeId)?.kind !== "symbol")
-    .sort((left, right) => riskSeedScore(right, nodesById.get(right.nodeId), flowStats) - riskSeedScore(left, nodesById.get(left.nodeId), flowStats));
+    .sort((left, right) =>
+      riskSeedScore(right, nodesById.get(right.nodeId), flowStats) -
+      riskSeedScore(left, nodesById.get(left.nodeId), flowStats)
+    );
 
   const selected = new Set<string>();
   for (const sample of rankedSeeds) {
@@ -622,8 +634,20 @@ function selectRiskSurfaceNodeIds(
     const neighbors = Array.from(adjacency.get(seedId) || [])
       .filter((neighborId) => samplesByNodeId.has(neighborId))
       .sort((left, right) => {
-        const leftScore = correlatedNeighborScore(seedId, left, nodesById, samplesByNodeId, edgeWeightByPair);
-        const rightScore = correlatedNeighborScore(seedId, right, nodesById, samplesByNodeId, edgeWeightByPair);
+        const leftScore = correlatedNeighborScore(
+          seedId,
+          left,
+          nodesById,
+          samplesByNodeId,
+          edgeWeightByPair,
+        );
+        const rightScore = correlatedNeighborScore(
+          seedId,
+          right,
+          nodesById,
+          samplesByNodeId,
+          edgeWeightByPair,
+        );
         return rightScore - leftScore;
       })
       .slice(0, 2);
@@ -674,12 +698,17 @@ function averageNeighborRisk(
   adjacency: Map<string, Set<string>>,
   samplesByNodeId: Map<string, ProgramShapeSample>,
 ): number {
-  const neighborIds = Array.from(adjacency.get(nodeId) || []).filter((neighborId) => samplesByNodeId.has(neighborId));
+  const neighborIds = Array.from(adjacency.get(nodeId) || []).filter((neighborId) =>
+    samplesByNodeId.has(neighborId)
+  );
   if (neighborIds.length === 0) {
     return 0;
   }
 
-  const total = neighborIds.reduce((sum, neighborId) => sum + (samplesByNodeId.get(neighborId)?.riskGradient || 0), 0);
+  const total = neighborIds.reduce(
+    (sum, neighborId) => sum + (samplesByNodeId.get(neighborId)?.riskGradient || 0),
+    0,
+  );
   return clamp01(total / neighborIds.length);
 }
 
@@ -845,7 +874,10 @@ function analyzeFlowCompleteness(
   return { score, notes };
 }
 
-function largestConnectedComponentRatio(nodes: ModuleNode[], adjacency: Map<string, Set<string>>): number {
+function largestConnectedComponentRatio(
+  nodes: ModuleNode[],
+  adjacency: Map<string, Set<string>>,
+): number {
   if (nodes.length === 0) {
     return 0;
   }
@@ -948,7 +980,10 @@ function getPatchChangeLines(patch?: string): string[] {
 
   const lines: string[] = [];
   for (const line of patch.split("\n")) {
-    if ((line.startsWith("+") || line.startsWith("-")) && !line.startsWith("+++") && !line.startsWith("---")) {
+    if (
+      (line.startsWith("+") || line.startsWith("-")) && !line.startsWith("+++") &&
+      !line.startsWith("---")
+    ) {
       lines.push(line.slice(1).trim());
     }
   }
@@ -1032,7 +1067,10 @@ function resolveReferenceToChangedPath(
   return baseMatches.length === 1 ? baseMatches[0] : null;
 }
 
-function matchChangedPath(candidate: string, changedPathToNodeId: Map<string, string>): string | null {
+function matchChangedPath(
+  candidate: string,
+  changedPathToNodeId: Map<string, string>,
+): string | null {
   const normalizedCandidate = normalizePath(candidate);
   if (changedPathToNodeId.has(normalizedCandidate)) {
     return normalizedCandidate;
@@ -1159,13 +1197,19 @@ function inferSurfaceKind(path: string, nodeKind?: ModuleNode["kind"]): RiskSurf
   if (lower.includes("auth") || lower.includes("jwt") || lower.includes("token")) {
     return "auth";
   }
-  if (lower.includes("db") || lower.includes("sql") || lower.includes("store") || lower.includes("persist")) {
+  if (
+    lower.includes("db") || lower.includes("sql") || lower.includes("store") ||
+    lower.includes("persist")
+  ) {
     return "persistence";
   }
   if (lower.includes("test") || lower.includes("spec")) {
     return "test_gap";
   }
-  if (lower.includes("async") || lower.includes("thread") || lower.includes("queue") || lower.includes("sched")) {
+  if (
+    lower.includes("async") || lower.includes("thread") || lower.includes("queue") ||
+    lower.includes("sched")
+  ) {
     return "concurrency";
   }
   if (lower.includes("perf") || lower.includes("cache")) {

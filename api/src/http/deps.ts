@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { InMemoryReviewRepository } from "../repositories/review_repository.ts";
+import { CelerReviewRepository } from "../repositories/review_repository.ts";
 import { ArtifactService } from "../services/artifact_service.ts";
 import { CdpDriverService } from "../services/cdp_driver_service.ts";
 import { ClickClackCoordinationService } from "../services/click_clack_coordination_service.ts";
@@ -14,11 +14,13 @@ import { ReviewSessionHub } from "../services/review_session_hub.ts";
 import { TcsrctReviewService } from "../services/tcsrct_review_service.ts";
 import { DurableReviewStore } from "../services/storage/celer_review_store.ts";
 
-const repository = new InMemoryReviewRepository();
+const repository = new CelerReviewRepository();
 
-// Opt-in durable storage: when CAPILLARY_STORAGE_DIR is set and the celer-mem
-// native library is available, mirror review artifacts to disk and replay them
-// on boot. Otherwise run purely in-memory (graceful fallback).
+// Durable storage: when CAPILLARY_STORAGE_DIR is set and the celer-mem native
+// library is available, celer becomes the source of truth for review artifacts
+// and the repository keeps only a bounded cache in front of it — memory stays
+// flat, boot is instant (no snapshot replay). Otherwise run purely in-memory
+// (graceful fallback).
 const storageDir = Deno.env.get("CAPILLARY_STORAGE_DIR");
 if (storageDir) {
   // One retry: opening an existing database can transiently fail right at
@@ -30,10 +32,12 @@ if (storageDir) {
     durable = await DurableReviewStore.tryOpen({ path: storageDir });
   }
   if (durable) {
-    await repository.attachDurableStore(durable);
+    repository.attachDurableStore(durable);
     console.log(`durable review storage enabled at ${storageDir}`);
   } else {
-    console.warn("CAPILLARY_STORAGE_DIR set but celer-mem native storage is unavailable; using in-memory store");
+    console.warn(
+      "CAPILLARY_STORAGE_DIR set but celer-mem native storage is unavailable; using in-memory store",
+    );
   }
 }
 
@@ -54,7 +58,9 @@ if (Deno.env.get("CAPILLARY_GITHUB_TOKEN")?.trim() || Deno.env.get("GITHUB_TOKEN
     const identity = await githubService.connectGithub("valid");
     console.log(`GitHub identity connected from environment token: ${identity.login}`);
   } catch {
-    console.warn("CAPILLARY_GITHUB_TOKEN/GITHUB_TOKEN set but GitHub connection failed; connect via the UI.");
+    console.warn(
+      "CAPILLARY_GITHUB_TOKEN/GITHUB_TOKEN set but GitHub connection failed; connect via the UI.",
+    );
   }
 }
 

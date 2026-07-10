@@ -16,64 +16,68 @@ const primaryOrigin = allowedOrigins[0] || "http://localhost:4200";
 const requireGithubLogin = readBooleanEnv("CAPILLARY_REQUIRE_GITHUB_LOGIN", false);
 const serveWebApp = readBooleanEnv("CAPILLARY_SERVE_WEB", false);
 const webDistRoot = Deno.env.get("CAPILLARY_WEB_DIST")?.trim() || decodeURIComponent(
-	new URL("../../web/dist/capillary-web/browser", import.meta.url).pathname,
+  new URL("../../web/dist/capillary-web/browser", import.meta.url).pathname,
 );
 
 const GITHUB_LOGIN_EXEMPT_API_PATHS = [
-	"/api/github/connect",
-	"/api/github/oauth/start",
-	"/api/github/oauth/callback",
+  "/api/github/connect",
+  "/api/github/oauth/start",
+  "/api/github/oauth/callback",
 ];
 const GITHUB_LOGIN_EXEMPT_API_PREFIXES = ["/api/github/oauth/poll/"];
 
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 app.use(async (ctx, next) => {
-	const requestOrigin = ctx.request.headers.get("origin");
-	const originAllowed = requestOrigin !== null &&
-		(allowedOrigins.includes(requestOrigin) || isSameHostOrigin(requestOrigin, ctx.request.url.host));
-	const allowOrigin = requestOrigin && originAllowed ? requestOrigin : primaryOrigin;
+  const requestOrigin = ctx.request.headers.get("origin");
+  const originAllowed = requestOrigin !== null &&
+    (allowedOrigins.includes(requestOrigin) ||
+      isSameHostOrigin(requestOrigin, ctx.request.url.host));
+  const allowOrigin = requestOrigin && originAllowed ? requestOrigin : primaryOrigin;
 
-	ctx.response.headers.set("Access-Control-Allow-Origin", allowOrigin);
-	ctx.response.headers.set("Vary", "Origin");
-	ctx.response.headers.set("Access-Control-Allow-Headers", "content-type, authorization");
-	ctx.response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+  ctx.response.headers.set("Access-Control-Allow-Origin", allowOrigin);
+  ctx.response.headers.set("Vary", "Origin");
+  ctx.response.headers.set("Access-Control-Allow-Headers", "content-type, authorization");
+  ctx.response.headers.set(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+  );
 
-	if (ctx.request.method === "OPTIONS") {
-		ctx.response.status = 204;
-		return;
-	}
+  if (ctx.request.method === "OPTIONS") {
+    ctx.response.status = 204;
+    return;
+  }
 
-	// CSRF guard: a cross-origin browser can issue "simple" state-changing
-	// requests without triggering a preflight, so CORS response headers alone do
-	// not protect mutating endpoints (e.g. setting a provider API key). Reject
-	// any mutating request whose Origin is present but neither allow-listed nor
-	// same-host. An Origin matching the request's own Host header is same-origin
-	// by definition (an attacker page cannot be served from the victim's own
-	// host:port), so it is safe on any published container port without
-	// operator configuration. Requests with no Origin (curl, server-to-server,
-	// tests) are permitted.
-	if (MUTATING_METHODS.has(ctx.request.method) && requestOrigin && !originAllowed) {
-		ctx.response.status = 403;
-		ctx.response.body = { error: "origin_not_allowed" };
-		return;
-	}
+  // CSRF guard: a cross-origin browser can issue "simple" state-changing
+  // requests without triggering a preflight, so CORS response headers alone do
+  // not protect mutating endpoints (e.g. setting a provider API key). Reject
+  // any mutating request whose Origin is present but neither allow-listed nor
+  // same-host. An Origin matching the request's own Host header is same-origin
+  // by definition (an attacker page cannot be served from the victim's own
+  // host:port), so it is safe on any published container port without
+  // operator configuration. Requests with no Origin (curl, server-to-server,
+  // tests) are permitted.
+  if (MUTATING_METHODS.has(ctx.request.method) && requestOrigin && !originAllowed) {
+    ctx.response.status = 403;
+    ctx.response.body = { error: "origin_not_allowed" };
+    return;
+  }
 
-	await next();
+  await next();
 });
 
 // Unauthenticated liveness/readiness probe for container orchestration and the
 // Docker HEALTHCHECK. Intentionally sits ahead of the GitHub-login gate so an
 // operator can confirm the process is up before any identity is connected.
 app.use(async (ctx, next) => {
-	if (ctx.request.url.pathname === "/healthz") {
-		ctx.response.status = 200;
-		ctx.response.headers.set("cache-control", "no-store");
-		ctx.response.body = { status: "ok" };
-		return;
-	}
+  if (ctx.request.url.pathname === "/healthz") {
+    ctx.response.status = 200;
+    ctx.response.headers.set("cache-control", "no-store");
+    ctx.response.body = { status: "ok" };
+    return;
+  }
 
-	await next();
+  await next();
 });
 
 // Error middleware sits ahead of the login gate: an unauthenticated poll is
@@ -82,74 +86,72 @@ app.use(async (ctx, next) => {
 app.use(errorMiddleware());
 
 app.use(async (ctx, next) => {
-	if (
-		requireGithubLogin &&
-		ctx.request.url.pathname.startsWith("/api/") &&
-		!isGithubLoginExemptPath(ctx.request.url.pathname)
-	) {
-		const identity = deps.repository.getIdentity();
-		if (!identity?.connected) {
-			throw unauthorized("github_login_required");
-		}
-	}
+  if (
+    requireGithubLogin &&
+    ctx.request.url.pathname.startsWith("/api/") &&
+    !isGithubLoginExemptPath(ctx.request.url.pathname)
+  ) {
+    const identity = await deps.repository.getIdentity();
+    if (!identity?.connected) {
+      throw unauthorized("github_login_required");
+    }
+  }
 
-	await next();
+  await next();
 });
 
 app.use(routes().routes());
 app.use(routes().allowedMethods());
 
 if (serveWebApp) {
-	app.use(async (ctx, next) => {
-		if (ctx.request.url.pathname.startsWith("/api/")) {
-			await next();
-			return;
-		}
+  app.use(async (ctx, next) => {
+    if (ctx.request.url.pathname.startsWith("/api/")) {
+      await next();
+      return;
+    }
 
-		const requestPath = ctx.request.url.pathname === "/"
-			? "/index.html"
-			: ctx.request.url.pathname;
+    const requestPath = ctx.request.url.pathname === "/" ? "/index.html" : ctx.request.url.pathname;
 
-		try {
-			await send(ctx, requestPath, { root: webDistRoot, index: "index.html" });
-		} catch {
-			await send(ctx, "/index.html", { root: webDistRoot });
-		}
-	});
+    try {
+      await send(ctx, requestPath, { root: webDistRoot, index: "index.html" });
+    } catch {
+      await send(ctx, "/index.html", { root: webDistRoot });
+    }
+  });
 }
 
 console.log(`Capillary API listening on :${port}`);
 await app.listen({ port });
 
 function isSameHostOrigin(origin: string, requestHost: string): boolean {
-	try {
-		return new URL(origin).host === requestHost;
-	} catch {
-		return false;
-	}
+  try {
+    return new URL(origin).host === requestHost;
+  } catch {
+    return false;
+  }
 }
 
 function isGithubLoginExemptPath(pathname: string): boolean {
-	if (GITHUB_LOGIN_EXEMPT_API_PATHS.includes(pathname)) {
-		return true;
-	}
+  if (GITHUB_LOGIN_EXEMPT_API_PATHS.includes(pathname)) {
+    return true;
+  }
 
-	return GITHUB_LOGIN_EXEMPT_API_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+  return GITHUB_LOGIN_EXEMPT_API_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
 function readBooleanEnv(name: string, fallback: boolean): boolean {
-	const raw = Deno.env.get(name);
-	if (!raw) {
-		return fallback;
-	}
+  const raw = Deno.env.get(name);
+  if (!raw) {
+    return fallback;
+  }
 
-	const normalized = raw.trim().toLowerCase();
-	if (["1", "true", "yes", "on"].includes(normalized)) {
-		return true;
-	}
-	if (["0", "false", "no", "off"].includes(normalized)) {
-		return false;
-	}
+  const normalized = raw.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
 
-	return fallback;
+  return fallback;
 }

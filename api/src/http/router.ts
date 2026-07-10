@@ -66,11 +66,14 @@ router.get("/api/github/repositories/:repositoryId/pull-requests/:pullRequestId"
   ctx.response.body = await deps.githubService.getPullRequest(repositoryId, pullRequestId);
 });
 
-router.get("/api/github/repositories/:repositoryId/pull-requests/:pullRequestId/diff", async (ctx) => {
-  const repositoryId = ctx.params.repositoryId || "";
-  const pullRequestId = ctx.params.pullRequestId || "";
-  ctx.response.body = await deps.githubService.getPullRequestDiff(repositoryId, pullRequestId);
-});
+router.get(
+  "/api/github/repositories/:repositoryId/pull-requests/:pullRequestId/diff",
+  async (ctx) => {
+    const repositoryId = ctx.params.repositoryId || "";
+    const pullRequestId = ctx.params.pullRequestId || "";
+    ctx.response.body = await deps.githubService.getPullRequestDiff(repositoryId, pullRequestId);
+  },
+);
 
 router.post("/api/review/runs", async (ctx) => {
   const body = await ctx.request.body.json();
@@ -81,7 +84,10 @@ router.post("/api/review/runs", async (ctx) => {
 
 router.post("/api/review/runs/async", async (ctx) => {
   const body = await ctx.request.body.json();
-  const run = await deps.reviewService.beginReviewAsync(body.pullRequestId || "", body.repositoryId);
+  const run = await deps.reviewService.beginReviewAsync(
+    body.pullRequestId || "",
+    body.repositoryId,
+  );
   ctx.response.status = 202;
   ctx.response.body = run;
 });
@@ -156,7 +162,10 @@ router.get("/api/review/runs/stream", async (ctx) => {
   };
 
   try {
-    await deps.reviewService.runReviewStream({ pullRequestId, repositoryId, maxCycles, trace }, send);
+    await deps.reviewService.runReviewStream(
+      { pullRequestId, repositoryId, maxCycles, trace },
+      send,
+    );
   } catch (error) {
     const message = error instanceof AppError ? error.message : "review_stream_failed";
     send({ type: "log", level: "error", message });
@@ -165,35 +174,35 @@ router.get("/api/review/runs/stream", async (ctx) => {
   }
 });
 
-router.get("/api/review/runs/:runId", (ctx) => {
+router.get("/api/review/runs/:runId", async (ctx) => {
   const runId = ctx.params.runId || "";
-  ctx.response.body = deps.reviewService.getReviewRun(runId);
+  ctx.response.body = await deps.reviewService.getReviewRun(runId);
 });
 
-router.get("/api/review/runs/:runId/events", (ctx) => {
+router.get("/api/review/runs/:runId/events", async (ctx) => {
   const runId = ctx.params.runId || "";
   ctx.response.body = {
-    events: deps.reviewService.streamReviewEvents(runId),
+    events: await deps.reviewService.streamReviewEvents(runId),
   };
 });
 
-router.get("/api/review/runs/:runId/findings", (ctx) => {
+router.get("/api/review/runs/:runId/findings", async (ctx) => {
   const runId = ctx.params.runId || "";
   ctx.response.body = {
-    findings: deps.repository.getFindings(runId),
+    findings: await deps.repository.getFindings(runId),
   };
 });
 
-router.get("/api/review/runs/:runId/checklist", (ctx) => {
+router.get("/api/review/runs/:runId/checklist", async (ctx) => {
   const runId = ctx.params.runId || "";
   ctx.response.body = {
-    checklist: deps.repository.getChecklist(runId),
+    checklist: await deps.repository.getChecklist(runId),
   };
 });
 
 router.post("/api/review/runs/:runId/pr-comment", async (ctx) => {
   const runId = ctx.params.runId || "";
-  const record = deps.reviewService.getReviewAgentRun(runId);
+  const record = await deps.reviewService.getReviewAgentRun(runId);
   if (!record) {
     ctx.response.status = 404;
     ctx.response.body = { message: "review_run_not_found" };
@@ -213,7 +222,7 @@ router.post("/api/review/runs/:runId/pr-comment", async (ctx) => {
 router.post("/api/review/runs/:runId/findings/:findingId/suggestion", async (ctx) => {
   const runId = ctx.params.runId || "";
   const findingId = ctx.params.findingId || "";
-  const record = deps.reviewService.getReviewAgentRun(runId);
+  const record = await deps.reviewService.getReviewAgentRun(runId);
   if (!record) {
     ctx.response.status = 404;
     ctx.response.body = { message: "review_run_not_found" };
@@ -245,7 +254,7 @@ router.post("/api/review/runs/:runId/findings/:findingId/suggestion", async (ctx
 router.post("/api/review/runs/:runId/findings/:findingId/comment", async (ctx) => {
   const runId = ctx.params.runId || "";
   const findingId = ctx.params.findingId || "";
-  const record = deps.reviewService.getReviewAgentRun(runId);
+  const record = await deps.reviewService.getReviewAgentRun(runId);
   if (!record) {
     ctx.response.status = 404;
     ctx.response.body = { message: "review_run_not_found" };
@@ -272,19 +281,19 @@ router.post("/api/review/runs/:runId/findings/:findingId/comment", async (ctx) =
   ctx.response.body = { posted: true, url: result.htmlUrl };
 });
 
-router.post("/api/review/runs/:runId/cancel", (ctx) => {
+router.post("/api/review/runs/:runId/cancel", async (ctx) => {
   const runId = ctx.params.runId || "";
   ctx.response.body = {
-    cancelled: deps.reviewService.cancelReview(runId),
+    cancelled: await deps.reviewService.cancelReview(runId),
   };
 });
 
-router.get("/api/review/agent/runs", (ctx) => {
-  ctx.response.body = { runs: deps.reviewService.listReviewAgentRuns() };
+router.get("/api/review/agent/runs", async (ctx) => {
+  ctx.response.body = { runs: await deps.reviewService.listReviewAgentRuns() };
 });
 
-router.get("/api/review/agent/runs/:runId", (ctx) => {
-  const record = deps.reviewService.getReviewAgentRun(ctx.params.runId || "");
+router.get("/api/review/agent/runs/:runId", async (ctx) => {
+  const record = await deps.reviewService.getReviewAgentRun(ctx.params.runId || "");
   if (!record) {
     ctx.response.status = 404;
     ctx.response.body = { error: "review_agent_run_not_found" };
@@ -293,8 +302,8 @@ router.get("/api/review/agent/runs/:runId", (ctx) => {
   ctx.response.body = record;
 });
 
-router.get("/api/review/agent/runs/:runId/report", (ctx) => {
-  const record = deps.reviewService.getReviewAgentRun(ctx.params.runId || "");
+router.get("/api/review/agent/runs/:runId/report", async (ctx) => {
+  const record = await deps.reviewService.getReviewAgentRun(ctx.params.runId || "");
   if (!record) {
     ctx.response.status = 404;
     ctx.response.body = { error: "review_agent_run_not_found" };
@@ -305,13 +314,15 @@ router.get("/api/review/agent/runs/:runId/report", (ctx) => {
   ctx.response.body = record.report;
 });
 
-router.get("/api/review/agent/runs/:runId/export", (ctx) => {
+router.get("/api/review/agent/runs/:runId/export", async (ctx) => {
   const runId = ctx.params.runId || "";
-  const bundle = deps.reviewService.buildReviewExport(runId);
+  const bundle = await deps.reviewService.buildReviewExport(runId);
   if (!bundle) {
-    const record = deps.reviewService.getReviewAgentRun(runId);
+    const record = await deps.reviewService.getReviewAgentRun(runId);
     ctx.response.status = record ? 409 : 404;
-    ctx.response.body = { error: record ? "review_agent_run_not_traced" : "review_agent_run_not_found" };
+    ctx.response.body = {
+      error: record ? "review_agent_run_not_traced" : "review_agent_run_not_found",
+    };
     return;
   }
   ctx.response.headers.set("content-type", "application/zip");
@@ -319,16 +330,16 @@ router.get("/api/review/agent/runs/:runId/export", (ctx) => {
   ctx.response.body = bundle;
 });
 
-router.get("/api/artifacts/:runId/markdown", (ctx) => {
+router.get("/api/artifacts/:runId/markdown", async (ctx) => {
   const runId = ctx.params.runId || "";
   ctx.response.headers.set("content-type", "text/markdown; charset=utf-8");
-  ctx.response.body = deps.artifactService.exportMarkdownReview(runId);
+  ctx.response.body = await deps.artifactService.exportMarkdownReview(runId);
 });
 
-router.get("/api/artifacts/:runId/graph", (ctx) => {
+router.get("/api/artifacts/:runId/graph", async (ctx) => {
   const runId = ctx.params.runId || "";
   ctx.response.headers.set("content-type", "application/json; charset=utf-8");
-  ctx.response.body = deps.artifactService.exportGraphJson(runId);
+  ctx.response.body = await deps.artifactService.exportGraphJson(runId);
 });
 
 router.post("/api/cdp/sessions", async (ctx) => {
@@ -398,12 +409,12 @@ router.get("/api/cdp/retv/run/stream", async (ctx) => {
   }
 });
 
-router.get("/api/cdp/retv/runs", (ctx) => {
-  ctx.response.body = { runs: deps.cdpRetvAgentService.listRuns() };
+router.get("/api/cdp/retv/runs", async (ctx) => {
+  ctx.response.body = { runs: await deps.cdpRetvAgentService.listRuns() };
 });
 
-router.get("/api/cdp/retv/runs/:runId", (ctx) => {
-  const record = deps.cdpRetvAgentService.getRun(ctx.params.runId || "");
+router.get("/api/cdp/retv/runs/:runId", async (ctx) => {
+  const record = await deps.cdpRetvAgentService.getRun(ctx.params.runId || "");
   if (!record) {
     ctx.response.status = 404;
     ctx.response.body = { error: "retv_run_not_found" };
@@ -412,8 +423,8 @@ router.get("/api/cdp/retv/runs/:runId", (ctx) => {
   ctx.response.body = record;
 });
 
-router.get("/api/cdp/retv/runs/:runId/report", (ctx) => {
-  const record = deps.cdpRetvAgentService.getRun(ctx.params.runId || "");
+router.get("/api/cdp/retv/runs/:runId/report", async (ctx) => {
+  const record = await deps.cdpRetvAgentService.getRun(ctx.params.runId || "");
   if (!record) {
     ctx.response.status = 404;
     ctx.response.body = { error: "retv_run_not_found" };
@@ -424,10 +435,10 @@ router.get("/api/cdp/retv/runs/:runId/report", (ctx) => {
   ctx.response.body = record.report;
 });
 
-router.get("/api/cdp/retv/runs/:runId/export", (ctx) => {
-  const bundle = deps.cdpRetvAgentService.buildRunExport(ctx.params.runId || "");
+router.get("/api/cdp/retv/runs/:runId/export", async (ctx) => {
+  const bundle = await deps.cdpRetvAgentService.buildRunExport(ctx.params.runId || "");
   if (!bundle) {
-    const record = deps.cdpRetvAgentService.getRun(ctx.params.runId || "");
+    const record = await deps.cdpRetvAgentService.getRun(ctx.params.runId || "");
     ctx.response.status = record ? 409 : 404;
     ctx.response.body = { error: record ? "retv_run_not_traced" : "retv_run_not_found" };
     return;
@@ -436,7 +447,6 @@ router.get("/api/cdp/retv/runs/:runId/export", (ctx) => {
   ctx.response.headers.set("content-disposition", `attachment; filename="${bundle.filename}"`);
   ctx.response.body = bundle.bytes;
 });
-
 
 router.get("/api/cdp/retv/config", (ctx) => {
   ctx.response.body = deps.cdpRetvAgentService.getPlannerConfig();
@@ -495,7 +505,9 @@ export function errorMiddleware() {
   };
 }
 
-function githubOAuthCallbackHtml(input: { ok: boolean; webOrigin?: string; message: string }): string {
+function githubOAuthCallbackHtml(
+  input: { ok: boolean; webOrigin?: string; message: string },
+): string {
   const payload = {
     source: "capillary-github-oauth",
     ok: input.ok,
@@ -508,8 +520,8 @@ function githubOAuthCallbackHtml(input: { ok: boolean; webOrigin?: string; messa
   return [
     "<!doctype html>",
     "<html>",
-    "<head><meta charset=\"utf-8\"><title>GitHub OAuth</title></head>",
-    "<body style=\"font-family:sans-serif;padding:24px;\">",
+    '<head><meta charset="utf-8"><title>GitHub OAuth</title></head>',
+    '<body style="font-family:sans-serif;padding:24px;">',
     `<h2>${input.ok ? "Connected" : "Connection failed"}</h2>`,
     `<p>${safeMessage}</p>`,
     "<p>You can close this window.</p>",
