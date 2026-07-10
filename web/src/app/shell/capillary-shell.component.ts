@@ -203,7 +203,7 @@ import { MarkdownPipe } from "./markdown.pipe";
                 <span>Previous Reviews</span>
                 <button class="cap-button cap-button-ghost" (click)="store.loadReviewRunHistory()">Refresh</button>
               </header>
-              <div class="cap-panel-body cap-list">
+              <div class="cap-panel-body cap-list cap-history-scroll">
                 @if (store.reviewRunHistory().length === 0) {
                   <p class="cap-muted">No saved reviews yet.</p>
                 }

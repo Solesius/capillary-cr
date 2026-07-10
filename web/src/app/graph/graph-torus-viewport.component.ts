@@ -154,7 +154,7 @@ interface TrailRow {
       letter-spacing: 0.05em;
       text-transform: uppercase;
       padding: 4px 12px;
-      border-radius: 99px;
+      border-radius: 3px;
       border: 1px solid var(--cap-border);
       background: transparent;
       color: var(--cap-muted);
@@ -187,7 +187,7 @@ interface TrailRow {
       flex-direction: column;
       gap: 2px;
       padding: 8px 10px;
-      border-radius: 8px;
+      border-radius: 4px;
       border: 1px solid var(--cap-border);
       background: var(--cap-surface, #0e1420);
       pointer-events: none;
@@ -255,7 +255,7 @@ interface TrailRow {
       text-transform: uppercase;
       letter-spacing: 0.06em;
       padding: 2px 8px;
-      border-radius: 99px;
+      border-radius: 3px;
       border: 1px solid var(--cap-border);
       color: var(--cap-muted);
       white-space: nowrap;

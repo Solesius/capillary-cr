@@ -150,7 +150,7 @@ import { CapillaryStore } from "../state/capillary.store";
       text-transform: uppercase;
       letter-spacing: 0.06em;
       padding: 3px 8px;
-      border-radius: 99px;
+      border-radius: 3px;
     }
     .cap-status-pill--ok {
       background: rgba(15, 118, 110, 0.12);

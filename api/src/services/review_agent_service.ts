@@ -489,6 +489,7 @@ export class ReviewAgentService {
     // Hot paths the agent is obliged to examine before Confirm is legitimate.
     const hotPaths = [...new Set(capture.riskSurfaces.map((surface) => surface.path))].slice(0, 10);
     const examinedPaths = new Set<string>();
+    let tokensUsed = 0;
 
     let verdict = "";
     let summary = "";
@@ -536,6 +537,8 @@ export class ReviewAgentService {
         stopReason = "planner_error";
         break;
       }
+
+      tokensUsed += (reply.value.inputTokens ?? 0) + (reply.value.outputTokens ?? 0);
 
       const payload = extractJsonObject(reply.value.content);
       if (!payload) {
@@ -645,6 +648,7 @@ export class ReviewAgentService {
         findingCount: cycleFindings.length,
         gatesCovered: coveredGates.size,
         gatesTotal: TCSRTC_GATES.length,
+        tokensUsed,
       });
       this.repository.appendReviewEvent(
         input.runId,

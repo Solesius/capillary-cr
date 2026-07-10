@@ -222,6 +222,7 @@ export type ReviewRunEvent =
     findingCount: number;
     gatesCovered: number;
     gatesTotal: number;
+    tokensUsed: number;
   }
   | { type: "report"; markdown: string }
   | { type: "done"; result: ReviewRunResult };

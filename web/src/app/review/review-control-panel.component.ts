@@ -14,7 +14,7 @@ import { MarkdownPipe } from "../shell/markdown.pipe";
     <section>
       <header class="cap-panel-title">
         <span>Review Control</span>
-        <span class="cap-chip">{{ reviewStatus() }}</span>
+        <span class="cap-chip" [attr.data-state]="reviewStatus()">{{ statusLabel(reviewStatus()) }}</span>
       </header>
       <div class="cap-panel-body">
         <p class="cap-muted">Target → Constrain → Sanitize → Review → Test → Confirm. The agent narrates each gate below; the final report renders when the run completes.</p>
@@ -34,8 +34,8 @@ import { MarkdownPipe } from "../shell/markdown.pipe";
           <span [style.width.%]="store.progress()"></span>
         </div>
         <div class="cap-row" style="margin-top: 8px;">
-          <p class="cap-muted">Progress {{ store.progress() }}%</p>
-          <p class="cap-muted">Phase {{ currentPhase() }}</p>
+          <p class="cap-muted">{{ store.progress() }}%</p>
+          <p class="cap-muted cap-mono-inline">{{ phaseLabel() }}</p>
         </div>
 
         <div class="cap-row" style="margin-top: 14px;">
@@ -53,21 +53,25 @@ import { MarkdownPipe } from "../shell/markdown.pipe";
           </button>
         </div>
 
-        <label class="cap-row cap-trace-toggle" style="margin-top: 10px; gap: 8px; cursor: pointer;">
-          <input
-            type="checkbox"
-            [checked]="store.reviewTraceEnabled()"
-            (change)="onTraceToggle($event)" />
-          <span class="cap-muted">Trace this review (retain tool trace + capture; enables bundle export)</span>
-        </label>
-
-        <label class="cap-row cap-trace-toggle" style="margin-top: 8px; gap: 8px; cursor: pointer;">
-          <input
-            type="checkbox"
-            [checked]="store.reviewSuggestEnabled()"
-            (change)="onSuggestToggle($event)" />
-          <span class="cap-muted">Enable suggestions (agent emits committable code fixes; uses more tokens)</span>
-        </label>
+        <div class="cap-run-options">
+          <p class="cap-run-options-label">Run Options</p>
+          <label class="cap-option-row">
+            <input
+              type="checkbox"
+              [checked]="store.reviewTraceEnabled()"
+              (change)="onTraceToggle($event)" />
+            <span class="cap-option-name">Trace review</span>
+            <span class="cap-option-hint">Retain tool trace + capture bundle</span>
+          </label>
+          <label class="cap-option-row">
+            <input
+              type="checkbox"
+              [checked]="store.reviewSuggestEnabled()"
+              (change)="onSuggestToggle($event)" />
+            <span class="cap-option-name">Suggestions</span>
+            <span class="cap-option-hint">Allow committable code fixes (more tokens)</span>
+          </label>
+        </div>
 
         @if (store.selectedPullRequest()) {
           <div class="cap-card" style="margin-top: 14px;">
@@ -96,10 +100,18 @@ import { MarkdownPipe } from "../shell/markdown.pipe";
         <div class="cap-activity-head" style="margin-top: 14px;">
           <div class="cap-row">
             <strong>Live Review Output</strong>
-            <span class="cap-live-chip" [class.active]="agentWorking()">
-              <span class="cap-live-dot"></span>
-              {{ agentWorking() ? 'agent cycling' : 'idle' }}
-            </span>
+            <div class="cap-row" style="gap: 10px;">
+              @if (store.reviewTokensUsed() > 0) {
+                <span class="cap-token-meter" title="Model tokens consumed by this run">
+                  <span class="cap-token-value">{{ store.reviewTokensUsed() | number }}</span>
+                  <span class="cap-token-unit">tok</span>
+                </span>
+              }
+              <span class="cap-live-chip" [class.active]="agentWorking()">
+                <span class="cap-live-dot"></span>
+                {{ agentWorking() ? 'cycling' : 'idle' }}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -159,36 +171,33 @@ import { MarkdownPipe } from "../shell/markdown.pipe";
               </div>
             </div>
           } @else {
-            <div class="cap-review-output-shell cap-narrative">
+            <div class="cap-review-output-shell cap-narrative cap-console">
               @for (entry of narrative(); track entry.id) {
-                @switch (entry.kind) {
-                  @case ('stage') {
-                    <div class="cap-nar-stage">{{ entry.text }}</div>
-                  }
-                  @case ('thinking') {
-                    <div class="cap-nar-thinking">
-                      <span class="cap-nar-gate">{{ entry.gate }}</span>
-                      <p class="cap-nar-text">{{ entry.text }}</p>
-                    </div>
-                  }
-                  @case ('tool') {
-                    <div class="cap-nar-tool" [class.cap-nar-tool--fail]="entry.ok === false">
-                      <span class="cap-nar-tool-name">{{ entry.tool }}</span>
-                      <span class="cap-nar-tool-why">{{ entry.text }}</span>
-                    </div>
-                  }
-                  @case ('finding') {
-                    <div class="cap-nar-finding" [attr.data-severity]="entry.severity">
-                      <span class="cap-nar-sev">{{ entry.severity }}</span>
-                      <span>{{ entry.text }}</span>
-                    </div>
-                  }
-                  @case ('gate') {
-                    <div class="cap-nar-gatedone">
-                      {{ entry.gate }} gate — cycle {{ entry.cycle }} closed with {{ entry.text }}.
-                    </div>
-                  }
-                }
+                <div class="cap-con-row" [attr.data-kind]="entry.kind" [attr.data-severity]="entry.severity">
+                  <span class="cap-con-badge">{{ badgeFor(entry) }}</span>
+                  <div class="cap-con-body">
+                    @switch (entry.kind) {
+                      @case ('thinking') {
+                        <span class="cap-con-text">{{ entry.text }}</span>
+                      }
+                      @case ('tool') {
+                        <span class="cap-con-mono">{{ entry.tool }}</span>
+                        <span class="cap-con-dim">{{ entry.text }}</span>
+                      }
+                      @case ('finding') {
+                        <span class="cap-con-sev">{{ entry.severity }}</span>
+                        <span class="cap-con-text">{{ entry.text }}</span>
+                      }
+                      @case ('gate') {
+                        <span class="cap-con-mono">{{ entry.gate }}</span>
+                        <span class="cap-con-dim">cycle {{ entry.cycle }} · {{ entry.text }}</span>
+                      }
+                      @default {
+                        <span class="cap-con-text">{{ entry.text }}</span>
+                      }
+                    }
+                  </div>
+                </div>
               }
             </div>
           }
@@ -215,7 +224,7 @@ import { MarkdownPipe } from "../shell/markdown.pipe";
       align-items: center;
       gap: 7px;
       padding: 5px 11px;
-      border-radius: 99px;
+      border-radius: 3px;
       border: 1px solid var(--cap-border);
       background: var(--cap-surface-raised);
       color: var(--cap-muted);
@@ -263,7 +272,7 @@ import { MarkdownPipe } from "../shell/markdown.pipe";
     .cap-modal-card {
       width: min(440px, calc(100vw - 48px));
       padding: 26px 26px 22px;
-      border-radius: 16px;
+      border-radius: 6px;
       border: 1px solid var(--cap-border);
       background: var(--cap-surface, #0e1420);
       box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
@@ -274,7 +283,7 @@ import { MarkdownPipe } from "../shell/markdown.pipe";
       height: 42px;
       display: grid;
       place-items: center;
-      border-radius: 12px;
+      border-radius: 4px;
       border: 1px solid var(--cap-border);
       background: var(--cap-surface-raised);
       font-size: 1.1rem;
@@ -312,7 +321,7 @@ import { MarkdownPipe } from "../shell/markdown.pipe";
       letter-spacing: 0.05em;
       text-transform: uppercase;
       padding: 3px 9px;
-      border-radius: 99px;
+      border-radius: 3px;
       border: 1px solid var(--cap-border);
       color: var(--cap-muted);
       background: transparent;
@@ -408,6 +417,33 @@ import { MarkdownPipe } from "../shell/markdown.pipe";
 export class ReviewControlPanelComponent {
   readonly store = inject(CapillaryStore);
   readonly gates = TCSRTC_GATES;
+
+  // Live phase readout — show the active gate + cycle while running, not "idle".
+  readonly phaseLabel = computed(() => {
+    const status = this.store.status();
+    if (status === "reviewing") {
+      const gate = this.store.reviewCurrentGate();
+      const cycle = this.store.reviewCycle();
+      return `Gate ${gate ?? "—"} · Cycle ${cycle || 1}`;
+    }
+    return this.statusLabel(status);
+  });
+
+  // Humanize raw status enums (PULL_REQUEST_SELECTED -> "PR selected").
+  statusLabel(status: string): string {
+    const map: Record<string, string> = {
+      idle: "Idle",
+      pull_request_selected: "PR selected",
+      queued: "Queued",
+      graphing: "Mapping",
+      wetting: "Impact",
+      reviewing: "Reviewing",
+      completed: "Complete",
+      failed: "Failed",
+      cancelled: "Cancelled",
+    };
+    return map[status.toLowerCase()] ?? status.replace(/_/g, " ");
+  }
   readonly reviewStatus = computed(() => this.store.reviewRun()?.status ?? this.store.status());
   readonly showFinalOutput = computed(() => this.store.status() === "completed" && Boolean(this.store.reviewReport()));
   readonly narrative = computed(() => this.store.reviewNarrative().slice(-48));
@@ -448,6 +484,24 @@ export class ReviewControlPanelComponent {
 
   postToPr(): void {
     void this.store.postReviewSummaryToPr();
+  }
+
+  // Console type badge per narrative event.
+  badgeFor(entry: { kind: string; text?: string }): string {
+    switch (entry.kind) {
+      case "stage":
+        return /torus|graph|mapped|dag/i.test(entry.text ?? "") ? "GRAPH" : "STAGE";
+      case "thinking":
+        return "THINK";
+      case "tool":
+        return "TOOL";
+      case "finding":
+        return "FIND";
+      case "gate":
+        return "GATE";
+      default:
+        return "•";
+    }
   }
 
   readonly runningCount = computed(() =>
