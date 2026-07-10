@@ -57,8 +57,11 @@ const MAX_FILE_CHARS = 20_000;
 // Per-read content the planner sees next turn, and how many recent reads to
 // carry at full length. Sized so the model reasons over real diffs/files
 // instead of stubs, while bounding context growth.
-const MAX_READ_FEEDBACK_CHARS = 7_000;
-const MAX_RECENT_RESULTS = 4;
+const MAX_READ_FEEDBACK_CHARS = 6_000;
+// Total budget for non-barred read content in the planner context; barred
+// (over-read) paths are always included on top of this so an examined file
+// is never reduced to a stub while the planner is forbidden to re-read it.
+const MAX_READ_FEEDBACK_TOTAL_CHARS = 36_000;
 // After this many reads of the same path, tell the planner to stop and decide.
 const REREAD_LIMIT = 2;
 
@@ -482,13 +485,19 @@ export class ReviewAgentService {
     // Full (generously-capped) content of the most recent read results — this
     // is the channel the planner actually reasons over, so a diff the agent
     // read is visible next turn instead of a 400-char stub.
-    const recentResults: { cycle: number; tool: string; path: string; output: string }[] = [];
+    // Latest full read content keyed by path. Keyed (not a FIFO window) so a
+    // file the planner is barred from re-reading (examinedPaths) never loses
+    // its content — the two structures must not disagree, or the planner ends
+    // up reasoning from a stub about a file it cannot re-open.
+    const readContentByPath = new Map<string, { cycle: number; tool: string; output: string }>();
     // How many times each path has been read — used to stop re-read loops.
     const readCounts = new Map<string, number>();
     const coveredGates = new Set<TcsrtcGate>();
     // Hot paths the agent is obliged to examine before Confirm is legitimate.
     const hotPaths = [...new Set(capture.riskSurfaces.map((surface) => surface.path))].slice(0, 10);
     const examinedPaths = new Set<string>();
+    let inputTokens = 0;
+    let outputTokens = 0;
 
     let verdict = "";
     let summary = "";
@@ -505,10 +514,36 @@ export class ReviewAgentService {
       const overRead = [...readCounts.entries()]
         .filter(([, count]) => count > REREAD_LIMIT)
         .map(([path]) => path);
+      // Retention invariant: content for any path the planner is barred from
+      // re-reading (over-read) must always be visible — otherwise the planner
+      // reasons from a stub about a file it cannot re-open. Include those
+      // first, then fill the remaining budget with other reads, newest first.
+      const overReadSet = new Set(overRead);
+      const retainedReads: { cycle: number; tool: string; path: string; output: string }[] = [];
+      let retainedChars = 0;
+      const pushRead = (path: string, entry: { cycle: number; tool: string; output: string }) => {
+        retainedReads.push({ ...entry, path });
+        retainedChars += entry.output.length;
+      };
+      for (const path of overRead) {
+        const entry = readContentByPath.get(path);
+        if (entry) {
+          pushRead(path, entry);
+        }
+      }
+      for (const [path, entry] of [...readContentByPath.entries()].reverse()) {
+        if (overReadSet.has(path)) {
+          continue;
+        }
+        if (retainedChars + entry.output.length > MAX_READ_FEEDBACK_TOTAL_CHARS) {
+          break;
+        }
+        pushRead(path, entry);
+      }
       const userMessage = buildPlannerUserMessage(
         capture,
         observations,
-        recentResults,
+        retainedReads,
         recordedFindings,
         cycle,
         budget,
@@ -536,6 +571,9 @@ export class ReviewAgentService {
         stopReason = "planner_error";
         break;
       }
+
+      inputTokens += reply.value.inputTokens ?? 0;
+      outputTokens += reply.value.outputTokens ?? 0;
 
       const payload = extractJsonObject(reply.value.content);
       if (!payload) {
@@ -586,13 +624,15 @@ export class ReviewAgentService {
         }
 
         const output = clamp(result.output, MAX_TOOL_OUTPUT_CHARS);
-        // Keep full read content available to the planner next turn (the real
-        // reasoning channel); a short older-history line stays in observations.
-        if (READ_TOOLS.has(tool) && result.ok) {
-          recentResults.push({ cycle, tool, path: argPath, output: clamp(result.output, MAX_READ_FEEDBACK_CHARS) });
-          while (recentResults.length > MAX_RECENT_RESULTS) {
-            recentResults.shift();
-          }
+        // Retain the latest full content per path so the planner can always
+        // reason over any file it has examined (never a stub for a file it is
+        // barred from re-reading).
+        if (READ_TOOLS.has(tool) && result.ok && argPath) {
+          readContentByPath.set(argPath, {
+            cycle,
+            tool,
+            output: clamp(result.output, MAX_READ_FEEDBACK_CHARS),
+          });
         }
         observations.push(`cycle ${cycle} ${tool}${argPath ? ` ${argPath}` : ""}: ${clamp(result.output, 200)}`);
         steps.push({
@@ -645,6 +685,9 @@ export class ReviewAgentService {
         findingCount: cycleFindings.length,
         gatesCovered: coveredGates.size,
         gatesTotal: TCSRTC_GATES.length,
+        tokensUsed: inputTokens + outputTokens,
+        inputTokens,
+        outputTokens,
       });
       this.repository.appendReviewEvent(
         input.runId,

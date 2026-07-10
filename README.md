@@ -17,11 +17,18 @@ One command, everything included (UI, browser agent, durable storage):
 ```bash
 docker run -d --name capillary -p 8080:8080 \
   -v capillary-data:/var/lib/capillary \
-  -e GITHUB_OAUTH_CLIENT_ID=your_client_id \
+  -e CAPILLARY_GITHUB_TOKEN=github_pat_... \
   ghcr.io/solesius/capillary-cr:latest
 ```
 
-Open **http://localhost:8080**, connect GitHub (device flow — or paste a PAT and skip the client id), pick a PR, hit **Begin Review**. Compose users: clone the repo and `docker compose up -d`. Details in [Docker deploy](#docker-deploy-single-instance).
+Open **http://localhost:8080**, pick a PR, hit **Begin Review**. Compose users: clone the repo and `docker compose up -d`. Details in [Docker deploy](#docker-deploy-single-instance).
+
+**GitHub access — use an environment token.** `CAPILLARY_GITHUB_TOKEN` connects an identity at boot, never travels through the browser, and reaches **org and private** repos (device-flow login against the built-in OAuth app only surfaces public repos for org accounts). Grant the minimum:
+
+- **Fine-grained PAT** (recommended): resource owner = your org or account, selected repositories, permissions **Contents: read**, **Metadata: read**, **Pull requests: read and write** (write only enables posting review comments/suggestions — drop to read-only if you never post).
+- **Classic PAT**: `repo` scope.
+
+Pasting a PAT into the UI works for a quick trial (it stays in memory only), but the env token is the recommended path.
 
 ## Quick start — local
 
@@ -102,20 +109,17 @@ make dev          # starts API (port 8080) and Angular dev server (port 4200) co
 make test         # Deno type-check + test, Angular unit tests, Playwright e2e scaffold
 ```
 
-GitHub OAuth setup (two minutes):
-
-1. Go to https://github.com/settings/developers → OAuth Apps → New OAuth App
-2. Homepage URL: `http://localhost:8080`
-3. Callback URL: `http://localhost:8080/api/github/oauth/callback`
-4. Copy your Client ID into `.env` as `GITHUB_OAUTH_CLIENT_ID`
-5. Client Secret is optional — device flow works without it
+GitHub access (recommended — environment token):
 
 ```bash
 cp .env.example .env
-# fill in GITHUB_OAUTH_CLIENT_ID at minimum
+# CAPILLARY_GITHUB_TOKEN=github_pat_...   (fine-grained: Contents+Metadata read,
+#                                          Pull requests read/write; or classic: repo)
 # add an LLM provider key for the review agent (ANTHROPIC_API_KEY, GEMINI_API_KEY, etc.)
 make dev
 ```
+
+Prefer this over browser login: it reaches org/private repos and never exposes the token to the client. OAuth device/web login is available as an alternative (set `GITHUB_OAUTH_CLIENT_ID` from your own OAuth App), but for org repos an admin must grant that app under the org's third-party access policy — a scoped PAT sidesteps that.
 
 ---
 

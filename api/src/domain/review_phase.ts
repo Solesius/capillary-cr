@@ -150,6 +150,12 @@ export type ReviewRunEvent =
     findingCount: number;
     gatesCovered: number;
     gatesTotal: number;
+    /** Cumulative model tokens consumed by the run so far (0 if unreported). */
+    tokensUsed: number;
+    /** Cumulative input (prompt) tokens. */
+    inputTokens: number;
+    /** Cumulative output (completion) tokens. */
+    outputTokens: number;
   }
   | { type: "report"; markdown: string }
   | { type: "done"; result: ReviewRunResult };

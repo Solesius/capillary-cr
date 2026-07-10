@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { ChangeDetectionStrategy, Component, effect, ElementRef, inject, signal, viewChild } from "@angular/core";
+import { ChangeDetectionStrategy, Component, computed, effect, ElementRef, inject, signal, viewChild } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { GitHubRepositoryPickerComponent } from "../github/github-repository-picker.component";
 import { GraphTorusViewportComponent } from "../graph/graph-torus-viewport.component";
 import { PullRequestCardGridComponent } from "../pr/pull-request-card-grid.component";
 import { ReviewControlPanelComponent } from "../review/review-control-panel.component";
+import { ApiClientService } from "../services/api-client.service";
 import { CapillaryStore } from "../state/capillary.store";
 import { RetvPlannerProviderKind } from "../models";
 import { MarkdownPipe } from "./markdown.pipe";
@@ -23,6 +24,7 @@ import { MarkdownPipe } from "./markdown.pipe";
   ],
   template: `
     <div class="cap-app">
+      <div class="cap-netbar" [class.active]="networkBusy()" aria-hidden="true"><span></span></div>
       <header class="cap-appbar">
         <div class="cap-appbar-row">
           <section class="cap-appbar-left">
@@ -41,7 +43,7 @@ import { MarkdownPipe } from "./markdown.pipe";
           </section>
 
           <section class="cap-appbar-right">
-            <span class="cap-chip">{{ store.status() }}</span>
+            <span class="cap-chip" [attr.data-state]="store.status()">{{ statusLabel(store.status()) }}</span>
             <button
               class="cap-icon-button cap-theme-toggle"
               type="button"
@@ -203,7 +205,7 @@ import { MarkdownPipe } from "./markdown.pipe";
                 <span>Previous Reviews</span>
                 <button class="cap-button cap-button-ghost" (click)="store.loadReviewRunHistory()">Refresh</button>
               </header>
-              <div class="cap-panel-body cap-list">
+              <div class="cap-panel-body cap-list cap-history-scroll">
                 @if (store.reviewRunHistory().length === 0) {
                   <p class="cap-muted">No saved reviews yet.</p>
                 }
@@ -508,28 +510,20 @@ import { MarkdownPipe } from "./markdown.pipe";
 
                   <div class="cap-list">
                     <label class="cap-muted" for="retvModel">Model</label>
-                    @if (setupModelChoices().length > 0) {
-                      <select
-                        id="retvModel"
-                        class="cap-select"
-                        [value]="setupModelInput()"
-                        (change)="setupModelInput.set($any($event.target).value)">
-                        @for (m of setupModelChoices(); track m) {
-                          <option [value]="m">{{ m }}</option>
-                        }
-                        @if (!setupModelChoices().includes(setupModelInput())) {
-                          <option [value]="setupModelInput()">{{ setupModelInput() }} (custom)</option>
-                        }
-                      </select>
-                    } @else {
-                      <input
-                        id="retvModel"
-                        class="cap-input"
-                        [value]="setupModelInput()"
-                        (input)="setupModelInput.set($any($event.target).value)"
-                        placeholder="model id" />
-                    }
-                    <p class="cap-muted">Model is switchable for every provider; the endpoint stays pinned unless local.</p>
+                    <input
+                      id="retvModel"
+                      class="cap-input"
+                      list="retvModelChoices"
+                      autocomplete="off"
+                      [value]="setupModelInput()"
+                      (input)="setupModelInput.set($any($event.target).value)"
+                      placeholder="type any model id" />
+                    <datalist id="retvModelChoices">
+                      @for (m of setupModelChoices(); track m) {
+                        <option [value]="m"></option>
+                      }
+                    </datalist>
+                    <p class="cap-muted">Type any model id, or pick a suggestion. The endpoint stays pinned unless local.</p>
                   </div>
 
                   <p class="cap-muted">
@@ -601,6 +595,24 @@ import { MarkdownPipe } from "./markdown.pipe";
 })
 export class CapillaryShellComponent {
   readonly store = inject(CapillaryStore);
+  private readonly api = inject(ApiClientService);
+  readonly networkBusy = computed(() => this.api.inFlight() > 0);
+
+  statusLabel(status: string): string {
+    const map: Record<string, string> = {
+      idle: "Idle",
+      pull_request_selected: "PR selected",
+      repository_selected: "Repo selected",
+      queued: "Queued",
+      graphing: "Mapping",
+      wetting: "Impact",
+      reviewing: "Reviewing",
+      completed: "Complete",
+      failed: "Failed",
+      cancelled: "Cancelled",
+    };
+    return map[status.toLowerCase()] ?? status.replace(/_/g, " ").toLowerCase();
+  }
   private readonly agentConsoleBox = viewChild<ElementRef<HTMLElement>>("agentConsoleBox");
   readonly activePage = signal<"run" | "github" | "setup" | "agent">("run");
   readonly theme = signal<"light" | "dark">(this.readStoredTheme());
