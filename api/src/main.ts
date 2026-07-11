@@ -73,7 +73,10 @@ app.use(async (ctx, next) => {
   if (ctx.request.url.pathname === "/healthz") {
     ctx.response.status = 200;
     ctx.response.headers.set("cache-control", "no-store");
-    ctx.response.body = { status: "ok" };
+    // Stays 200 for liveness even if persistence has degraded — the container
+    // must not restart-loop on a storage hiccup. `storage.healthy: false` (with
+    // writeFailures + lastError) is the signal to alert on.
+    ctx.response.body = { status: "ok", storage: deps.storageHealth.snapshot() };
     return;
   }
 

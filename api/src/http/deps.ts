@@ -13,6 +13,7 @@ import { AgenticReviewService } from "../services/agentic_review_orchestrator_se
 import { ReviewSessionHub } from "../services/review_session_hub.ts";
 import { TcsrctReviewService } from "../services/tcsrct_review_service.ts";
 import { DurableReviewStore } from "../services/storage/celer_review_store.ts";
+import { storageHealth } from "../services/storage/storage_health.ts";
 
 const repository = new CelerReviewRepository();
 
@@ -23,16 +24,22 @@ const repository = new CelerReviewRepository();
 // (graceful fallback).
 const storageDir = Deno.env.get("CAPILLARY_STORAGE_DIR");
 if (storageDir) {
+  // Persistence failures are swallowed to keep the request path alive, but we
+  // record them so /healthz surfaces silent durability loss instead of it
+  // living only in a log line.
+  const onError = (op: string, error: unknown) => storageHealth.recordError(op, error);
   // One retry: opening an existing database can transiently fail right at
   // boot (e.g. WAL recovery after an unclean container stop) and a single
   // miss must not silently demote the process to in-memory for its lifetime.
-  let durable = await DurableReviewStore.tryOpen({ path: storageDir });
+  let durable = await DurableReviewStore.tryOpen({ path: storageDir, onError });
   if (!durable) {
     await new Promise((resolve) => setTimeout(resolve, 1500));
-    durable = await DurableReviewStore.tryOpen({ path: storageDir });
+    durable = await DurableReviewStore.tryOpen({ path: storageDir, onError });
   }
   if (durable) {
     repository.attachDurableStore(durable);
+    storageHealth.markDurable();
+    registerDurableShutdown(durable);
     console.log(`durable review storage enabled at ${storageDir}`);
   } else {
     console.warn(
@@ -91,4 +98,35 @@ export const deps = {
   cdpDriverService,
   cdpRetvAgentService,
   llmProviderService,
+  storageHealth,
 };
+
+/**
+ * Flush and close the durable store on SIGINT/SIGTERM so the last in-flight
+ * writes land on disk. RocksDB already recovers uncommitted writes from its WAL
+ * on the next open, so this is belt-and-suspenders for a clean stop (e.g. the
+ * SIGTERM `docker stop` sends) rather than the only line of defense.
+ */
+function registerDurableShutdown(store: DurableReviewStore): void {
+  let closing = false;
+  const shutdown = async (signal: string) => {
+    if (closing) return;
+    closing = true;
+    try {
+      await store.close();
+      console.log(`durable review storage flushed and closed on ${signal}`);
+    } catch (error) {
+      console.warn("durable review storage close failed on shutdown:", error);
+    } finally {
+      Deno.exit(0);
+    }
+  };
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    try {
+      Deno.addSignalListener(signal, () => void shutdown(signal));
+    } catch {
+      // Signal listeners are unsupported on some platforms (e.g. Windows);
+      // a graceful close is best-effort there and the WAL still recovers.
+    }
+  }
+}
