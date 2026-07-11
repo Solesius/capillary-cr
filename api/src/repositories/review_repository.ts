@@ -28,7 +28,8 @@ import {
   ReviewRun,
 } from "../domain/entities.ts";
 import { notFound } from "../domain/errors.ts";
-import { DurableReviewStore } from "../services/storage/celer_review_store.ts";
+import { ReviewArtifactStore } from "../services/storage/celer_review_store.ts";
+import { BoundedCache } from "./bounded_cache.ts";
 
 export interface RuntimeLlmConfig {
   providerKind: string;
@@ -90,62 +91,23 @@ export interface ReviewRepository {
 }
 
 /**
- * Bounded LRU cache in front of the durable store. Eviction is off until a
- * backing store is attached — without one the cache is the source of truth and
- * must retain everything; with one, evicting is safe because celer still holds
- * the record and a later read faults it back in.
+ * Per-entity LRU cache caps. Large payloads (graphs, diffs, RetV traces) keep
+ * small caps so resident memory stays flat; small records can afford more
+ * headroom. Overridable via the repository constructor for tuning and tests.
  */
-class BoundedCache<V> {
-  readonly #map = new Map<string, V>();
-  readonly #cap: number;
-  #evict = false;
-
-  constructor(cap: number) {
-    this.#cap = cap;
-  }
-
-  enableEviction(): void {
-    this.#evict = true;
-    this.#trim();
-  }
-
-  get(key: string): V | undefined {
-    const value = this.#map.get(key);
-    if (value !== undefined) {
-      // LRU touch: move to the most-recently-used end.
-      this.#map.delete(key);
-      this.#map.set(key, value);
-    }
-    return value;
-  }
-
-  set(key: string, value: V): void {
-    this.#map.delete(key);
-    this.#map.set(key, value);
-    this.#trim();
-  }
-
-  delete(key: string): void {
-    this.#map.delete(key);
-  }
-
-  values(): IterableIterator<V> {
-    return this.#map.values();
-  }
-
-  #trim(): void {
-    if (!this.#evict) return;
-    while (this.#map.size > this.#cap) {
-      const oldest = this.#map.keys().next().value as string | undefined;
-      if (oldest === undefined) break;
-      this.#map.delete(oldest);
-    }
-  }
+export interface CacheCaps {
+  runs: number;
+  events: number;
+  findings: number;
+  packets: number;
+  graphs: number;
+  checklists: number;
+  diffs: number;
+  retvRuns: number;
+  reviewAgentRuns: number;
 }
 
-// Per-entity cache caps. Large payloads (graphs, diffs, RetV traces) keep small
-// caps so resident memory stays flat; small records can afford more headroom.
-const CAP = {
+const DEFAULT_CAPS: CacheCaps = {
   runs: 256,
   events: 256,
   findings: 256,
@@ -155,7 +117,7 @@ const CAP = {
   diffs: 32,
   retvRuns: 8,
   reviewAgentRuns: 64,
-} as const;
+};
 
 export class CelerReviewRepository implements ReviewRepository {
   // In-memory only, never persisted (secrets + GitHub catalog).
@@ -166,24 +128,37 @@ export class CelerReviewRepository implements ReviewRepository {
   #pullRequests: PullRequest[] = [];
 
   // Bounded caches in front of the durable store.
-  #diffs = new BoundedCache<DiffFile[]>(CAP.diffs);
-  #runs = new BoundedCache<ReviewRun>(CAP.runs);
-  #runEvents = new BoundedCache<string[]>(CAP.events);
-  #graphs = new BoundedCache<GraphSnapshot>(CAP.graphs);
-  #packets = new BoundedCache<ReviewPacket>(CAP.packets);
-  #findings = new BoundedCache<ReviewFinding[]>(CAP.findings);
-  #checklist = new BoundedCache<ReviewChecklistItem[]>(CAP.checklists);
-  #retvRuns = new BoundedCache<RetvCdpRunRecord>(CAP.retvRuns);
-  #reviewAgentRuns = new BoundedCache<ReviewAgentRunRecord>(CAP.reviewAgentRuns);
+  readonly #diffs: BoundedCache<DiffFile[]>;
+  readonly #runs: BoundedCache<ReviewRun>;
+  readonly #runEvents: BoundedCache<string[]>;
+  readonly #graphs: BoundedCache<GraphSnapshot>;
+  readonly #packets: BoundedCache<ReviewPacket>;
+  readonly #findings: BoundedCache<ReviewFinding[]>;
+  readonly #checklist: BoundedCache<ReviewChecklistItem[]>;
+  readonly #retvRuns: BoundedCache<RetvCdpRunRecord>;
+  readonly #reviewAgentRuns: BoundedCache<ReviewAgentRunRecord>;
 
-  #durable: DurableReviewStore | null = null;
+  #durable: ReviewArtifactStore | null = null;
+
+  constructor(caps: Partial<CacheCaps> = {}) {
+    const c: CacheCaps = { ...DEFAULT_CAPS, ...caps };
+    this.#diffs = new BoundedCache<DiffFile[]>(c.diffs);
+    this.#runs = new BoundedCache<ReviewRun>(c.runs);
+    this.#runEvents = new BoundedCache<string[]>(c.events);
+    this.#graphs = new BoundedCache<GraphSnapshot>(c.graphs);
+    this.#packets = new BoundedCache<ReviewPacket>(c.packets);
+    this.#findings = new BoundedCache<ReviewFinding[]>(c.findings);
+    this.#checklist = new BoundedCache<ReviewChecklistItem[]>(c.checklists);
+    this.#retvRuns = new BoundedCache<RetvCdpRunRecord>(c.retvRuns);
+    this.#reviewAgentRuns = new BoundedCache<ReviewAgentRunRecord>(c.reviewAgentRuns);
+  }
 
   /**
    * Attach the durable backing store. celer becomes the source of truth and the
    * caches begin bounding themselves — nothing is replayed into memory, so boot
    * is instant and resident memory starts (and stays) flat.
    */
-  attachDurableStore(store: DurableReviewStore): void {
+  attachDurableStore(store: ReviewArtifactStore): void {
     this.#durable = store;
     for (
       const cache of [
@@ -270,14 +245,17 @@ export class CelerReviewRepository implements ReviewRepository {
     }));
   }
 
-  getPullRequest(repositoryId: string, pullRequestId: string): Promise<PullRequest> {
+  // async so a not-found rejects the promise rather than throwing
+  // synchronously — the whole repository contract is uniformly async.
+  // deno-lint-ignore require-await
+  async getPullRequest(repositoryId: string, pullRequestId: string): Promise<PullRequest> {
     const pr = this.#pullRequests.find((item) =>
       item.repositoryId === repositoryId && item.id === pullRequestId
     );
     if (!pr) {
       throw notFound("pull_request_not_found");
     }
-    return Promise.resolve(pr);
+    return pr;
   }
 
   // --- diffs (durable) ---
@@ -420,7 +398,8 @@ export class CelerReviewRepository implements ReviewRepository {
 
   // --- findings (durable) ---
   async saveFindings(runId: string, findings: ReviewFinding[]): Promise<void> {
-    this.#findings.set(runId, findings);
+    // Copy so a later mutation of the caller's array cannot corrupt the cache.
+    this.#findings.set(runId, findings.slice());
     await this.#durable?.saveFindings(runId, findings);
   }
 
@@ -439,7 +418,8 @@ export class CelerReviewRepository implements ReviewRepository {
 
   // --- checklists (durable) ---
   async saveChecklist(runId: string, items: ReviewChecklistItem[]): Promise<void> {
-    this.#checklist.set(runId, items);
+    // Copy so a later mutation of the caller's array cannot corrupt the cache.
+    this.#checklist.set(runId, items.slice());
     await this.#durable?.saveChecklist(runId, items);
   }
 

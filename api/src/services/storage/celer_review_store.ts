@@ -56,12 +56,46 @@ export interface DurableReviewStoreOptions {
 }
 
 /**
+ * The durable-store surface the repository depends on. Kept as an interface so
+ * the repository is decoupled from the FFI-backed implementation and can be
+ * exercised in unit tests against a faithful in-memory fake — no native library
+ * required. `DurableReviewStore` is the production implementation.
+ */
+export interface ReviewArtifactStore {
+  saveRun(run: ReviewRun): Promise<void>;
+  saveEvents(runId: string, events: string[]): Promise<void>;
+  saveFindings(runId: string, findings: ReviewFinding[]): Promise<void>;
+  savePacket(packet: ReviewPacket): Promise<void>;
+  saveGraph(diffDagId: string, snapshot: GraphSnapshot): Promise<void>;
+  saveChecklist(runId: string, items: ReviewChecklistItem[]): Promise<void>;
+  saveRetvRun(record: RetvCdpRunRecord): Promise<void>;
+  saveReviewAgentRun(record: ReviewAgentRunRecord): Promise<void>;
+  saveDiff(key: string, diff: DiffFile[]): Promise<void>;
+
+  getRun(runId: string): Promise<ReviewRun | null>;
+  getEvents(runId: string): Promise<string[] | null>;
+  getFindings(runId: string): Promise<ReviewFinding[] | null>;
+  getPacket(packetId: string): Promise<ReviewPacket | null>;
+  getGraph(diffDagId: string): Promise<GraphSnapshot | null>;
+  getChecklist(runId: string): Promise<ReviewChecklistItem[] | null>;
+  getRetvRun(runId: string): Promise<RetvCdpRunRecord | null>;
+  getReviewAgentRun(runId: string): Promise<ReviewAgentRunRecord | null>;
+  getDiff(key: string): Promise<DiffFile[] | null>;
+
+  listRetvRuns(): Promise<RetvCdpRunRecord[]>;
+  listReviewAgentRuns(): Promise<ReviewAgentRunRecord[]>;
+  listGraphs(): Promise<GraphSnapshot[]>;
+
+  close(): Promise<void>;
+}
+
+/**
  * Durable, source-of-truth store for review artifacts. Writes persist before
  * resolving; reads return `null` on a miss. Persistence errors are reported
  * through `onError` and surface as `null`/no-op rather than throwing, so a
  * storage hiccup degrades gracefully instead of breaking the request path.
  */
-export class DurableReviewStore {
+export class DurableReviewStore implements ReviewArtifactStore {
   #store: CelerStore;
   #onError: (op: string, error: unknown) => void;
 
