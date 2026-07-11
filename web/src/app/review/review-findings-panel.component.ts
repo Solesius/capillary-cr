@@ -13,6 +13,16 @@ import { CapillaryStore } from "../state/capillary.store";
       <header class="cap-panel-title">
         <span>Findings</span>
         <span class="cap-muted">{{ filteredFindings().length }} / {{ store.findings().length }}</span>
+        @if (postableCount() > 0) {
+          <button
+            class="cap-button cap-button-sm cap-findings-post-all"
+            type="button"
+            [class.busy]="store.postingAllComments()"
+            [disabled]="store.postingAllComments()"
+            (click)="postAll()">
+            {{ store.postingAllComments() ? 'Posting…' : 'Post all inline (' + postableCount() + ')' }}
+          </button>
+        }
       </header>
 
       <div class="cap-panel-body cap-finding-controls">
@@ -118,6 +128,17 @@ export class ReviewFindingsPanelComponent {
   postComment(findingId: string): void {
     void this.store.postFindingComment(findingId);
   }
+
+  postAll(): void {
+    void this.store.postAllFindingComments();
+  }
+
+  /** Findings that resolved to a real diff line and aren't posted yet. */
+  readonly postableCount = computed(() =>
+    this.store.findings().filter(
+      (finding) => Boolean(finding.line) && this.store.commentState()[finding.id] !== "posted",
+    ).length
+  );
 
   readonly filteredFindings = computed(() => {
     const filter = this.severityFilter();

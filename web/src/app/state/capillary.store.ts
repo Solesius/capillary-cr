@@ -191,8 +191,21 @@ export class CapillaryStore {
     this.cdpSessions().find((session) => session.sessionId === this.activeCdpSessionId()) ?? null
   );
 
+  /**
+   * True when a review for the currently selected PR is already running. Guards
+   * against the double-run token-burn footgun: the same PR cannot be reviewed
+   * twice concurrently (a different PR still can).
+   */
+  readonly selectedReviewInProgress = computed(() => {
+    const prId = this.selectedPullRequestId();
+    return Boolean(prId) && this.reviewSessions().some((s) => s.active && s.pullRequestId === prId);
+  });
+
   readonly canBegin = computed(() =>
-    Boolean(this.selectedPullRequestId()) && this.status() !== "reviewing" && this.status() !== "graphing"
+    Boolean(this.selectedPullRequestId()) &&
+    this.status() !== "reviewing" &&
+    this.status() !== "graphing" &&
+    !this.selectedReviewInProgress()
   );
 
   readonly canCancel = computed(() => {
@@ -853,11 +866,42 @@ export class CapillaryStore {
     if (!this.selectedPullRequestId() || !this.selectedRepositoryId()) {
       return;
     }
+    // Same PR already under review: hard stop, no confirm bypass — this is the
+    // double-run footgun the guard exists to kill.
+    if (this.selectedReviewInProgress()) {
+      this.lastError.set("A review for this pull request is already in progress.");
+      return;
+    }
+    // A different PR under review is allowed, but confirm so it is deliberate.
     if (this.reviewSessions().some((session) => session.active)) {
       this.newSessionWarningVisible.set(true);
       return;
     }
     await this.startNewSession();
+  }
+
+  /**
+   * Post every commentable finding (one that resolved to a real diff line) as an
+   * inline PR comment, sequentially to stay under GitHub's secondary rate limit,
+   * skipping any already posted. This is the "come back, post them all for the
+   * author" flow.
+   */
+  readonly postingAllComments = signal(false);
+  async postAllFindingComments(): Promise<void> {
+    if (this.postingAllComments()) {
+      return;
+    }
+    this.postingAllComments.set(true);
+    try {
+      const pending = this.findings().filter(
+        (finding) => Boolean(finding.line) && this.commentState()[finding.id] !== "posted",
+      );
+      for (const finding of pending) {
+        await this.postFindingComment(finding.id);
+      }
+    } finally {
+      this.postingAllComments.set(false);
+    }
   }
 
   async confirmNewSession(): Promise<void> {
