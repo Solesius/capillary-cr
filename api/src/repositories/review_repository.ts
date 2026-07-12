@@ -12,6 +12,16 @@
 // Secrets and catalog data (identity, tokens, the runtime LLM config, and the
 // GitHub repo/PR listing) are never persisted: they live only in memory, behind
 // the same async interface for a uniform contract.
+//
+// Concurrency contract: reads are safe under any concurrency. Writes are safe
+// under the actual usage model — at most one review loop writes to a given
+// runId at a time (each review is a single detached loop; concurrent reviews
+// operate on distinct runIds and never share cache keys). The read-modify-write
+// paths (updateReviewRun, appendReviewEvent) are NOT safe against two writers
+// racing on the *same* runId: both could read the same value across the celer
+// await and the later write would clobber the earlier. That is not a pattern the
+// system produces today; if a future caller fans out concurrent writes to one
+// runId, it must serialize them (e.g. a per-run mutex) rather than rely on this.
 import {
   DiffFile,
   GitHubIdentity,
