@@ -2179,3 +2179,86 @@ textarea {
   white-space: nowrap;
 }
 
+
+/* --- file-explorer: finding cards injected into Monaco view zones ----------
+   These live inside Monaco's DOM (outside Angular encapsulation) so they are
+   global by necessity. Bespoke Carbon language: sharp corners, thin border,
+   severity accent bar, mono uppercase labels — deliberately not a GitHub
+   comment lookalike. */
+.cap-fz {
+  padding: 6px 12px 6px 4px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.cap-fz-card {
+  height: 100%;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  background: #101a30;
+  border: 1px solid #24304a;
+  border-left-width: 3px;
+  overflow: hidden;
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+}
+.cap-fz-card--blocker { border-left-color: #fa4d56; }
+.cap-fz-card--high { border-left-color: #ff832b; }
+.cap-fz-card--medium { border-left-color: #f1c21b; }
+.cap-fz-card--low { border-left-color: #4c9aff; }
+.cap-fz-card--note { border-left-color: #7f8db0; }
+.cap-fz-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 5px;
+}
+.cap-fz-sev,
+.cap-fz-gate,
+.cap-fz-conf {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.64rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #7f8db0;
+}
+.cap-fz-card--blocker .cap-fz-sev { color: #fa4d56; }
+.cap-fz-card--high .cap-fz-sev { color: #ff832b; }
+.cap-fz-card--medium .cap-fz-sev { color: #f1c21b; }
+.cap-fz-card--low .cap-fz-sev { color: #4c9aff; }
+.cap-fz-conf { margin-left: auto; }
+.cap-fz-title {
+  margin: 0 0 4px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #dde4f2;
+}
+.cap-fz-body {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: #a8b3cc;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.cap-fz-fix {
+  margin: 6px 0 0;
+  font-size: 0.74rem;
+  color: #8fd6a8;
+}
+.cap-fz-fix span {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  margin-right: 6px;
+}
+/* Finding line highlight + gutter tick inside the editor */
+.cap-fz-line { background: rgba(76, 154, 255, 0.06); }
+.cap-fz-line--blocker { background: rgba(250, 77, 86, 0.08); }
+.cap-fz-line--high { background: rgba(255, 131, 43, 0.08); }
+.cap-fz-gutter { border-left: 3px solid #4c9aff; }
+.cap-fz-gutter--blocker { border-left-color: #fa4d56; }
+.cap-fz-gutter--high { border-left-color: #ff832b; }
+.cap-fz-gutter--medium { border-left-color: #f1c21b; }
+.cap-fz-gutter--note { border-left-color: #7f8db0; }

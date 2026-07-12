@@ -66,6 +66,28 @@ router.get("/api/github/repositories/:repositoryId/pull-requests/:pullRequestId"
   ctx.response.body = await deps.githubService.getPullRequest(repositoryId, pullRequestId);
 });
 
+// Read-only single-file content at the PR's head, for the file explorer. The
+// explorer loads the tree map from the (already cached) diff and fetches file
+// bodies one at a time on click — never in bulk — so a large PR cannot fan out
+// into a GitHub rate-limit burst.
+router.get(
+  "/api/github/repositories/:repositoryId/pull-requests/:pullRequestId/file",
+  async (ctx) => {
+    const repositoryId = ctx.params.repositoryId || "";
+    const pullRequestId = ctx.params.pullRequestId || "";
+    const path = ctx.request.url.searchParams.get("path") || "";
+    const pull = await deps.repository.getPullRequest(repositoryId, pullRequestId);
+    const ref = pull.headSha || pull.sourceBranch;
+    const content = await deps.githubService.getRepoFileContent(repositoryId, ref, path);
+    if (content === null) {
+      ctx.response.status = 404;
+      ctx.response.body = { error: "file_content_unavailable", path };
+      return;
+    }
+    ctx.response.body = { path, content };
+  },
+);
+
 router.get(
   "/api/github/repositories/:repositoryId/pull-requests/:pullRequestId/diff",
   async (ctx) => {

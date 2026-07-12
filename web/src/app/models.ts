@@ -58,6 +58,23 @@ export interface PullRequest {
   riskHint: RiskHint;
 }
 
+/** One changed file in a PR diff — the file explorer's tree map row. */
+export interface PullRequestDiffFile {
+  path: string;
+  status: "added" | "modified" | "deleted" | "renamed" | "copied";
+  additions: number;
+  deletions: number;
+  language?: string;
+  isTest: boolean;
+  isConfig: boolean;
+}
+
+/** A single file body fetched on demand at the PR head (explorer viewer). */
+export interface PullRequestFileContent {
+  path: string;
+  content: string;
+}
+
 export interface ReviewRun {
   id: string;
   pullRequestId: string;
