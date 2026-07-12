@@ -10,6 +10,7 @@ import {
   GitHubRepository,
   GraphSnapshotView,
   PullRequest,
+  PullRequestDiffFile,
   RetvCdpRunEvent,
   RetvCdpRunListItem,
   RetvCdpRunResult,
@@ -1842,6 +1843,80 @@ export class CapillaryStore {
       return;
     }
     window.open(this.api.buildReviewExportUrl(runId), "_blank");
+  }
+
+  // --- file explorer (left fly-out, lazy content) ---------------------------
+  readonly explorerOpen = signal(false);
+  readonly explorerFiles = signal<PullRequestDiffFile[]>([]);
+  readonly explorerActivePath = signal<string | null>(null);
+  /** Line to reveal when the active file renders; consumed by the viewer. */
+  readonly explorerRevealLine = signal<number | null>(null);
+  readonly explorerContent = signal<string | null>(null);
+  readonly explorerLoading = signal(false);
+  readonly explorerError = signal<string | null>(null);
+  /** Findings anchored to the file currently open in the explorer. */
+  readonly explorerFindings = computed(() => {
+    const path = this.explorerActivePath();
+    if (!path) return [];
+    return this.findings().filter((finding) => finding.filePath === path);
+  });
+  /**
+   * Session cache of fetched file bodies, keyed repo:pr:path. The explorer
+   * loads the tree map from the cached diff and fetches file bodies one at a
+   * time on click — re-opens are served from here, so browsing never fans out
+   * into a GitHub rate-limit burst.
+   */
+  readonly #fileContentCache = new Map<string, string>();
+
+  /** Open the fly-out and lazily load the tree map (diff paths, no bodies). */
+  async openExplorer(): Promise<void> {
+    this.explorerOpen.set(true);
+    const repositoryId = this.selectedRepositoryId();
+    const pullRequestId = this.selectedPullRequestId();
+    if (!repositoryId || !pullRequestId || this.explorerFiles().length > 0) {
+      return;
+    }
+    try {
+      this.explorerFiles.set(await this.api.getPullRequestDiffFiles(repositoryId, pullRequestId));
+    } catch (error) {
+      this.explorerError.set(`Failed to load file map: ${toMessage(error)}`);
+    }
+  }
+
+  closeExplorer(): void {
+    this.explorerOpen.set(false);
+  }
+
+  /** Deep-link from a finding (or a tree click) to a file at a line. */
+  async openFileInExplorer(path: string, line: number | null = null): Promise<void> {
+    await this.openExplorer();
+    this.explorerActivePath.set(path);
+    this.explorerRevealLine.set(line);
+    this.explorerError.set(null);
+
+    const repositoryId = this.selectedRepositoryId();
+    const pullRequestId = this.selectedPullRequestId();
+    if (!repositoryId || !pullRequestId) {
+      this.explorerError.set("Select a repository and pull request first.");
+      return;
+    }
+    const cacheKey = `${repositoryId}:${pullRequestId}:${path}`;
+    const cached = this.#fileContentCache.get(cacheKey);
+    if (cached !== undefined) {
+      this.explorerContent.set(cached);
+      return;
+    }
+    this.explorerLoading.set(true);
+    this.explorerContent.set(null);
+    try {
+      const file = await this.api.getPullRequestFileContent(repositoryId, pullRequestId, path);
+      this.#fileContentCache.set(cacheKey, file.content);
+      this.explorerContent.set(file.content);
+    } catch (error) {
+      this.explorerError.set(`Unable to load ${path}: ${toMessage(error)}`);
+    } finally {
+      this.explorerLoading.set(false);
+    }
   }
 
   downloadSelectedReviewReport(): void {

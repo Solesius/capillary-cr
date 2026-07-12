@@ -28,7 +28,10 @@
             "styles": [
               "src/styles.scss"
             ],
-            "scripts": []
+            "scripts": [],
+            "loader": {
+              ".ttf": "file"
+            }
           }
         },
         "serve": {

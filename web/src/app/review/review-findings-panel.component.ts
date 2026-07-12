@@ -70,6 +70,14 @@ import { CapillaryStore } from "../state/capillary.store";
             @if (finding.evidence?.length) {
               <p class="cap-muted" style="margin-top: 8px;">Evidence: {{ finding.evidence[0] }}</p>
             }
+            <div class="cap-finding-actions">
+              <button
+                class="cap-button cap-button-ghost cap-button-sm"
+                type="button"
+                (click)="viewInFile(finding.filePath, finding.line ?? null)">
+                View in file →
+              </button>
+            </div>
             @if (finding.line) {
               <div class="cap-finding-actions">
                 @if (store.commentState()[finding.id] === 'posted') {
@@ -131,6 +139,10 @@ export class ReviewFindingsPanelComponent {
 
   postAll(): void {
     void this.store.postAllFindingComments();
+  }
+
+  viewInFile(path: string, line: number | null): void {
+    void this.store.openFileInExplorer(path, line);
   }
 
   /** Findings on a real diff line that are neither posted nor mid-post. */

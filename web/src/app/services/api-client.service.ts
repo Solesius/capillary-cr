@@ -12,6 +12,8 @@ import {
   GraphSnapshotView,
   GitHubRepository,
   PullRequest,
+  PullRequestDiffFile,
+  PullRequestFileContent,
   RetvCdpRunListItem,
   RetvCdpRunRecord,
   RetvCdpRunResult,
@@ -65,6 +67,27 @@ export class ApiClientService {
 
   async listPullRequests(repositoryId: string, stateFilter: "open" | "closed" = "open"): Promise<PullRequest[]> {
     return this.get(`/api/github/repositories/${repositoryId}/pull-requests?state=${stateFilter}`);
+  }
+
+  /** Changed-file map for the explorer tree — served from the cached diff. */
+  async getPullRequestDiffFiles(
+    repositoryId: string,
+    pullRequestId: string,
+  ): Promise<PullRequestDiffFile[]> {
+    return this.get(`/api/github/repositories/${repositoryId}/pull-requests/${pullRequestId}/diff`);
+  }
+
+  /** One file body at the PR head, fetched on click — never in bulk (429 armor). */
+  async getPullRequestFileContent(
+    repositoryId: string,
+    pullRequestId: string,
+    path: string,
+  ): Promise<PullRequestFileContent> {
+    return this.get(
+      `/api/github/repositories/${repositoryId}/pull-requests/${pullRequestId}/file?path=${
+        encodeURIComponent(path)
+      }`,
+    );
   }
 
   async beginReview(pullRequestId: string, repositoryId: string): Promise<ReviewRun> {

@@ -10,12 +10,14 @@ import { ApiClientService } from "../services/api-client.service";
 import { CapillaryStore } from "../state/capillary.store";
 import { RetvPlannerProviderKind } from "../models";
 import { MarkdownPipe } from "./markdown.pipe";
+import { FileExplorerComponent } from "../explorer/file-explorer.component";
 
 @Component({
   selector: "app-root",
   standalone: true,
   imports: [
     CommonModule,
+    FileExplorerComponent,
     GitHubRepositoryPickerComponent,
     GraphTorusViewportComponent,
     PullRequestCardGridComponent,
@@ -142,6 +144,14 @@ import { MarkdownPipe } from "./markdown.pipe";
           <button class="cap-page-tab" type="button" [class.active]="activePage() === 'github'" (click)="setPage('github')">GitHub</button>
           <button class="cap-page-tab" type="button" [class.active]="activePage() === 'agent'" (click)="setPage('agent')">QA Agent</button>
           <button class="cap-page-tab" type="button" [class.active]="activePage() === 'setup'" (click)="setPage('setup')">Setup</button>
+          <button
+            class="cap-page-tab cap-page-tab--files"
+            type="button"
+            [class.active]="store.explorerOpen()"
+            [disabled]="!store.selectedPullRequestId()"
+            (click)="store.explorerOpen() ? store.closeExplorer() : store.openExplorer()">
+            Files ⌥
+          </button>
         </nav>
 
         <section class="cap-stats" aria-label="Review metrics">
@@ -589,6 +599,8 @@ import { MarkdownPipe } from "./markdown.pipe";
           {{ store.lastError() }}
         </div>
       }
+
+      <app-file-explorer />
     </div>
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
