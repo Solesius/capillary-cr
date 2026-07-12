@@ -219,7 +219,13 @@ export class CapillaryStore {
 
   readonly canCancel = computed(() => {
     const run = this.reviewRun();
-    return Boolean(run && run.status !== "completed" && run.status !== "cancelled");
+    if (run && run.status !== "completed" && run.status !== "cancelled" && run.status !== "failed") {
+      return true;
+    }
+    // After a refresh the local run object may not be rehydrated yet, but the
+    // attached server session knows a run is live — Stop must work there too.
+    const activeId = this.activeSessionRunId();
+    return this.reviewSessions().some((session) => session.runId === activeId && session.active);
   });
 
   readonly selectedRepository = computed(() =>
@@ -1237,6 +1243,14 @@ export class CapillaryStore {
           this.lastError.set(`Review failed: ${event.result.stopReason}`);
           return;
         }
+        if (event.result.phase === "cancelled") {
+          // Stopped by the user: no completed artifacts to load (the markdown
+          // export rejects non-completed runs) — settle the UI and move on.
+          this.status.set("cancelled");
+          this.progress.set(0);
+          void this.loadReviewRunHistory();
+          return;
+        }
         this.selectedReviewRunId.set(event.result.runId);
         this.selectedReviewTraceEnabled.set(this.reviewTraceEnabled());
         await this.loadReviewArtifacts(event.result.runId);
@@ -1331,9 +1345,11 @@ export class CapillaryStore {
   }
 
   async cancelReview(): Promise<void> {
-    this.stopReviewStream();
-    const runId = this.reviewRun()?.id;
+    // Fall back to the attached session id — after a refresh the local run
+    // object may be gone while the server run is very much alive.
+    const runId = this.reviewRun()?.id ?? this.activeSessionRunId();
     if (!runId) {
+      this.stopReviewStream();
       this.status.set("cancelled");
       this.reviewEvents.update((events) => events.concat("review_cancelled"));
       return;
@@ -1341,12 +1357,16 @@ export class CapillaryStore {
 
     try {
       await this.api.cancelReview(runId);
+      // Keep the stream attached: the server loop exits at its next boundary
+      // and emits a cancelled `done`, which settles the session list and UI.
     } catch {
-      // Best-effort; the local stream is already stopped and the UI should remain responsive.
+      // Best-effort; keep the UI responsive even if the request fails.
+      this.stopReviewStream();
     }
 
     this.status.set("cancelled");
     this.reviewEvents.update((events) => events.concat("review_cancelled"));
+    void this.refreshReviewSessions();
   }
 
   private enqueueAgentWork(
