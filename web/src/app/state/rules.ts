@@ -60,7 +60,6 @@ export function computeReviewStages(phase: ReviewPhase): readonly ReviewStageSta
   });
 }
 
-
 /**
  * Count pull requests that are genuinely open from the loaded list. Drafts
  * count as open; closed and merged do not. Defensive on the wire contract: a
@@ -69,4 +68,22 @@ export function computeReviewStages(phase: ReviewPhase): readonly ReviewStageSta
  */
 export function countOpenPullRequests(prs: readonly { state?: string }[]): number {
   return prs.filter((pr) => pr.state !== "closed" && pr.state !== "merged").length;
+}
+
+/**
+ * Whether the Stop button is armed. True when the locally-known run is still
+ * in flight, OR — after a refresh, before local run state rehydrates — when
+ * the attached server session reports a live run. A failed cancel keeps this
+ * true (status stays truthful), so Stop remains armed for the retry.
+ */
+export function isStopArmed(
+  runStatus: string | null,
+  attachedSessionActive: boolean,
+): boolean {
+  if (
+    runStatus && runStatus !== "completed" && runStatus !== "cancelled" && runStatus !== "failed"
+  ) {
+    return true;
+  }
+  return attachedSessionActive;
 }
