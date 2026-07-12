@@ -83,6 +83,38 @@ function createId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().slice(0, 8)}`;
 }
 
+/** Sentinel returned by raceCancellation when a stop request wins the race. */
+const CANCELLED = Symbol("cancelled");
+
+/**
+ * Await `work`, but yield CANCELLED as soon as `isCancelled` reports true —
+ * polled every 250ms — so a stop lands mid-model-turn instead of after it.
+ * The orphaned promise gets a no-op rejection handler so a late failure of
+ * the abandoned call can never surface as an unhandled rejection.
+ */
+async function raceCancellation<T>(
+  work: Promise<T>,
+  isCancelled?: () => boolean,
+): Promise<T | typeof CANCELLED> {
+  if (!isCancelled) {
+    return work;
+  }
+  work.catch(() => {});
+  let timer: ReturnType<typeof setInterval> | undefined;
+  const watcher = new Promise<typeof CANCELLED>((resolve) => {
+    timer = setInterval(() => {
+      if (isCancelled()) {
+        resolve(CANCELLED);
+      }
+    }, 250);
+  });
+  try {
+    return await Promise.race([work, watcher]);
+  } finally {
+    clearInterval(timer);
+  }
+}
+
 interface CapturedFile {
   path: string;
   status: string;
@@ -142,6 +174,9 @@ export interface ReviewAgentPassInput {
   trace: boolean;
   /** Encourage the agent to emit committable suggestions on findings. */
   suggest?: boolean;
+  /** Live stop signal: checked at every loop boundary and raced against
+   * in-flight planner calls so Stop lands within moments. */
+  isCancelled?: () => boolean;
   emit: (event: ReviewRunEvent) => void;
 }
 
@@ -204,7 +239,9 @@ export class ReviewAgentService {
         input.emit({ type: "log", level: "warn", message: note });
       }
 
-      llmReport = await this.generateLlmReport(
+      // A stopped run must exit now, not spend another model turn narrating —
+      // the deterministic report covers whatever was recorded before the stop.
+      llmReport = stopReason === "cancelled" ? null : await this.generateLlmReport(
         capture,
         recordedFindings,
         verdict,
@@ -519,6 +556,10 @@ export class ReviewAgentService {
     let cycle = 0;
 
     for (cycle = 1; cycle <= budget; cycle += 1) {
+      if (input.isCancelled?.()) {
+        stopReason = "cancelled";
+        break;
+      }
       if (Date.now() >= deadline) {
         stopReason = "time_budget_reached";
         break;
@@ -571,10 +612,20 @@ export class ReviewAgentService {
       const systemPrompt = input.suggest
         ? `${REVIEW_SYSTEM_PROMPT}\n\n${SUGGESTION_DIRECTIVE}`
         : REVIEW_SYSTEM_PROMPT;
-      const reply = await plannerChat(config, systemPrompt, userMessage, {
-        runContextId: input.runId,
-        maxOutputTokens: input.suggest ? 2400 : 1800,
-      });
+      // Race the planner call against a stop request: a Stop must not wait out
+      // a 30-60s model turn. On cancel the orphaned call settles harmlessly in
+      // the background (its tokens are already committed either way).
+      const reply = await raceCancellation(
+        plannerChat(config, systemPrompt, userMessage, {
+          runContextId: input.runId,
+          maxOutputTokens: input.suggest ? 2400 : 1800,
+        }),
+        input.isCancelled,
+      );
+      if (reply === CANCELLED) {
+        stopReason = "cancelled";
+        break;
+      }
 
       if (!reply.ok || !reply.value) {
         if (cycle === 1) {
@@ -624,6 +675,9 @@ export class ReviewAgentService {
       const cycleFindings: string[] = [];
 
       for (let stepIndex = 0; stepIndex < toolCalls.length; stepIndex += 1) {
+        if (input.isCancelled?.()) {
+          break;
+        }
         const raw = toolCalls[stepIndex] as Record<string, unknown>;
         const tool = String(raw?.tool || "").trim();
         const toolReason = String(raw?.reason || "").trim();

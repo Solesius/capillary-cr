@@ -73,6 +73,15 @@ export class AgenticReviewService {
 
   private readonly reviewAgent: ReviewAgentService;
 
+  /**
+   * Runs with a pending stop request. cancelReview() only used to flip the
+   * stored status — the loop never looked, so Stop was decorative and the
+   * model kept burning tokens. The loop and the agent's tool loop now consult
+   * this set at every boundary (and race in-flight planner calls against it),
+   * so a stop lands within moments, not at the end of the run.
+   */
+  readonly #cancelRequested = new Set<string>();
+
   async beginReview(pullRequestId: string, repositoryId?: string): Promise<ReviewRun> {
     const { runId, resolvedRepositoryId } = await this.createRun(pullRequestId, repositoryId);
     await this.executeReviewLoop(runId, pullRequestId, resolvedRepositoryId, NOOP_EMIT);
@@ -182,7 +191,44 @@ export class AgenticReviewService {
     return { runId: run.id, resolvedRepositoryId };
   }
 
+  /** Terminal path for a stopped run: settle state, emit a cancelled done. */
+  async #finishCancelled(
+    runId: string,
+    pullRequestId: string,
+    emit: EmitFn,
+    cycles: ReviewCycleSummary[],
+  ): Promise<ReviewRunResult> {
+    this.#cancelRequested.delete(runId);
+    await this.repository.updateReviewRun(runId, (current) => ({
+      ...current,
+      status: "cancelled",
+      currentPhase: "cancelled",
+      finishedAt: current.finishedAt ?? new Date().toISOString(),
+    }));
+    await this.repository.appendReviewEvent(runId, "phase:cancelled");
+    const run = await this.repository.getReviewRun(runId);
+    const result: ReviewRunResult = {
+      runId,
+      pullRequestId,
+      phase: "cancelled",
+      stopReason: "cancelled_by_user",
+      goalAchieved: false,
+      findingCount: run.findingCount,
+      blockerCount: run.blockerCount,
+      highCount: run.highCount,
+      progress: computeReviewProgress({
+        coveredPasses: cycles.map((cycle) => cycle.pass),
+        passRisk: {},
+        findingCount: run.findingCount,
+      }),
+      cycles,
+    };
+    emit({ type: "done", result });
+    return result;
+  }
+
   private async failRun(runId: string, error: unknown): Promise<void> {
+    this.#cancelRequested.delete(runId);
     const message = error instanceof AppError ? error.code : "review_pipeline_failed";
     await this.repository.updateReviewRun(runId, (current) => ({
       ...current,
@@ -203,6 +249,7 @@ export class AgenticReviewService {
     suggest = false,
   ): Promise<ReviewRunResult> {
     emit({ type: "run_start", runId, pullRequestId, phase: "queued" });
+    const isCancelled = () => this.#cancelRequested.has(runId);
 
     // Phase: diff_dag — observe the change surface.
     await this.repository.updateReviewRun(runId, (current) => ({
@@ -268,6 +315,10 @@ export class AgenticReviewService {
     // read-only review tools, run the gated review loop, then enrich findings
     // and emit/persist an exportable report + run record. Supersedes the prior
     // single-shot provider pass; deterministic findings remain the fallback.
+    if (isCancelled()) {
+      return await this.#finishCancelled(runId, pullRequestId, emit, cycles);
+    }
+
     await this.reviewAgent.runReviewPass({
       runId,
       pullRequestId,
@@ -277,8 +328,12 @@ export class AgenticReviewService {
       maxCycles,
       trace,
       suggest,
+      isCancelled,
       emit,
     });
+    if (isCancelled()) {
+      return await this.#finishCancelled(runId, pullRequestId, emit, cycles);
+    }
     await this.tcsrct.produceAuthorChecklist(runId);
 
     await this.artifacts.exportGraphJson(runId);
@@ -308,6 +363,7 @@ export class AgenticReviewService {
       progress,
       cycles,
     };
+    this.#cancelRequested.delete(runId);
     emit({ type: "done", result });
     return result;
   }
@@ -471,6 +527,7 @@ export class AgenticReviewService {
 
   async cancelReview(runId: string): Promise<boolean> {
     enforceDefensiveInput(runId, "run_id");
+    this.#cancelRequested.add(runId);
     await this.repository.updateReviewRun(runId, (current) => ({
       ...current,
       status: "cancelled",

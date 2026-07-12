@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { ChangeDetectionStrategy, Component, computed, inject } from "@angular/core";
+import { ChangeDetectionStrategy, Component, computed, inject, OnDestroy, signal } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { ApiClientService } from "../services/api-client.service";
 import { CapillaryStore } from "../state/capillary.store";
@@ -37,6 +37,9 @@ import { ReviewFindingsPanelComponent } from "./review-findings-panel.component"
         </div>
         <div class="cap-row" style="margin-top: 8px;">
           <p class="cap-muted">{{ store.progress() }}%</p>
+          @if (runElapsedLabel(); as elapsed) {
+            <p class="cap-muted cap-mono-inline">run {{ elapsed }}</p>
+          }
           <p class="cap-muted cap-mono-inline">{{ phaseLabel() }}</p>
         </div>
 
@@ -443,11 +446,36 @@ import { ReviewFindingsPanelComponent } from "./review-findings-panel.component"
   `],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class ReviewControlPanelComponent {
+export class ReviewControlPanelComponent implements OnDestroy {
   readonly store = inject(CapillaryStore);
   private readonly api = inject(ApiClientService);
   readonly starting = computed(() => this.api.inFlight() > 0 && this.store.status() !== "reviewing");
   readonly gates = TCSRTC_GATES;
+
+  // Whole-second run clock — a useful "how long has this been going" readout,
+  // not millisecond theater. Driven by the durable session's startedAt, so it
+  // is correct even after a page refresh mid-run.
+  readonly #now = signal(Date.now());
+  readonly #clock = setInterval(() => this.#now.set(Date.now()), 1000);
+  readonly runElapsedLabel = computed(() => {
+    const now = this.#now();
+    const session = this.store.reviewSessions()
+      .find((candidate) => candidate.runId === this.store.activeSessionRunId());
+    if (!session?.active) {
+      return null;
+    }
+    const total = Math.max(0, Math.floor((now - Date.parse(session.startedAt)) / 1000));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const seconds = total % 60;
+    const mm = String(minutes).padStart(2, "0");
+    const ss = String(seconds).padStart(2, "0");
+    return hours > 0 ? `${hours}:${mm}:${ss}` : `${minutes}:${ss}`;
+  });
+
+  ngOnDestroy(): void {
+    clearInterval(this.#clock);
+  }
 
   // Live phase readout — show the active gate + cycle while running, not "idle".
   readonly phaseLabel = computed(() => {
