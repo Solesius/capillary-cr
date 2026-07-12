@@ -2411,3 +2411,13 @@ html:not([data-theme="dark"]) .cap-qa-frame { background: #10182b; }
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 0.76rem;
 }
+
+.cap-qa-head-metrics { display: flex; align-items: center; gap: 10px; }
+.cap-qa-tokens,
+.cap-qa-clock {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  color: var(--cap-muted, #64748b);
+  white-space: nowrap;
+}

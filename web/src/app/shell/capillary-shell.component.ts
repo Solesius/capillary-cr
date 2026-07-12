@@ -258,8 +258,18 @@ import { FileExplorerComponent } from "../explorer/file-explorer.component";
               <section class="cap-panel cap-qa-mission">
                 <header class="cap-panel-title">
                   <span>Functional QA</span>
-                  <span class="cap-qa-state" [class.live]="store.agentStreaming() || store.cdpRoundRunning()">
-                    {{ store.agentStreaming() ? 'streaming' : (store.cdpRoundRunning() ? 'running' : 'idle') }} · queue {{ store.cdpQueueDepth() }}
+                  <span class="cap-qa-head-metrics">
+                    @if (store.cdpTokensTotal() > 0) {
+                      <span class="cap-qa-tokens" title="Model tokens — input / output for this run">
+                        in {{ store.cdpInputTokens() | number }} · out {{ store.cdpOutputTokens() | number }}
+                      </span>
+                    }
+                    @if (qaElapsedLabel(); as elapsed) {
+                      <span class="cap-qa-clock">run {{ elapsed }}</span>
+                    }
+                    <span class="cap-qa-state" [class.live]="store.agentStreaming() || store.cdpRoundRunning()">
+                      {{ store.agentStreaming() ? 'streaming' : (store.cdpRoundRunning() ? 'running' : 'idle') }} · queue {{ store.cdpQueueDepth() }}
+                    </span>
                   </span>
                 </header>
                 <div class="cap-panel-body">
@@ -607,6 +617,22 @@ import { FileExplorerComponent } from "../explorer/file-explorer.component";
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class CapillaryShellComponent {
+  // Whole-second run clock for the QA agent — same idiom as the review timer.
+  readonly #qaNow = signal(Date.now());
+  readonly #qaClock = setInterval(() => this.#qaNow.set(Date.now()), 1000);
+  readonly qaElapsedLabel = computed(() => {
+    const now = this.#qaNow();
+    const startedAt = this.store.cdpRunStartedAt();
+    const live = this.store.agentStreaming() || this.store.cdpRoundRunning();
+    if (!startedAt || !live) {
+      return null;
+    }
+    const total = Math.max(0, Math.floor((now - startedAt) / 1000));
+    const minutes = Math.floor(total / 60);
+    const seconds = String(total % 60).padStart(2, "0");
+    return `${minutes}:${seconds}`;
+  });
+
   readonly store = inject(CapillaryStore);
   private readonly api = inject(ApiClientService);
   readonly networkBusy = computed(() => this.api.inFlight() > 0);
@@ -810,7 +836,7 @@ export class CapillaryShellComponent {
   }
 
   stopLiveRound(): void {
-    this.store.stopAgentStream();
+    void this.store.cancelAgentRun();
   }
 
   requestNavigate(): void {

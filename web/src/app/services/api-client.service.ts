@@ -215,6 +215,11 @@ export class ApiClientService {
     return this.post(`/api/cdp/sessions/${sessionId}/work-units`, request);
   }
 
+  /** Live stop for an in-flight functional run — the loop lands it in moments. */
+  async cancelRetvRun(runId: string): Promise<{ cancelled: boolean }> {
+    return this.post(`/api/cdp/retv/runs/${runId}/cancel`, {});
+  }
+
   async runRetvCdpGoalRound(request: {
     goal: string;
     sessionId?: string;

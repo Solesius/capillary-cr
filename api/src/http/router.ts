@@ -434,6 +434,14 @@ router.get("/api/cdp/retv/run/stream", async (ctx) => {
   }
 });
 
+// Live stop for an in-flight functional run. Closing the SSE stream alone
+// never stopped the server-side round; this lands the stop at the loop's next
+// boundary (racing any in-flight planner turn).
+router.post("/api/cdp/retv/runs/:runId/cancel", (ctx) => {
+  const runId = ctx.params.runId || "";
+  ctx.response.body = { cancelled: deps.cdpRetvAgentService.cancelRetvRun(runId) };
+});
+
 router.get("/api/cdp/retv/runs", async (ctx) => {
   ctx.response.body = { runs: await deps.cdpRetvAgentService.listRuns() };
 });

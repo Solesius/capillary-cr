@@ -172,6 +172,13 @@ export class CapillaryStore {
   readonly agentPlannerLiveText = signal("");
   readonly agentPlannerToolHistory = signal<AgentPlannerToolEntry[]>([]);
   readonly agentRunPhase = signal<AgentRunPhase>("idle");
+  /** In-flight functional run id (from run_start) — target for a live stop. */
+  readonly cdpLiveRunId = signal<string | null>(null);
+  /** Wall-clock start of the live round, for the whole-second run clock. */
+  readonly cdpRunStartedAt = signal<number | null>(null);
+  readonly cdpInputTokens = signal(0);
+  readonly cdpOutputTokens = signal(0);
+  readonly cdpTokensTotal = signal(0);
   readonly agentRunPhaseLabel = computed(() => {
     const phase = this.agentRunPhase();
     switch (phase) {
@@ -445,6 +452,27 @@ export class CapillaryStore {
     };
   }
 
+  /**
+   * Stop the live functional run for real: request server-side cancellation
+   * (the loop races it against in-flight planner turns) and keep the stream
+   * attached so the cancelled done/summary settles the UI. Closing the stream
+   * alone was decorative — the server round kept executing.
+   */
+  async cancelAgentRun(): Promise<void> {
+    const runId = this.cdpLiveRunId();
+    if (!runId) {
+      this.stopAgentStream();
+      return;
+    }
+    try {
+      await this.api.cancelRetvRun(runId);
+      this.pushConsole("system", `stop requested for ${runId} — landing at next boundary`);
+    } catch {
+      // Server unreachable: fall back to detaching locally so the UI frees up.
+      this.stopAgentStream();
+    }
+  }
+
   stopAgentStream(): void {
     if (this.#agentStream) {
       this.#agentStream.close();
@@ -521,6 +549,11 @@ export class CapillaryStore {
     switch (event.type) {
       case "run_start":
         this.agentRunPhase.set("observing");
+        this.cdpLiveRunId.set(event.runId);
+        this.cdpRunStartedAt.set(Date.now());
+        this.cdpInputTokens.set(0);
+        this.cdpOutputTokens.set(0);
+        this.cdpTokensTotal.set(0);
         this.resetPlannerTelemetry();
         this.pushConsole(
           "system",
@@ -573,6 +606,11 @@ export class CapillaryStore {
         break;
       case "cycle":
         this.agentRunPhase.set("observing");
+        if (event.tokens) {
+          this.cdpInputTokens.set(event.tokens.input);
+          this.cdpOutputTokens.set(event.tokens.output);
+          this.cdpTokensTotal.set(event.tokens.total);
+        }
         this.pushConsole(
           "result",
           `cycle ${event.cycle.cycle} done · success=${event.cycle.workUnit.success} · progress ${event.progress.completedMilestones}/${event.progress.totalMilestones} (${event.progress.percent}%)`,

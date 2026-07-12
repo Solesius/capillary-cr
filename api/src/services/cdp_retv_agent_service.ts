@@ -22,6 +22,7 @@ import {
 import { chat, chatStream } from "./providers/provider_client.ts";
 import type { ProviderStreamEvent } from "./providers/provider_core.ts";
 import { createZipArchive, type ZipEntryInput } from "./storage/zip_writer.ts";
+import { CANCELLED, raceCancellation } from "./review_agent_service.ts";
 
 // Agent runs are bounded by a wall-clock budget so big features that keep making
 // progress aren't cut short by a fixed iteration count. Default 10 minutes;
@@ -172,7 +173,13 @@ export type RetvCdpRunEvent =
     findings: string[];
   }
   | { type: "screenshot"; cycle: number; dataUrl: string }
-  | { type: "cycle"; cycle: RetvCdpCycleSummary; progress: RetvCdpProgress }
+  | {
+    type: "cycle";
+    cycle: RetvCdpCycleSummary;
+    progress: RetvCdpProgress;
+    /** Cumulative model tokens for the run so far. */
+    tokens?: { input: number; output: number; total: number };
+  }
   | { type: "log"; level: "info" | "warn" | "error"; message: string }
   | { type: "summary"; summary: string }
   | { type: "report"; report: string }
@@ -197,6 +204,45 @@ export interface RetvCdpRunResult {
   traceEnabled: boolean;
 }
 
+/** Outcome of gating a planner's goalAchieved claim against its evidence. */
+export interface GoalClaimGate {
+  accepted: boolean;
+  rejection?: string;
+}
+
+/**
+ * The completion contract's teeth: goalAchieved is a VERDICT, not a hope. A
+ * claim is accepted only with concrete quoted evidence AND every milestone
+ * complete; rejections are surfaced as findings so the planner sees exactly
+ * why on its next cycle and self-corrects instead of flailing ambiguously.
+ * Exported for direct unit testing.
+ */
+export function evaluateGoalClaim(
+  claimed: boolean,
+  evidence: string | undefined,
+  milestonesComplete: boolean,
+): GoalClaimGate {
+  if (!claimed) {
+    return { accepted: false };
+  }
+  const proof = (evidence || "").trim();
+  if (proof.length < 12) {
+    return {
+      accepted: false,
+      rejection: "goal_claim_rejected:no_evidence — quote concrete on-page proof " +
+        "(url/heading/visible text/extract output) in progress.evidence",
+    };
+  }
+  if (!milestonesComplete) {
+    return {
+      accepted: false,
+      rejection: "goal_claim_rejected:milestones_incomplete — finish or explicitly " +
+        "re-plan the remaining milestones before claiming the goal",
+    };
+  }
+  return { accepted: true };
+}
+
 interface PlannerResult {
   structuredPlan?: RetvCdpStructuredPlan;
   nextToolCalls: RetvCdpToolCall[];
@@ -205,9 +251,13 @@ interface PlannerResult {
     completedMilestones?: number;
     goalAchieved?: boolean;
     nextMilestone?: string;
+    /** Concrete on-page proof quoted by the planner for its progress claim. */
+    evidence?: string;
   };
   findings: string[];
   rawContent?: string;
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 const AVAILABLE_PLANNER_PROVIDER_KINDS: RetvPlannerProviderKind[] = [
@@ -336,6 +386,19 @@ function assertSecureProviderBaseUrl(baseUrl: string): void {
 
 export class CdpRetvAgentService {
   #plannerConfig: RetvPlannerConfig;
+
+  /**
+   * Runs with a pending stop request. Checked at every cycle boundary and
+   * raced against in-flight planner calls, so Stop lands in moments — closing
+   * the SSE stream alone never stopped the server-side round.
+   */
+  readonly #cancelRequested = new Set<string>();
+
+  /** Request a live stop for an in-flight functional run. */
+  cancelRetvRun(runId: string): boolean {
+    this.#cancelRequested.add(runId);
+    return true;
+  }
 
   constructor(
     private readonly repository: ReviewRepository,
@@ -508,6 +571,9 @@ export class CdpRetvAgentService {
     const traceEnabled = request.trace === true;
     const startedAt = new Date().toISOString();
     emit({ type: "run_start", runId, sessionId, goal, allowedOrigin });
+    const isCancelled = () => this.#cancelRequested.has(runId);
+    let runInputTokens = 0;
+    let runOutputTokens = 0;
 
     let structuredPlan = this.defaultPlan(goal);
     emit({ type: "plan", structuredPlan });
@@ -535,6 +601,10 @@ export class CdpRetvAgentService {
         stopReason = "time_budget_exhausted";
         break;
       }
+      if (isCancelled()) {
+        stopReason = "cancelled";
+        break;
+      }
       if (cycle > HARD_CYCLE_CAP) {
         stopReason = "iteration_budget_exhausted";
         break;
@@ -545,26 +615,42 @@ export class CdpRetvAgentService {
         driftWarnings += 1;
       }
 
-      const planner = await this.planNextCycle(
-        goal,
-        cycle,
-        allowedOrigin,
-        observation,
-        cycles,
-        structuredPlan,
-        runId,
-        (text) => {
-          if (!text) {
-            return;
-          }
-          emit({ type: "planner_delta", cycle, text });
-        },
+      // Race the planner turn against a stop request: Stop must not wait out
+      // a 30-60s model call. The orphaned call settles in the background.
+      const plannerOrCancelled = await raceCancellation(
+        this.planNextCycle(
+          goal,
+          cycle,
+          allowedOrigin,
+          observation,
+          cycles,
+          structuredPlan,
+          runId,
+          (text) => {
+            if (!text) {
+              return;
+            }
+            emit({ type: "planner_delta", cycle, text });
+          },
+        ),
+        isCancelled,
       );
+      if (plannerOrCancelled === CANCELLED) {
+        stopReason = "cancelled";
+        break;
+      }
+      const planner = plannerOrCancelled;
+      runInputTokens += planner.inputTokens ?? 0;
+      runOutputTokens += planner.outputTokens ?? 0;
       if (planner.structuredPlan) {
         structuredPlan = planner.structuredPlan;
         emit({ type: "plan", structuredPlan });
       }
 
+      if (isCancelled()) {
+        stopReason = "cancelled";
+        break;
+      }
       const plannedCalls = planner.nextToolCalls.length > 0
         ? planner.nextToolCalls
         : this.fallbackToolCalls(goal, cycle, startUrl);
@@ -633,8 +719,28 @@ export class CdpRetvAgentService {
         plannerRaw: planner.rawContent,
         screenshot,
       };
+      // Completion-contract teeth: an unproven goalAchieved claim becomes a
+      // visible rejection finding, teaching the planner what evidence it owes.
+      const claimGate = evaluateGoalClaim(
+        Boolean(planner.progress?.goalAchieved),
+        planner.progress?.evidence,
+        progress.completedMilestones >= progress.totalMilestones,
+      );
+      if (claimGate.rejection) {
+        cycleFindings.push(claimGate.rejection);
+        cycleSummary.findings = cycleFindings;
+      }
       cycles.push(cycleSummary);
-      emit({ type: "cycle", cycle: cycleSummary, progress });
+      emit({
+        type: "cycle",
+        cycle: cycleSummary,
+        progress,
+        tokens: {
+          input: runInputTokens,
+          output: runOutputTokens,
+          total: runInputTokens + runOutputTokens,
+        },
+      });
 
       if (traceEnabled) {
         traceCycles.push({
@@ -724,8 +830,11 @@ export class CdpRetvAgentService {
       goalAchieved,
     };
 
+    this.#cancelRequested.delete(runId);
+    const wasCancelled = stopReason === "cancelled";
     const functionalTestSucceeded = goalAchieved && cycles.every((cycle) => cycle.workUnit.success);
-    const summary = await this.summarizeRun({
+    // A stopped run exits now — no verdict turn, no report turn, no tokens.
+    const summary = wasCancelled ? "Run stopped by user." : await this.summarizeRun({
       runId,
       goal,
       stopReason,
@@ -738,19 +847,22 @@ export class CdpRetvAgentService {
     });
     emit({ type: "summary", summary });
 
-    const report = await this.generateRunReport({
-      runId,
-      goal,
-      allowedOrigin,
-      stopReason,
-      functionalTestSucceeded,
-      goalAchieved,
-      structuredPlan,
-      progress,
-      cycles,
-      findings,
-      summary,
-    });
+    const report = wasCancelled
+      ? "# Functional Test Report\n\n## Verdict\n**STOPPED** — cancelled by user after " +
+        `${cycles.length} cycle${cycles.length === 1 ? "" : "s"}.\n\n${summary}`
+      : await this.generateRunReport({
+        runId,
+        goal,
+        allowedOrigin,
+        stopReason,
+        functionalTestSucceeded,
+        goalAchieved,
+        structuredPlan,
+        progress,
+        cycles,
+        findings,
+        summary,
+      });
     emit({ type: "report", report });
 
     const finishedAt = new Date().toISOString();
@@ -1129,7 +1241,10 @@ export class CdpRetvAgentService {
       "Tools are first-class objects; never skip Toolform.",
       "Return ONLY JSON and no markdown.",
       "JSON schema:",
-      '{"structuredPlan":{"milestones":[],"successCriteria":[],"antiDriftRules":[]},"nextToolCalls":[{"tool":"click","args":{},"reason":""}],"progress":{"percent":0,"completedMilestones":0,"goalAchieved":false,"nextMilestone":""},"findings":[]}',
+      '{"structuredPlan":{"milestones":[],"successCriteria":[],"antiDriftRules":[]},"nextToolCalls":[{"tool":"click","args":{},"reason":""}],"progress":{"percent":0,"completedMilestones":0,"goalAchieved":false,"nextMilestone":"","evidence":""},"findings":[]}',
+      "progress.evidence is REQUIRED whenever you raise completedMilestones or set goalAchieved:true — quote the concrete on-page proof (URL, heading, visible text, extract/assert output) from THIS cycle's observation or toolOutputs. Unproven claims are rejected and the rejection appears in your findings next cycle.",
+      "goalAchieved:true is a FINAL VERDICT, not a hope: every milestone complete AND evidence quoted. Never set it on intention, likelihood, or an action you have queued but not yet observed succeeding.",
+      "If the goal is ambiguous, state 'interpretation: <your reading>' in findings on cycle 1 and pursue that reading consistently for the whole run — do not re-litigate the goal mid-run.",
       `Allowed tools: ${
         TOOL_CATALOG.map((tool) => `${tool.name}(${tool.requiredArgs.join(",")})`).join(" | ")
       }`,
@@ -1227,6 +1342,8 @@ export class CdpRetvAgentService {
       progress: this.normalizePlannerProgress(payload.progress),
       findings: dedupe(findings),
       rawContent,
+      inputTokens: response.value.inputTokens,
+      outputTokens: response.value.outputTokens,
     };
   }
 
@@ -1415,6 +1532,7 @@ export class CdpRetvAgentService {
       completedMilestones: numberArg(payload.completedMilestones),
       goalAchieved: Boolean(payload.goalAchieved),
       nextMilestone: stringArg(payload.nextMilestone),
+      evidence: stringArg(payload.evidence),
     };
   }
 
@@ -1449,7 +1567,13 @@ export class CdpRetvAgentService {
         structuredPlan.milestones[nextCompleted] || "complete",
       roundsWithoutProgress,
       driftWarnings,
-      goalAchieved: Boolean(plannerProgress?.goalAchieved) ||
+      // The claim is gated: accepted only with quoted evidence and complete
+      // milestones (evaluateGoalClaim); mechanical completion still counts.
+      goalAchieved: evaluateGoalClaim(
+        Boolean(plannerProgress?.goalAchieved),
+        plannerProgress?.evidence,
+        nextCompleted >= totalMilestones,
+      ).accepted ||
         (allowAutoAdvance && nextCompleted >= totalMilestones),
     };
   }
@@ -1594,7 +1718,7 @@ export class CdpRetvAgentService {
     plannerConfig: RetvPlannerConfig,
   ): Promise<{
     ok: boolean;
-    value?: { content: string };
+    value?: { content: string; inputTokens?: number; outputTokens?: number };
     error?: { kind: string; message: string };
   }> {
     const base = plannerConfig.baseUrl.replace(/\/+$/, "");
@@ -1654,9 +1778,14 @@ export class CdpRetvAgentService {
         };
       }
 
+      const usage = (payload?.usage as Record<string, unknown>) || {};
       return {
         ok: true,
-        value: { content },
+        value: {
+          content,
+          inputTokens: Number(usage.prompt_tokens) || 0,
+          outputTokens: Number(usage.completion_tokens) || 0,
+        },
       };
     } catch (error) {
       return {
