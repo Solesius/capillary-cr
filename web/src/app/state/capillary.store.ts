@@ -1363,9 +1363,18 @@ export class CapillaryStore {
       await this.api.cancelReview(runId);
       // Keep the stream attached: the server loop exits at its next boundary
       // and emits a cancelled `done`, which settles the session list and UI.
-    } catch {
-      // Best-effort; keep the UI responsive even if the request fails.
-      this.stopReviewStream();
+    } catch (error) {
+      // Flagged by capillary reviewing its own Stop fix: if the cancel call
+      // fails (network blip, server briefly unreachable), the server never
+      // registered the stop — the run is STILL LIVE. Detaching the stream and
+      // stamping "cancelled" here made the UI lie: frozen 'cancelled' state,
+      // no live updates, tokens still burning, no recovery short of a reload.
+      // Honest failure: keep the stream attached, keep the status truthful,
+      // surface the failure, and leave Stop armed for a retry.
+      this.lastError.set(
+        `Stop failed — the run is still active (${toMessage(error)}). Hit Stop again.`,
+      );
+      return;
     }
 
     this.status.set("cancelled");
