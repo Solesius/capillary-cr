@@ -47,16 +47,22 @@ const HARD_CYCLE_CAP = 60;
 const DEFAULT_MAX_CYCLES = 12;
 // Tools whose successful use marks a path as examined for coverage purposes.
 const READ_TOOLS = new Set(["readDiff", "readFile", "readFileSlice", "readNeighbor"]);
-const MAX_TOOL_OUTPUT_CHARS = 6_000;
-const MAX_FILE_CHARS = 20_000;
+// Read budgets. Dogfooding on this repo's own 1,000+ line services showed the
+// old limits (6k tool output / 20k file / 36k total) starved the reviewer: it
+// burned whole cycles slice-hunting through files it had nominally "read", and
+// verification-grade review of a large file was impossible. Frontier context
+// windows take these comfortably; the total feedback budget (~21k tokens) is
+// the real ceiling and is still enforced below.
+const MAX_TOOL_OUTPUT_CHARS = 14_000;
+const MAX_FILE_CHARS = 48_000;
 // Per-read content the planner sees next turn, and how many recent reads to
 // carry at full length. Sized so the model reasons over real diffs/files
 // instead of stubs, while bounding context growth.
-const MAX_READ_FEEDBACK_CHARS = 6_000;
+const MAX_READ_FEEDBACK_CHARS = 14_000;
 // Total budget for non-barred read content in the planner context; barred
 // (over-read) paths are always included on top of this so an examined file
 // is never reduced to a stub while the planner is forbidden to re-read it.
-const MAX_READ_FEEDBACK_TOTAL_CHARS = 36_000;
+const MAX_READ_FEEDBACK_TOTAL_CHARS = 84_000;
 // After this many reads of the same path, tell the planner to stop and decide.
 const REREAD_LIMIT = 2;
 
@@ -707,7 +713,12 @@ export class ReviewAgentService {
           }
         }
 
-        const output = clamp(result.output, MAX_TOOL_OUTPUT_CHARS);
+        // Reads get line-aware truncation with an explicit continuation hint;
+        // a generic char-count cut on file content is a dead end that costs
+        // the planner a guessing cycle.
+        const output = READ_TOOLS.has(tool) && result.ok && argPath
+          ? clampFileRead(result.output, MAX_TOOL_OUTPUT_CHARS, argPath)
+          : clamp(result.output, MAX_TOOL_OUTPUT_CHARS);
         // Retain the latest full content per path so the planner can always
         // reason over any file it has examined (never a stub for a file it is
         // barred from re-reading).
@@ -715,7 +726,7 @@ export class ReviewAgentService {
           readContentByPath.set(argPath, {
             cycle,
             tool,
-            output: clamp(result.output, MAX_READ_FEEDBACK_CHARS),
+            output: clampFileRead(result.output, MAX_READ_FEEDBACK_CHARS, argPath),
           });
         }
         observations.push(
@@ -816,11 +827,17 @@ export class ReviewAgentService {
         case "listNeighbors":
           return { ok: true, output: listFiles(capture.neighborFiles) };
         case "readDiff": {
-          const file = findFile(capture, String(args.path || ""));
+          const rawPath = String(args.path || "");
+          const file = findFile(capture, rawPath);
           if (!file) {
-            return { ok: false, output: `unknown path: ${String(args.path || "")}` };
+            return { ok: false, output: `unknown path: ${rawPath}` };
           }
-          return { ok: true, output: file.patch || "(no patch available)" };
+          return {
+            ok: true,
+            output: file.patch
+              ? clampFileRead(file.patch, MAX_FILE_CHARS, rawPath)
+              : "(no patch available)",
+          };
         }
         case "readFile":
         case "readNeighbor": {
@@ -829,7 +846,7 @@ export class ReviewAgentService {
           if (content === null) {
             return { ok: false, output: `unable to read: ${path}` };
           }
-          return { ok: true, output: clamp(content, MAX_FILE_CHARS) };
+          return { ok: true, output: clampFileRead(content, MAX_FILE_CHARS, path) };
         }
         case "readFileSlice": {
           const path = String(args.path || "");
@@ -1214,6 +1231,26 @@ function clamp(value: string, max: number): string {
     return value;
   }
   return `${value.slice(0, max)}\n…[truncated ${value.length - max} chars]`;
+}
+
+/**
+ * Line-aware truncation for file/diff reads: cut at a line boundary and tell
+ * the model exactly where it stands and how to continue. A bare
+ * "[truncated N chars]" is a dead end that costs a guessing cycle; naming the
+ * line range shown and the precise readFileSlice call to get the rest turns
+ * truncation into a one-step continuation. Exported for direct unit testing.
+ */
+export function clampFileRead(content: string, max: number, path: string): string {
+  if (content.length <= max) {
+    return content;
+  }
+  const cut = content.lastIndexOf("\n", max);
+  const head = cut > 0 ? content.slice(0, cut) : content.slice(0, max);
+  const shownLines = head.length === 0 ? 0 : head.split("\n").length;
+  const totalLines = content.split("\n").length;
+  return `${head}\n…[truncated: showing lines 1-${shownLines} of ${totalLines}. ` +
+    `Continue with readFileSlice {path: "${path}", startLine: ${shownLines + 1}, ` +
+    `endLine: ${Math.min(totalLines, shownLines + 400)}}]`;
 }
 
 function parseSuggestion(raw: unknown): ReviewSuggestion | undefined {
