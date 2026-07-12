@@ -259,6 +259,10 @@ export class CapillaryStore {
     // Reconnect to any server-side review sessions that outlived the last
     // page: reviews are durable, the browser is just a viewport.
     void this.restoreReviewSessions();
+    // The server may already hold a GitHub identity (CAPILLARY_GITHUB_TOKEN
+    // auto-connects at boot) — probe once so the UI reflects it instead of
+    // stranding the user on the Connect screen while the API is fully live.
+    void this.#bootstrapGithubIdentity();
     setInterval(() => {
       if (this.reviewSessions().some((session) => session.active)) {
         void this.refreshReviewSessions();
@@ -1481,6 +1485,25 @@ export class CapillaryStore {
       "capillary_github_oauth",
       "popup=yes,width=620,height=760,resizable,scrollbars",
     );
+  }
+
+  /**
+   * Detect a server-side identity on app load. listRepositories succeeds iff
+   * the API holds a connected identity + token (it 401s otherwise), so one
+   * probe doubles as both the check and the initial repo load. On success the
+   * session/history panels refresh too — they were 401-blocked before this.
+   */
+  async #bootstrapGithubIdentity(): Promise<void> {
+    if (this.githubConnected()) {
+      return;
+    }
+    try {
+      await this.refreshGithubConnectedState();
+      void this.refreshReviewSessions();
+      void this.loadReviewRunHistory();
+    } catch {
+      // No server-side identity — the Connect screen is correct.
+    }
   }
 
   private async refreshGithubConnectedState(): Promise<void> {
