@@ -465,7 +465,15 @@ export class CapillaryStore {
       return;
     }
     try {
-      await this.api.cancelRetvRun(runId);
+      const { cancelled } = await this.api.cancelRetvRun(runId);
+      if (!cancelled) {
+        // Server says no such live run (finished, restarted, stale id): there
+        // is nothing to land the stop — detach locally instead of logging a
+        // stop that will never arrive while the UI stays frozen live.
+        this.pushConsole("system", `no live run ${runId} on the server — detaching locally`);
+        this.stopAgentStream();
+        return;
+      }
       this.pushConsole("system", `stop requested for ${runId} — landing at next boundary`);
     } catch {
       // Server unreachable: fall back to detaching locally so the UI frees up.
@@ -478,6 +486,8 @@ export class CapillaryStore {
       this.#agentStream.close();
       this.#agentStream = null;
     }
+    // The run id is only meaningful while attached to a live round.
+    this.cdpLiveRunId.set(null);
     this.agentStreaming.set(false);
     this.cdpRoundRunning.set(false);
     this.agentRunPhase.set("idle");

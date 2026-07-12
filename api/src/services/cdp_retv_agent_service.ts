@@ -394,9 +394,19 @@ export class CdpRetvAgentService {
    * the SSE stream alone never stopped the server-side round.
    */
   readonly #cancelRequested = new Set<string>();
+  /** Runs currently executing — the honest denominator for cancelRetvRun. */
+  readonly #activeRuns = new Set<string>();
 
-  /** Request a live stop for an in-flight functional run. */
+  /**
+   * Request a live stop for an in-flight functional run. Returns false when no
+   * such run is executing (finished, server restarted, stale id) — flagged by
+   * capillary: blindly returning true made the client log a stop that would
+   * never land while the UI stayed frozen in its live state.
+   */
   cancelRetvRun(runId: string): boolean {
+    if (!this.#activeRuns.has(runId)) {
+      return false;
+    }
     this.#cancelRequested.add(runId);
     return true;
   }
@@ -572,6 +582,7 @@ export class CdpRetvAgentService {
     const traceEnabled = request.trace === true;
     const startedAt = new Date().toISOString();
     emit({ type: "run_start", runId, sessionId, goal, allowedOrigin });
+    this.#activeRuns.add(runId);
     const isCancelled = () => this.#cancelRequested.has(runId);
     let runInputTokens = 0;
     let runOutputTokens = 0;
@@ -831,6 +842,7 @@ export class CdpRetvAgentService {
       goalAchieved,
     };
 
+    this.#activeRuns.delete(runId);
     this.#cancelRequested.delete(runId);
     const wasCancelled = stopReason === "cancelled";
     const functionalTestSucceeded = goalAchieved && cycles.every((cycle) => cycle.workUnit.success);

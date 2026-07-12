@@ -116,3 +116,55 @@ Deno.test("runsheet carries goal, ordered actions with intent, and outcomes", ()
   assert(sheet.includes("interpretation: smoke-check the login flow"));
   assert(sheet.includes("whitespace-normalized"));
 });
+
+Deno.test("unexecuted tail tool calls are quarantined, not laundered into passes", () => {
+  const record = makeRecord();
+  // Cycle 1 planned two calls but only executed the first (crashed mid-batch).
+  record.trace!.cycles[0].steps = [record.trace!.cycles[0].steps[0]];
+  const spec = buildPlaywrightSpec(record);
+  assert(spec.includes('await page.goto("http://localhost:4200/login");'));
+  assert(!spec.includes('\n  await page.locator("input[name=\\"email\\"]")'));
+  assert(spec.includes("FAILED in the recorded run"));
+});
+
+Deno.test("assertText equals exports as exact toHaveText, not containment", () => {
+  const record = makeRecord();
+  record.trace!.cycles[1].toolCalls[0] = {
+    tool: "assertText",
+    args: { selector: "h1", equals: "Welcome back" },
+    reason: "exact heading",
+  };
+  record.trace!.cycles[1].steps[0].ok = true;
+  const spec = buildPlaywrightSpec(record);
+  assert(spec.includes('toHaveText("Welcome back")'));
+  assert(!spec.includes('toContainText("Welcome back")'));
+});
+
+Deno.test("typed credentials are redacted to env placeholders in both artifacts", () => {
+  const record = makeRecord();
+  record.trace!.cycles[0].toolCalls[1] = {
+    tool: "type",
+    args: { selector: 'input[type="password"]', text: "hunter2-super-secret" },
+    reason: "fill password",
+  };
+  const spec = buildPlaywrightSpec(record);
+  assert(!spec.includes("hunter2-super-secret"), "spec must not embed the secret");
+  assert(spec.includes("process.env.CAP_SKELETON_SECRET_1"));
+  assert(spec.includes("Provide via env: CAP_SKELETON_SECRET_1"));
+  const sheet = buildAgentRunsheet(record);
+  assert(!sheet.includes("hunter2-super-secret"), "runsheet must not embed the secret");
+  assert(sheet.includes("redacted-secret"));
+});
+
+Deno.test("runsheet neutralizes backticks so args cannot break the table", () => {
+  const record = makeRecord();
+  record.trace!.cycles[0].toolCalls[1] = {
+    tool: "type",
+    args: { selector: "input", text: "payload with ` backtick" },
+    reason: "backtick payload",
+  };
+  const sheet = buildAgentRunsheet(record);
+  const row = sheet.split("\n").find((line) => line.includes("payload with"));
+  assert(row !== undefined);
+  assert(!row.includes("`payload"), "raw backtick must not survive inside the code span");
+});

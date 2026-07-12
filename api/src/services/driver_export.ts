@@ -24,6 +24,13 @@ function lit(value: unknown): string {
   return JSON.stringify(str(value));
 }
 
+/** Selector smells that mark a typed value as a credential. */
+const SECRET_SELECTOR = /password|passwd|secret|token|api[-_]?key|otp|pin/i;
+
+function isSecretType(call: { tool: string; args: Record<string, unknown> }): boolean {
+  return call.tool === "type" && SECRET_SELECTOR.test(str(call.args.selector));
+}
+
 interface FlatCall {
   cycle: number;
   tool: string;
@@ -43,7 +50,11 @@ function flattenCalls(cycles: RetvCdpTraceCycle[]): FlatCall[] {
         tool: call.tool,
         args: (call.args ?? {}) as Record<string, unknown>,
         reason: call.reason ?? "",
-        ok: cycle.steps[index]?.ok ?? true,
+        // No recorded step outcome means the call was planned but NEVER
+        // executed (run aborted mid-batch) — quarantine it like a failure.
+        // Defaulting to ok would launder unverified actions into a passing
+        // spec, the exact thing the quarantine exists to prevent.
+        ok: cycle.steps[index]?.ok ?? false,
       });
     });
   }
@@ -51,7 +62,7 @@ function flattenCalls(cycles: RetvCdpTraceCycle[]): FlatCall[] {
 }
 
 /** One Playwright statement per tool call; unknown tools become comments. */
-function playwrightLine(call: FlatCall): string {
+function playwrightLine(call: FlatCall, secretIndex?: number): string {
   const a = call.args;
   switch (call.tool) {
     case "navigate":
@@ -61,13 +72,28 @@ function playwrightLine(call: FlatCall): string {
     case "click":
       return `await page.locator(${lit(a.selector)}).first().click();`;
     case "type":
+      // Credentials never export verbatim: password-shaped fields become env
+      // placeholders so a recorded login flow cannot leak secrets into a
+      // committable artifact.
+      if (secretIndex !== undefined) {
+        return `await page.locator(${lit(a.selector)}).first().fill(` +
+          `process.env.CAP_SKELETON_SECRET_${secretIndex} ?? "");`;
+      }
       return `await page.locator(${lit(a.selector)}).first().fill(${lit(a.text ?? a.value)});`;
     case "extractText":
       return `console.log(await page.locator(${lit(a.selector)}).first().innerText());`;
     case "assertText":
-      // Capillary asserts whitespace-normalized; toContainText matches that.
+      // Capillary asserts whitespace-normalized. equals is an EXACT match —
+      // exporting it as containment would let a regression that appends text
+      // pass a spec the original assertion would have failed. Playwright's
+      // toHaveText/toContainText both whitespace-normalize, matching upstream.
+      if (typeof a.equals === "string" && a.equals.length > 0) {
+        return `await expect(page.locator(${lit(a.selector)}).first()).toHaveText(${
+          lit(a.equals)
+        });`;
+      }
       return `await expect(page.locator(${lit(a.selector)}).first()).toContainText(${
-        lit(a.includes ?? a.equals)
+        lit(a.includes)
       });`;
     case "evaluate":
       return `await page.evaluate(${lit(a.expression)});`;
@@ -95,6 +121,7 @@ export function buildPlaywrightSpec(record: RetvCdpRunRecord): string {
   lines.push(``);
   lines.push(`test(${lit(record.goal.slice(0, 80) || record.runId)}, async ({ page }) => {`);
 
+  const secretVars: string[] = [];
   let lastCycle = -1;
   for (const call of calls) {
     if (call.cycle !== lastCycle) {
@@ -104,7 +131,12 @@ export function buildPlaywrightSpec(record: RetvCdpRunRecord): string {
     if (call.reason) {
       lines.push(`  // ${call.reason.replaceAll("\n", " ")}`);
     }
-    const statement = playwrightLine(call);
+    let secretIndex: number | undefined;
+    if (isSecretType(call)) {
+      secretIndex = secretVars.length + 1;
+      secretVars.push(`CAP_SKELETON_SECRET_${secretIndex}`);
+    }
+    const statement = playwrightLine(call, secretIndex);
     if (!call.ok) {
       // Failed in the original run: exported disabled, with the record kept —
       // silently replaying a known failure would launder it into a pass.
@@ -117,6 +149,14 @@ export function buildPlaywrightSpec(record: RetvCdpRunRecord): string {
 
   lines.push(`});`);
   lines.push(``);
+  if (secretVars.length > 0) {
+    lines.splice(
+      4,
+      0,
+      `// Secrets were typed during the recorded run and are NOT embedded here.`,
+      `// Provide via env: ${secretVars.join(", ")}`,
+    );
+  }
   return lines.join("\n");
 }
 
@@ -154,7 +194,12 @@ export function buildAgentRunsheet(record: RetvCdpRunRecord): string {
   lines.push(`| # | Cycle | Action | Arguments | Intent | Recorded result |`);
   lines.push(`|---|-------|--------|-----------|--------|-----------------|`);
   calls.forEach((call, index) => {
-    const args = JSON.stringify(call.args).replaceAll("|", "\\|");
+    const safeArgs = isSecretType(call)
+      ? { ...call.args, text: "«redacted-secret»", value: undefined }
+      : call.args;
+    // Backticks terminate a Markdown code span early (backslash escapes do
+    // not work inside spans) and corrupt the table — neutralize them.
+    const args = JSON.stringify(safeArgs).replaceAll("|", "\\|").replaceAll("\u0060", "'");
     const reason = (call.reason || "—").replaceAll("|", "\\|").replaceAll("\n", " ");
     lines.push(
       `| ${index + 1} | ${call.cycle} | ${call.tool} | \`${args}\` | ${reason} | ${
