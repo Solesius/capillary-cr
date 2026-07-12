@@ -81,7 +81,14 @@ import { CapillaryStore } from "../state/capillary.store";
                 {{ store.repositories().length === 0 ? 'Loading repositories…' : filteredRepositories().length === 0 ? 'No repositories match' : 'Select a repository' }}
               </option>
               @for (repo of filteredRepositories(); track repo.id) {
-                <option [value]="repo.id">{{ repo.fullName }}</option>
+                <!-- [selected] per option, not just [value] on the select: when
+                     the tab remounts, the select's value is written in the same
+                     pass the options render and the browser silently falls back
+                     to the first option. [selected] re-marks the right one on
+                     every render, so the current selection survives tab switches. -->
+                <option [value]="repo.id" [selected]="repo.id === store.selectedRepositoryId()">{{
+                  repo.fullName
+                }}</option>
               }
             </select>
           </div>

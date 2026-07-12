@@ -50,6 +50,8 @@ export interface PullRequest {
   title: string;
   author: string;
   targetBranch: string;
+  /** Mirrors the API's PullRequestState — used to count genuinely-open PRs. */
+  state: "open" | "closed" | "merged" | "draft";
   additions: number;
   deletions: number;
   changedFileCount: number;
