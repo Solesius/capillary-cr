@@ -133,11 +133,12 @@ export class ReviewFindingsPanelComponent {
     void this.store.postAllFindingComments();
   }
 
-  /** Findings that resolved to a real diff line and aren't posted yet. */
+  /** Findings on a real diff line that are neither posted nor mid-post. */
   readonly postableCount = computed(() =>
-    this.store.findings().filter(
-      (finding) => Boolean(finding.line) && this.store.commentState()[finding.id] !== "posted",
-    ).length
+    this.store.findings().filter((finding) => {
+      const state = this.store.commentState()[finding.id];
+      return Boolean(finding.line) && state !== "posted" && state !== "posting";
+    }).length
   );
 
   readonly filteredFindings = computed(() => {
@@ -151,7 +152,9 @@ export class ReviewFindingsPanelComponent {
       ["note", 4],
     ]);
 
-    const filtered = this.store.findings().filter((finding) => filter === "all" || finding.severity === filter);
+    const filtered = this.store.findings().filter((finding) =>
+      filter === "all" || finding.severity === filter
+    );
     return filtered
       .slice()
       .sort((left, right) => {

@@ -7,8 +7,8 @@ import {
   CdpSessionSummary,
   CdpWorkStep,
   CdpWorkUnitResult,
-  GraphSnapshotView,
   GitHubRepository,
+  GraphSnapshotView,
   PullRequest,
   RetvCdpRunEvent,
   RetvCdpRunListItem,
@@ -224,7 +224,9 @@ export class CapillaryStore {
   readonly findingCount = computed(() => this.findings().length);
 
   readonly highRiskCount = computed(() =>
-    this.findings().filter((finding) => finding.severity === "high" || finding.severity === "blocker").length
+    this.findings().filter((finding) =>
+      finding.severity === "high" || finding.severity === "blocker"
+    ).length
   );
 
   readonly checklistCompletion = computed(() => {
@@ -256,7 +258,10 @@ export class CapillaryStore {
       if (!this.activeCdpSessionId() && sessions.length > 0) {
         this.activeCdpSessionId.set(sessions[0].sessionId);
       }
-      if (this.activeCdpSessionId() && !sessions.some((session) => session.sessionId === this.activeCdpSessionId())) {
+      if (
+        this.activeCdpSessionId() &&
+        !sessions.some((session) => session.sessionId === this.activeCdpSessionId())
+      ) {
         this.activeCdpSessionId.set(sessions[0]?.sessionId || null);
       }
     } catch (error) {
@@ -268,10 +273,16 @@ export class CapillaryStore {
     try {
       const session = await this.api.createCdpSession(startUrl || "about:blank");
       this.activeCdpSessionId.set(session.sessionId);
-      this.cdpSessions.update((current) => [session].concat(current.filter((item) => item.sessionId !== session.sessionId)));
+      this.cdpSessions.update((current) =>
+        [session].concat(current.filter((item) => item.sessionId !== session.sessionId))
+      );
       this.pushAgentMessage("system", `Browser session launched at ${session.targetUrl}.`, "info");
     } catch (error) {
-      this.pushAgentMessage("system", `Unable to launch browser session: ${toMessage(error)}`, "error");
+      this.pushAgentMessage(
+        "system",
+        `Unable to launch browser session: ${toMessage(error)}`,
+        "error",
+      );
       this.lastError.set("Unable to launch browser session.");
     }
   }
@@ -287,7 +298,11 @@ export class CapillaryStore {
       this.pushAgentMessage("system", "Browser session closed.", "info");
       await this.refreshCdpSessions();
     } catch (error) {
-      this.pushAgentMessage("system", `Failed to close browser session: ${toMessage(error)}`, "error");
+      this.pushAgentMessage(
+        "system",
+        `Failed to close browser session: ${toMessage(error)}`,
+        "error",
+      );
     }
   }
 
@@ -296,7 +311,11 @@ export class CapillaryStore {
       const config = await this.api.getRetvPlannerConfig();
       this.retvPlannerConfig.set(config);
     } catch (error) {
-      this.pushAgentMessage("system", `Failed to load RetV planner config: ${toMessage(error)}`, "error");
+      this.pushAgentMessage(
+        "system",
+        `Failed to load RetV planner config: ${toMessage(error)}`,
+        "error",
+      );
     }
   }
 
@@ -310,7 +329,11 @@ export class CapillaryStore {
         "info",
       );
     } catch (error) {
-      this.pushAgentMessage("system", `Failed to save RetV planner config: ${toMessage(error)}`, "error");
+      this.pushAgentMessage(
+        "system",
+        `Failed to save RetV planner config: ${toMessage(error)}`,
+        "error",
+      );
       this.lastError.set("Failed to save RetV planner config.");
     }
   }
@@ -318,7 +341,11 @@ export class CapillaryStore {
   beginAgentFunctionalRound(goal: string): void {
     const normalizedGoal = goal.trim();
     if (!normalizedGoal) {
-      this.pushAgentMessage("agent", "Please provide a goal so I can build the functional test round.", "question");
+      this.pushAgentMessage(
+        "agent",
+        "Please provide a goal so I can build the functional test round.",
+        "question",
+      );
       return;
     }
 
@@ -337,11 +364,18 @@ export class CapillaryStore {
   streamAgentFunctionalRound(goal: string): void {
     const normalizedGoal = goal.trim();
     if (!normalizedGoal) {
-      this.pushAgentMessage("agent", "Please provide a goal so I can run the functional test round.", "question");
+      this.pushAgentMessage(
+        "agent",
+        "Please provide a goal so I can run the functional test round.",
+        "question",
+      );
       return;
     }
     if (this.agentStreaming()) {
-      this.pushConsole("system", "A streaming round is already running. Stop it before starting another.");
+      this.pushConsole(
+        "system",
+        "A streaming round is already running. Stop it before starting another.",
+      );
       return;
     }
 
@@ -481,7 +515,10 @@ export class CapillaryStore {
       case "plan":
         this.pushConsole(
           "plan",
-          `plan: ${event.structuredPlan.milestones.map((milestone, index) => `${index + 1}. ${milestone}`).join("  ")}`,
+          `plan: ${
+            event.structuredPlan.milestones.map((milestone, index) => `${index + 1}. ${milestone}`)
+              .join("  ")
+          }`,
         );
         break;
       case "observation":
@@ -688,9 +725,13 @@ export class CapillaryStore {
     } catch (error) {
       const message = error instanceof Error ? error.message : "unknown_error";
       if (message.includes("github_auth_failed")) {
-        this.lastError.set("GitHub authentication failed. Check PAT value or GITHUB_TOKEN on the API process.");
+        this.lastError.set(
+          "GitHub authentication failed. Check PAT value or GITHUB_TOKEN on the API process.",
+        );
       } else if (message.includes("github_token_required") || message.includes("unauthorized")) {
-        this.lastError.set("GitHub token required. Paste a PAT and click Connect PAT (or set GITHUB_TOKEN). ");
+        this.lastError.set(
+          "GitHub token required. Paste a PAT and click Connect PAT (or set GITHUB_TOKEN). ",
+        );
       } else {
         this.lastError.set("Failed to connect GitHub.");
       }
@@ -730,8 +771,13 @@ export class CapillaryStore {
             try {
               await this.connect();
             } catch (fallbackError) {
-              const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : "unknown_error";
-              if (fallbackMessage.includes("github_token_required") || fallbackMessage.includes("unauthorized")) {
+              const fallbackMessage = fallbackError instanceof Error
+                ? fallbackError.message
+                : "unknown_error";
+              if (
+                fallbackMessage.includes("github_token_required") ||
+                fallbackMessage.includes("unauthorized")
+              ) {
                 throw new Error("github_oauth_not_configured");
               }
               throw fallbackError;
@@ -759,7 +805,12 @@ export class CapillaryStore {
       }
 
       if (oauth.mode === "device") {
-        await this.waitForGithubDeviceOAuthResult(oauth.sessionId, oauth.intervalSeconds, oauth.expiresAt, popup);
+        await this.waitForGithubDeviceOAuthResult(
+          oauth.sessionId,
+          oauth.intervalSeconds,
+          oauth.expiresAt,
+          popup,
+        );
       } else {
         await this.waitForGithubOAuthResult(popup, this.api.getApiOrigin(), oauth.expiresAt);
       }
@@ -770,7 +821,9 @@ export class CapillaryStore {
       const message = error instanceof Error ? error.message : "github_oauth_failed";
       if (message.includes("oauth_popup_blocked_device")) {
         this.lastError.set(
-          `Popup blocked. Open ${deviceAuthorizeUrl || "https://github.com/login/device"} and enter code ${deviceUserCode || "(not available)"}.`,
+          `Popup blocked. Open ${
+            deviceAuthorizeUrl || "https://github.com/login/device"
+          } and enter code ${deviceUserCode || "(not available)"}.`,
         );
       } else if (message.includes("oauth_popup_blocked")) {
         this.lastError.set("Popup blocked. Allow popups for localhost to complete GitHub OAuth.");
@@ -893,9 +946,14 @@ export class CapillaryStore {
     }
     this.postingAllComments.set(true);
     try {
-      const pending = this.findings().filter(
-        (finding) => Boolean(finding.line) && this.commentState()[finding.id] !== "posted",
-      );
+      // Exclude terminal AND in-flight states: a finding whose individual post
+      // is mid-flight when this snapshot is taken must not be queued again, or
+      // it lands twice on the PR. postFindingComment re-checks per item too,
+      // since a state can change while the batch walks the queue.
+      const pending = this.findings().filter((finding) => {
+        const state = this.commentState()[finding.id];
+        return Boolean(finding.line) && state !== "posted" && state !== "posting";
+      });
       for (const finding of pending) {
         await this.postFindingComment(finding.id);
       }
@@ -966,7 +1024,9 @@ export class CapillaryStore {
         const event = JSON.parse(message.data) as ReviewRunEvent;
         void this.handleReviewStreamEvent(event);
       } catch {
-        this.reviewEvents.update((events) => events.concat(`unparseable:${String(message.data).slice(0, 160)}`));
+        this.reviewEvents.update((events) =>
+          events.concat(`unparseable:${String(message.data).slice(0, 160)}`)
+        );
       }
     };
 
@@ -1052,7 +1112,9 @@ export class CapillaryStore {
         this.status.set(reviewStatusForPhase(event.phase));
         this.progress.set(reviewProgressFromPhase(event.phase));
         this.reviewEvents.update((events) =>
-          events.concat(event.detail ? `phase:${event.phase}:${event.detail}` : `phase:${event.phase}`)
+          events.concat(
+            event.detail ? `phase:${event.phase}:${event.detail}` : `phase:${event.phase}`,
+          )
         );
         const stage = reviewStageNarrative(event.phase);
         if (stage) {
@@ -1086,11 +1148,18 @@ export class CapillaryStore {
           gates.includes(event.gate) ? gates : gates.concat(event.gate)
         );
         this.reviewEvents.update((events) => events.concat(`thinking:${event.gate}:${event.text}`));
-        this.#pushNarrative({ kind: "thinking", cycle: event.cycle, gate: event.gate, text: event.text });
+        this.#pushNarrative({
+          kind: "thinking",
+          cycle: event.cycle,
+          gate: event.gate,
+          text: event.text,
+        });
         break;
       case "tool":
         this.reviewToolActivity.update((items) =>
-          items.concat(`#${event.cycle} ${event.tool} ${event.ok ? "ok" : "fail"}: ${event.summary}`)
+          items.concat(
+            `#${event.cycle} ${event.tool} ${event.ok ? "ok" : "fail"}: ${event.summary}`,
+          )
         );
         this.reviewEvents.update((events) =>
           events.concat(`tool:${event.tool}:cycle=${event.cycle}:${event.ok ? "ok" : "fail"}`)
@@ -1115,7 +1184,9 @@ export class CapillaryStore {
         this.#pushNarrative({
           kind: "finding",
           severity: event.finding.severity,
-          text: `${event.finding.title} — ${event.finding.filePath}${event.finding.line ? `:${event.finding.line}` : ""}`,
+          text: `${event.finding.title} — ${event.finding.filePath}${
+            event.finding.line ? `:${event.finding.line}` : ""
+          }`,
         });
         break;
       case "cycle": {
@@ -1130,7 +1201,9 @@ export class CapillaryStore {
           this.reviewOutputTokens.set(event.outputTokens);
         }
         this.reviewEvents.update((events) =>
-          events.concat(`gate:${event.gate}:cycle=${event.cycle}:tools=${event.toolCount}:findings=${event.findingCount}`)
+          events.concat(
+            `gate:${event.gate}:cycle=${event.cycle}:tools=${event.toolCount}:findings=${event.findingCount}`,
+          )
         );
         this.#pushNarrative({
           kind: "gate",
@@ -1173,8 +1246,12 @@ export class CapillaryStore {
     ]);
 
     const parsed = this.#parseMarkdown(markdown);
-    this.findings.set(findingsResult.findings.length > 0 ? findingsResult.findings : parsed.findings);
-    this.checklist.set(checklistResult.checklist.length > 0 ? checklistResult.checklist : parsed.checklist);
+    this.findings.set(
+      findingsResult.findings.length > 0 ? findingsResult.findings : parsed.findings,
+    );
+    this.checklist.set(
+      checklistResult.checklist.length > 0 ? checklistResult.checklist : parsed.checklist,
+    );
     this.reviewEvents.set(events.events);
     this.markdownPreview.set(markdown);
     this.reviewGraph.set(graph);
@@ -1227,7 +1304,10 @@ export class CapillaryStore {
 
   async postFindingComment(findingId: string): Promise<void> {
     const runId = this.selectedReviewRunId() ?? this.reviewRun()?.id;
-    if (!runId || this.commentState()[findingId] === "posting") {
+    // Idempotent: never double-post — bail when already in flight OR already
+    // landed (the batch loop takes its snapshot before individual posts settle).
+    const state = this.commentState()[findingId];
+    if (!runId || state === "posting" || state === "posted") {
       return;
     }
     this.commentState.update((map) => ({ ...map, [findingId]: "posting" }));
@@ -1286,7 +1366,11 @@ export class CapillaryStore {
           throw new Error("No active CDP session");
         }
 
-        this.pushAgentMessage("agent", `Executing ${executionSteps.length} step(s): ${name}`, "info");
+        this.pushAgentMessage(
+          "agent",
+          `Executing ${executionSteps.length} step(s): ${name}`,
+          "info",
+        );
         const result = await this.api.executeCdpWorkUnit(sessionId, {
           name,
           stopOnFailure,
@@ -1314,7 +1398,11 @@ export class CapillaryStore {
             continue;
           }
 
-          this.pushAgentMessage("agent", `Step ${step.action} failed: ${step.error || "unknown_error"}`, "error");
+          this.pushAgentMessage(
+            "agent",
+            `Step ${step.action} failed: ${step.error || "unknown_error"}`,
+            "error",
+          );
           this.pushAgentMessage(
             "agent",
             "Provide a steering instruction or answer so I can continue. Example: click .retry-button",
@@ -1377,7 +1465,11 @@ export class CapillaryStore {
     this.reviewEvents.set(["github_connected"]);
   }
 
-  private waitForGithubOAuthResult(popup: Window, apiOrigin: string, expiresAt: string): Promise<void> {
+  private waitForGithubOAuthResult(
+    popup: Window,
+    apiOrigin: string,
+    expiresAt: string,
+  ): Promise<void> {
     return new Promise((resolve, reject) => {
       const defaultTimeoutMs = 2 * 60 * 1000;
       const expiresAtMs = Date.parse(expiresAt);
@@ -1526,7 +1618,11 @@ export class CapillaryStore {
           throw new Error("No active CDP session");
         }
 
-        this.pushAgentMessage("agent", "Executing RetV toolforming round with first-class CDP tools.", "info");
+        this.pushAgentMessage(
+          "agent",
+          "Executing RetV toolforming round with first-class CDP tools.",
+          "info",
+        );
 
         const result = await this.api.runRetvCdpGoalRound({
           goal,
@@ -1548,7 +1644,8 @@ export class CapillaryStore {
           goalAchieved: false,
           cycle: 1,
           milestonesCompleted: progress?.completedMilestones || 0,
-          milestonesTotal: progress?.totalMilestones || (this.cdpGoalPlan()?.milestones.length || 0),
+          milestonesTotal: progress?.totalMilestones ||
+            (this.cdpGoalPlan()?.milestones.length || 0),
           failedStepCount: 1,
           findings: [`retv execution failed: ${toMessage(error)}`],
         }));
@@ -1817,7 +1914,10 @@ export class CapillaryStore {
       );
     }
 
-    if (progress && progress.completedMilestones <= 1 && preferredPage && !this.isActiveTab(lastObservation?.activePageTab, preferredPage.label)) {
+    if (
+      progress && progress.completedMilestones <= 1 && preferredPage &&
+      !this.isActiveTab(lastObservation?.activePageTab, preferredPage.label)
+    ) {
       steps.push({ action: "click", selector: preferredPage.selector });
     } else if (
       progress &&
@@ -1832,7 +1932,11 @@ export class CapillaryStore {
     }
 
     if (keyword.includes("login") || keyword.includes("sign in")) {
-      steps.push({ action: "waitForSelector", selector: "input[type='password']", timeoutMs: 3000 });
+      steps.push({
+        action: "waitForSelector",
+        selector: "input[type='password']",
+        timeoutMs: 3000,
+      });
     }
 
     return steps;
@@ -1857,8 +1961,7 @@ export class CapillaryStore {
     return {
       action: "evaluate",
       returnByValue: true,
-      expression:
-        `(() => {
+      expression: `(() => {
           const activePageTab = document.querySelector('.cap-page-tab.active')?.textContent?.trim() || '';
           const activeRunTab = document.querySelector('.cap-run-tab.active')?.textContent?.trim() || '';
           const buttonLabels = Array.from(document.querySelectorAll('button'))
@@ -1882,7 +1985,9 @@ export class CapillaryStore {
     const observations: PageObservationSnapshot[] = [];
 
     for (const step of result.steps) {
-      if (!step.ok || step.action !== "evaluate" || !step.output || typeof step.output !== "object") {
+      if (
+        !step.ok || step.action !== "evaluate" || !step.output || typeof step.output !== "object"
+      ) {
         continue;
       }
 
@@ -1902,7 +2007,9 @@ export class CapillaryStore {
         buttonLabels: Array.isArray(output.buttonLabels)
           ? output.buttonLabels.filter((value): value is string => typeof value === "string")
           : [],
-        timestamp: typeof output.timestamp === "string" ? output.timestamp : new Date().toISOString(),
+        timestamp: typeof output.timestamp === "string"
+          ? output.timestamp
+          : new Date().toISOString(),
       });
     }
 
@@ -1944,19 +2051,30 @@ export class CapillaryStore {
       driftWarnings += 1;
       this.pushAgentMessage(
         "agent",
-        `Drift warning: page origin moved away from allowed scope (${currentPlan.allowedOrigin || "none"}).`,
+        `Drift warning: page origin moved away from allowed scope (${
+          currentPlan.allowedOrigin || "none"
+        }).`,
         "error",
       );
     }
 
     const updatedPlan = nextPlan.plan;
     this.cdpGoalPlan.set(updatedPlan);
-    const updatedProgress = this.computeGoalProgress(updatedPlan, roundsWithoutProgress, driftWarnings);
+    const updatedProgress = this.computeGoalProgress(
+      updatedPlan,
+      roundsWithoutProgress,
+      driftWarnings,
+    );
     this.cdpGoalProgress.set(updatedProgress);
 
     const goalAchieved = updatedProgress.completedMilestones >= updatedProgress.totalMilestones;
     const failedSteps = result.steps.filter((step) => !step.ok);
-    const findings = this.collectFunctionalRunFindings(result, failedSteps.length, roundsWithoutProgress, driftWarnings);
+    const findings = this.collectFunctionalRunFindings(
+      result,
+      failedSteps.length,
+      roundsWithoutProgress,
+      driftWarnings,
+    );
     const status = !result.success
       ? "failed"
       : goalAchieved
@@ -2069,8 +2187,10 @@ export class CapillaryStore {
     driftWarnings: number,
   ): FunctionalGoalProgress {
     const totalMilestones = plan.milestones.length;
-    const completedMilestones = plan.milestones.filter((milestone) => milestone.status === "done").length;
-    const nextMilestone = plan.milestones.find((milestone) => milestone.status !== "done")?.title || "complete";
+    const completedMilestones =
+      plan.milestones.filter((milestone) => milestone.status === "done").length;
+    const nextMilestone = plan.milestones.find((milestone) => milestone.status !== "done")?.title ||
+      "complete";
 
     return {
       completedMilestones,
@@ -2136,7 +2256,9 @@ export class CapillaryStore {
   }
 
   private selectPreferredPageTab(keyword: string): { selector: string; label: string } | null {
-    if (keyword.includes("github") || keyword.includes("repo") || keyword.includes("pull request")) {
+    if (
+      keyword.includes("github") || keyword.includes("repo") || keyword.includes("pull request")
+    ) {
       return { selector: ".cap-page-tab:nth-child(2)", label: "github" };
     }
 
@@ -2144,7 +2266,9 @@ export class CapillaryStore {
       return { selector: ".cap-page-tab:nth-child(3)", label: "agent" };
     }
 
-    if (keyword.includes("setup") || keyword.includes("config") || keyword.includes("environment")) {
+    if (
+      keyword.includes("setup") || keyword.includes("config") || keyword.includes("environment")
+    ) {
       return { selector: ".cap-page-tab:nth-child(4)", label: "setup" };
     }
 
@@ -2171,7 +2295,9 @@ export class CapillaryStore {
   }
 
   private selectValidationSelector(keyword: string): string {
-    if (keyword.includes("github") || keyword.includes("repo") || keyword.includes("pull request")) {
+    if (
+      keyword.includes("github") || keyword.includes("repo") || keyword.includes("pull request")
+    ) {
       return ".cap-page-content";
     }
     if (keyword.includes("agent") || keyword.includes("cdp") || keyword.includes("browser")) {
@@ -2283,7 +2409,11 @@ export class CapillaryStore {
 
     const assertIncludesMatch = /^assert\s+(.+?)\s+includes\s+(.+)$/i.exec(instruction);
     if (assertIncludesMatch) {
-      return [{ action: "assertText", selector: assertIncludesMatch[1].trim(), includes: assertIncludesMatch[2].trim() }];
+      return [{
+        action: "assertText",
+        selector: assertIncludesMatch[1].trim(),
+        includes: assertIncludesMatch[2].trim(),
+      }];
     }
 
     const typeMatch = /^type\s+(.+?)\s*=>\s*(.+)$/i.exec(instruction);
@@ -2299,13 +2429,15 @@ export class CapillaryStore {
     message: string,
     kind: AgentTranscriptItem["kind"] = "info",
   ): void {
-    this.agentTranscript.update((items) => items.concat({
-      id: `agent_msg_${crypto.randomUUID().slice(0, 8)}`,
-      role,
-      message,
-      kind,
-      at: new Date().toISOString(),
-    }));
+    this.agentTranscript.update((items) =>
+      items.concat({
+        id: `agent_msg_${crypto.randomUUID().slice(0, 8)}`,
+        role,
+        message,
+        kind,
+        at: new Date().toISOString(),
+      })
+    );
   }
 
   #parseMarkdown(markdown: string): {
@@ -2336,7 +2468,9 @@ export class CapillaryStore {
       }
 
       if (section === "findings") {
-        const match = /^- \[(blocker|high|medium|low|note)\]\s+(.+?)\s+\((.+?):(\d+|n\/a)\)(?:\s+\[(?:gate|pass)=(.+?);\s*confidence=([0-9]*\.?[0-9]+)\])?$/.exec(line);
+        const match =
+          /^- \[(blocker|high|medium|low|note)\]\s+(.+?)\s+\((.+?):(\d+|n\/a)\)(?:\s+\[(?:gate|pass)=(.+?);\s*confidence=([0-9]*\.?[0-9]+)\])?$/
+            .exec(line);
         if (!match) {
           continue;
         }

@@ -998,7 +998,12 @@ function patchForPath(capture: ReviewCapture, filePath: string): string {
 // advance the new-file counter and are not right-side comment targets. Returning
 // a real diff line is what lets every finding be posted without GitHub rejecting
 // it — the difference between the tool working and "praying" the model is exact.
-function postableDiffLine(patch: string, preferred: number | undefined, anchor: string): number | undefined {
+// Exported for direct unit testing — pure function, no service state.
+export function postableDiffLine(
+  patch: string,
+  preferred: number | undefined,
+  anchor: string,
+): number | undefined {
   if (!patch) return preferred;
   const commentable: number[] = [];
   const needles = anchorNeedles(anchor);
@@ -1010,7 +1015,13 @@ function postableDiffLine(patch: string, preferred: number | undefined, anchor: 
       newLine = Number(hunk[1]);
       continue;
     }
-    if (newLine === 0 || raw.startsWith("+++") || raw.startsWith("---")) continue;
+    // File headers ("--- a/…" / "+++ b/…") only ever appear before the first
+    // @@ hunk, where newLine is still 0 — so that guard alone covers them. Do
+    // NOT also skip on a "+++"/"---" prefix inside a hunk: an added line whose
+    // own content starts with "++" (e.g. `++counter;`) renders as `+++counter;`
+    // and would be misread as a header, desyncing the new-side line counter and
+    // shifting every later finding's inline comment one line off.
+    if (newLine === 0) continue;
     if (raw.startsWith("+") || raw.startsWith(" ")) {
       commentable.push(newLine);
       if (anchored === undefined && matchesAnchor(raw.slice(1), needles)) {
