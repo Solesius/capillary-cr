@@ -81,3 +81,29 @@ describe("Review stage projection", () => {
   });
 });
 
+
+import { countOpenPullRequests } from "../src/app/state/rules";
+
+describe("countOpenPullRequests", () => {
+  it("should_count_open_and_draft_but_not_closed_or_merged", () => {
+    const count = countOpenPullRequests([
+      { state: "open" },
+      { state: "draft" },
+      { state: "closed" },
+      { state: "merged" },
+    ]);
+    expect(count).to.equal(2);
+  });
+
+  it("should_return_zero_for_an_all_closed_history_list", () => {
+    expect(countOpenPullRequests([{ state: "closed" }, { state: "merged" }])).to.equal(0);
+  });
+
+  it("should_treat_missing_state_as_open_rather_than_zeroing_the_stat", () => {
+    expect(countOpenPullRequests([{}, { state: "open" }])).to.equal(2);
+  });
+
+  it("should_return_zero_for_an_empty_list", () => {
+    expect(countOpenPullRequests([])).to.equal(0);
+  });
+});

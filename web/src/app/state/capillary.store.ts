@@ -28,6 +28,7 @@ import {
   TcsrtcGate,
 } from "../models";
 import { ApiClientService } from "../services/api-client.service";
+import { countOpenPullRequests } from "./rules";
 
 interface FunctionalGoalMilestone {
   id: string;
@@ -102,10 +103,9 @@ export class CapillaryStore {
    * Genuinely-open PRs in the loaded list. The "Open PRs" stat must count by
    * state, not list length — with the closed/history filter active, the raw
    * length is merged/closed PRs and reads as a wildly wrong open count.
+   * Predicate lives in rules.ts (pure, spec-covered, defensive on missing state).
    */
-  readonly openPullRequestCount = computed(() =>
-    this.pullRequests().filter((pr) => pr.state === "open" || pr.state === "draft").length
-  );
+  readonly openPullRequestCount = computed(() => countOpenPullRequests(this.pullRequests()));
   readonly findings = signal<ReviewFinding[]>([]);
   readonly checklist = signal<ReviewChecklistItem[]>([]);
   readonly reviewEvents = signal<string[]>([]);
