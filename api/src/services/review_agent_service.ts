@@ -214,18 +214,33 @@ export class ReviewAgentService {
       );
     }
 
-    // Merge agent findings with the deterministic baseline (dedupe by signature).
-    const merged = this.mergeFindings(input.runId, input.baselineFindings, recordedFindings);
+    // The deterministic torus baseline is a fallback, not a co-author: when the
+    // LLM actually reviewed (reached a verdict, or ran and was cut by budget),
+    // its findings are THE findings — heuristic "instability around X,
+    // curvature=…" narratives must not surface as review findings next to a
+    // real review, least of all on a clean PR where they read as hallucinated
+    // noise. Baseline fills in only when the LLM never effectively ran: no
+    // provider configured, provider unavailable, or planner error.
+    const llmReviewed = Boolean(config) &&
+      stopReason !== "llm_unavailable" && stopReason !== "planner_error";
+    const merged = llmReviewed
+      ? this.mergeFindings(input.runId, [], recordedFindings)
+      : this.mergeFindings(input.runId, input.baselineFindings, recordedFindings);
     const blockerCount = merged.filter((finding) => finding.severity === "blocker").length;
     const highCount = merged.filter((finding) => finding.severity === "high").length;
 
-    if (!config || recordedFindings.length === 0) {
+    if (!llmReviewed) {
       verdict = deriveVerdict(blockerCount, highCount, merged.length);
       if (summary.trim().length === 0) {
         summary = deriveSummary(capture, merged);
       }
     } else {
+      // The model's verdict stands — including a clean approve with zero
+      // findings. Only backfill what it left blank.
       verdict = verdict || deriveVerdict(blockerCount, highCount, merged.length);
+      if (summary.trim().length === 0) {
+        summary = deriveSummary(capture, merged);
+      }
     }
 
     await this.repository.saveFindings(input.runId, merged);
@@ -779,7 +794,7 @@ export class ReviewAgentService {
         case "readTorus":
           return { ok: true, output: describeTorus(capture) };
         case "recordFinding": {
-          const finding = this.coerceFinding(input.runId, args);
+          const finding = this.coerceFinding(input.runId, args, capture);
           if (!finding) {
             return { ok: false, output: "recordFinding rejected: missing required fields" };
           }
@@ -841,7 +856,11 @@ export class ReviewAgentService {
     return value;
   }
 
-  private coerceFinding(runId: string, args: Record<string, unknown>): ReviewFinding | null {
+  private coerceFinding(
+    runId: string,
+    args: Record<string, unknown>,
+    capture: ReviewCapture,
+  ): ReviewFinding | null {
     const title = String(args.title || "").trim();
     const finding = String(args.finding || "").trim();
     const filePath = String(args.filePath || args.path || "").trim();
@@ -854,6 +873,15 @@ export class ReviewAgentService {
       : [];
     const lineRaw = Number(args.line);
     const confidenceRaw = Number(args.confidence);
+    // A finding is only actionable if it anchors to a line GitHub will accept as
+    // an inline comment — i.e. an added/context line in this file's diff. Resolve
+    // it against the real patch: trust the model's line only when it is a genuine
+    // commentable line, otherwise anchor by the finding text, otherwise fall back
+    // to the file's first changed line. This makes "post inline comment" reliable
+    // instead of dependent on the model emitting a perfect line number.
+    const modelLine = Number.isFinite(lineRaw) && lineRaw > 0 ? lineRaw : undefined;
+    const patch = patchForPath(capture, filePath);
+    const line = postableDiffLine(patch, modelLine, `${title} ${finding}`);
     return {
       id: createId("finding"),
       runId,
@@ -862,7 +890,7 @@ export class ReviewAgentService {
       // is legacy; `gate` in the tool schema, `passName` in storage).
       passName: toTcsrtcGate(String(args.gate ?? args.passName ?? "Review")),
       filePath,
-      line: Number.isFinite(lineRaw) && lineRaw > 0 ? lineRaw : undefined,
+      line,
       title,
       finding,
       evidence,
@@ -945,6 +973,79 @@ export function buildPrSummaryComment(record: ReviewAgentRunRecord): string {
       `TCSRTC gated review · run \`${record.runId}\`</sub>`,
   );
   return lines.join("\n");
+}
+
+function normalizeFindingPath(path: string): string {
+  return path.replaceAll("\\", "/").replace(/^\.\//, "").replace(/^\/+/, "");
+}
+
+/** The unified patch for a finding's file, matched leniently on path suffix. */
+function patchForPath(capture: ReviewCapture, filePath: string): string {
+  const target = normalizeFindingPath(filePath);
+  const exact = capture.changedFiles.find((f) => normalizeFindingPath(f.path) === target);
+  if (exact) return exact.patch ?? "";
+  const suffix = capture.changedFiles.find((f) => {
+    const p = normalizeFindingPath(f.path);
+    return p.endsWith(target) || target.endsWith(p);
+  });
+  return suffix?.patch ?? "";
+}
+
+// Resolve the NEW-side line a PR inline comment can actually target: an added
+// ('+') or context (' ') line present in the diff. Prefer the model's line when
+// it is genuinely commentable, else the line whose content best matches the
+// finding text, else the file's first changed line. Deletion ('-') lines never
+// advance the new-file counter and are not right-side comment targets. Returning
+// a real diff line is what lets every finding be posted without GitHub rejecting
+// it — the difference between the tool working and "praying" the model is exact.
+// Exported for direct unit testing — pure function, no service state.
+export function postableDiffLine(
+  patch: string,
+  preferred: number | undefined,
+  anchor: string,
+): number | undefined {
+  if (!patch) return preferred;
+  const commentable: number[] = [];
+  const needles = anchorNeedles(anchor);
+  let anchored: number | undefined;
+  let newLine = 0;
+  for (const raw of patch.split("\n")) {
+    const hunk = /^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/.exec(raw);
+    if (hunk) {
+      newLine = Number(hunk[1]);
+      continue;
+    }
+    // File headers ("--- a/…" / "+++ b/…") only ever appear before the first
+    // @@ hunk, where newLine is still 0 — so that guard alone covers them. Do
+    // NOT also skip on a "+++"/"---" prefix inside a hunk: an added line whose
+    // own content starts with "++" (e.g. `++counter;`) renders as `+++counter;`
+    // and would be misread as a header, desyncing the new-side line counter and
+    // shifting every later finding's inline comment one line off.
+    if (newLine === 0) continue;
+    if (raw.startsWith("+") || raw.startsWith(" ")) {
+      commentable.push(newLine);
+      if (anchored === undefined && matchesAnchor(raw.slice(1), needles)) {
+        anchored = newLine;
+      }
+      newLine += 1;
+    }
+    // '-' (deletion) lines: skip; they do not exist on the new side.
+  }
+  if (preferred !== undefined && commentable.includes(preferred)) return preferred;
+  if (anchored !== undefined) return anchored;
+  return commentable[0];
+}
+
+function anchorNeedles(anchor: string): string[] {
+  return Array.from(
+    new Set(anchor.toLowerCase().split(/[^a-z0-9_]+/).filter((token) => token.length >= 4)),
+  ).slice(0, 8);
+}
+
+function matchesAnchor(content: string, needles: string[]): boolean {
+  if (needles.length === 0) return false;
+  const lower = content.toLowerCase();
+  return needles.some((needle) => lower.includes(needle));
 }
 
 function toCapturedFile(file: DiffFile): CapturedFile {
@@ -1152,8 +1253,11 @@ const REVIEW_SYSTEM_PROMPT =
   `- listNeighbors {} — list dependency-wetted neighbor files.\n` +
   `- readNeighbor {path} — read a neighbor/impact file on demand (read-only).\n` +
   `- readTorus {} — DAG metrics, risk surfaces, hottest program-shape samples.\n` +
-  `- recordFinding {severity, gate, filePath, line?, title, finding, evidence[], suggestedFix?, ` +
-  `suggestion?, confidence} — suggestion is an OPTIONAL committable code fix: ` +
+  `- recordFinding {severity, gate, filePath, line, title, finding, evidence[], suggestedFix?, ` +
+  `suggestion?, confidence} — line is REQUIRED: the exact new-file line number of the ` +
+  `changed ('+') or context line the finding is about, read straight from readDiff's ` +
+  `hunk headers. A finding without a real diff line cannot be posted to the PR, so always ` +
+  `cite one. suggestion is an OPTIONAL committable code fix: ` +
   `{startLine, endLine, code} where startLine/endLine are the 1-indexed inclusive ` +
   `lines in filePath to replace and code is the exact replacement text. Only include ` +
   `suggestion when you are confident of the precise replacement; omit it otherwise. ` +

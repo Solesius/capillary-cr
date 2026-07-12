@@ -6,11 +6,12 @@ import { ApiClientService } from "../services/api-client.service";
 import { CapillaryStore } from "../state/capillary.store";
 import { ReviewPhase, TCSRTC_GATES, toReviewPhase } from "../models";
 import { MarkdownPipe } from "../shell/markdown.pipe";
+import { ReviewFindingsPanelComponent } from "./review-findings-panel.component";
 
 @Component({
   selector: "app-review-control-panel",
   standalone: true,
-  imports: [CommonModule, MarkdownPipe],
+  imports: [CommonModule, MarkdownPipe, ReviewFindingsPanelComponent],
   template: `
     <section>
       <header class="cap-panel-title">
@@ -45,7 +46,7 @@ import { MarkdownPipe } from "../shell/markdown.pipe";
             [class.busy]="starting()"
             [disabled]="!store.canBegin() || starting()"
             (click)="beginReview()">
-            Begin Review
+            {{ store.selectedReviewInProgress() ? 'Review in progress…' : 'Begin Review' }}
           </button>
           <button
             class="cap-button"
@@ -167,8 +168,25 @@ import { MarkdownPipe } from "../shell/markdown.pipe";
                   {{ store.prCommentState() === 'posting' ? 'Posting…' : store.prCommentState() === 'failed' ? 'Retry post to PR' : 'Post summary to PR' }}
                 </button>
               }
+              <button
+                class="cap-button cap-button-ghost cap-button-sm"
+                type="button"
+                (click)="store.downloadSelectedReviewReport()">
+                Download report (.md)
+              </button>
+              @if (store.selectedReviewTraceEnabled()) {
+                <button
+                  class="cap-button cap-button-ghost cap-button-sm"
+                  type="button"
+                  (click)="store.exportSelectedReview()">
+                  Export trace bundle (.zip)
+                </button>
+              } @else {
+                <span class="cap-option-hint">Run not traced — enable “Trace review” for bundle export.</span>
+              }
             </div>
             <div class="cap-md-report" [innerHTML]="store.reviewReport() | capMarkdown"></div>
+            <app-review-findings-panel />
           </div>
         } @else {
           @if (narrative().length === 0) {
@@ -350,6 +368,9 @@ import { MarkdownPipe } from "../shell/markdown.pipe";
       display: flex;
       flex-direction: column;
       gap: 8px;
+      max-height: 460px;
+      overflow-y: auto;
+      overscroll-behavior: contain;
     }
     .cap-nar-stage {
       font-size: 0.75rem;
