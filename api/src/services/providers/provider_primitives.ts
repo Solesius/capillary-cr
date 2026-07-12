@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import {
-  ProviderDescriptor,
-  ProviderKind,
-} from "./provider_core.ts";
+import { ProviderDescriptor, ProviderKind } from "./provider_core.ts";
 
 interface ProviderDefaults {
   baseUrl: string;

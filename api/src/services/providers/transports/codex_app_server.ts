@@ -38,7 +38,10 @@ export function createCodexAppServerProviderOps(
 ): ProviderOps {
   const sessionPool = createCodexSessionPool(channelFactory);
 
-  const send = async (provider: ProviderDescriptor, request: ProviderRequest): Promise<ProviderResult<ProviderResponse>> => {
+  const send = async (
+    provider: ProviderDescriptor,
+    request: ProviderRequest,
+  ): Promise<ProviderResult<ProviderResponse>> => {
     if (!request.messages || request.messages.length === 0) {
       return invalidRequest("messages_required");
     }
@@ -53,7 +56,9 @@ export function createCodexAppServerProviderOps(
     }
 
     // Allow pointing at an OpenAI-compatible REST shim over http(s).
-    if (baseUrl.toLowerCase().startsWith("http://") || baseUrl.toLowerCase().startsWith("https://")) {
+    if (
+      baseUrl.toLowerCase().startsWith("http://") || baseUrl.toLowerCase().startsWith("https://")
+    ) {
       return await sendOpenAiCompatibleRequest({
         fetchLike,
         provider,

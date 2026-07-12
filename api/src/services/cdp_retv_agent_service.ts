@@ -863,7 +863,13 @@ export class CdpRetvAgentService {
         findings,
         summary,
       });
-    emit({ type: "report", report });
+    const meteredReport = runInputTokens + runOutputTokens > 0
+      ? `${report}\n\n---\n<sub>Model usage — in ${runInputTokens.toLocaleString()} · ` +
+        `out ${runOutputTokens.toLocaleString()} · total ${
+          (runInputTokens + runOutputTokens).toLocaleString()
+        } tokens</sub>`
+      : report;
+    emit({ type: "report", report: meteredReport });
 
     const finishedAt = new Date().toISOString();
     const trace: RetvCdpRunTrace | undefined = traceEnabled
@@ -876,6 +882,9 @@ export class CdpRetvAgentService {
       allowedOrigin,
       stopReason,
       functionalTestSucceeded,
+      inputTokens: runInputTokens,
+      outputTokens: runOutputTokens,
+      totalTokens: runInputTokens + runOutputTokens,
       goalAchieved,
       startedAt,
       finishedAt,
@@ -886,7 +895,7 @@ export class CdpRetvAgentService {
       percent: progress.percent,
       findings,
       summary,
-      report,
+      report: meteredReport,
       traceEnabled,
       trace,
     };

@@ -770,10 +770,19 @@ export class CdpDriverService {
     // its text — a one-shot read produces false negatives against SPAs.
     const start = Date.now();
     let text = "";
+    // Whitespace-normalized comparison on BOTH sides: the observation's
+    // visibleText (what a planner quotes its expectation from) collapses
+    // whitespace, while raw innerText carries newlines between the very same
+    // words — so a byte-wise includes() failed on text that was visibly,
+    // verbatim present. Caught by capillary functionally testing itself.
+    const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+    const wantIncludes = typeof includes === "string" ? normalize(includes) : undefined;
+    const wantEquals = typeof equals === "string" ? normalize(equals) : undefined;
     while (true) {
       text = await this.extractSelectorText(connection, selector);
-      const equalsOk = typeof equals !== "string" || text === equals;
-      const includesOk = typeof includes !== "string" || text.includes(includes);
+      const got = normalize(text);
+      const equalsOk = wantEquals === undefined || got === wantEquals;
+      const includesOk = wantIncludes === undefined || got.includes(wantIncludes);
       if (equalsOk && includesOk) {
         return { selector, text };
       }
@@ -783,10 +792,21 @@ export class CdpDriverService {
       await this.sleep(150);
     }
 
-    if (typeof equals === "string" && text !== equals) {
-      throw new AppError(`assert_text_failed_equals: ${selector}`, 409, "assert_text_failed");
+    // Diagnostic failures: name what was expected and show what was actually
+    // there, so a failed assert is a lead instead of a dead end.
+    const excerpt = normalize(text).slice(0, 160);
+    if (wantEquals !== undefined && normalize(text) !== wantEquals) {
+      throw new AppError(
+        `assert_text_failed_equals: ${selector} — expected "${wantEquals}", got "${excerpt}"`,
+        409,
+        "assert_text_failed",
+      );
     }
-    throw new AppError(`assert_text_failed_includes: ${selector}`, 409, "assert_text_failed");
+    throw new AppError(
+      `assert_text_failed_includes: ${selector} — expected to include "${wantIncludes}", got "${excerpt}"`,
+      409,
+      "assert_text_failed",
+    );
   }
 
   private async extractSelectorText(connection: CdpConnection, selector: string): Promise<string> {

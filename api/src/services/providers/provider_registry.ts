@@ -7,8 +7,8 @@ import {
   createAnthropicProviderOps,
   createBedrockProviderOps,
   createClaudeCodeProviderOps,
-  createCopilotProviderOps,
   createCodexAppServerProviderOps,
+  createCopilotProviderOps,
   createGeminiProviderOps,
   createOpenRouterProviderOps,
 } from "./transports/mod.ts";
@@ -93,7 +93,12 @@ const PROVIDER_API_KEY_CHAIN: Record<ProviderKind, string[]> = {
   openrouter: ["OPENROUTER_API_KEY", DEFAULT_PROVIDER_API_KEY_ENV],
   anthropic: ["ANTHROPIC_API_KEY", DEFAULT_PROVIDER_API_KEY_ENV],
   github_copilot: ["GITHUB_COPILOT_TOKEN", "GITHUB_TOKEN", DEFAULT_PROVIDER_API_KEY_ENV],
-  codex_app_server: ["CODEX_APP_SERVER_API_KEY", "GITHUB_COPILOT_TOKEN", "GITHUB_TOKEN", DEFAULT_PROVIDER_API_KEY_ENV],
+  codex_app_server: [
+    "CODEX_APP_SERVER_API_KEY",
+    "GITHUB_COPILOT_TOKEN",
+    "GITHUB_TOKEN",
+    DEFAULT_PROVIDER_API_KEY_ENV,
+  ],
   // Claude Code authenticates via its own subscription OAuth login; no API key is used.
   claude_code: [],
 };

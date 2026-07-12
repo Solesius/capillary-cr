@@ -2,17 +2,17 @@
 // Copyright 2026 Khalil Warren — capillary
 import {
   ChatMessage,
+  errorResult,
+  okResult,
   ProviderDescriptor,
   ProviderError,
   ProviderOps,
   ProviderRequest,
-  ProviderResult,
   ProviderResponse,
+  ProviderResult,
   ProviderStreamCallback,
-  errorResult,
-  okResult,
 } from "../provider_core.ts";
-import { JSON_CONTENT_TYPE, emitTextStream, estimateTokens } from "../provider_helpers.ts";
+import { emitTextStream, estimateTokens, JSON_CONTENT_TYPE } from "../provider_helpers.ts";
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 export const OPENAI_CHAT_COMPLETIONS_PATH = "/chat/completions";
@@ -54,8 +54,12 @@ function joinUrl(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
 }
 
-function isSupportedEndpointProtocol(protocol: string): protocol is (typeof SUPPORTED_ENDPOINT_PROTOCOLS)[number] {
-  return SUPPORTED_ENDPOINT_PROTOCOLS.includes(protocol as (typeof SUPPORTED_ENDPOINT_PROTOCOLS)[number]);
+function isSupportedEndpointProtocol(
+  protocol: string,
+): protocol is (typeof SUPPORTED_ENDPOINT_PROTOCOLS)[number] {
+  return SUPPORTED_ENDPOINT_PROTOCOLS.includes(
+    protocol as (typeof SUPPORTED_ENDPOINT_PROTOCOLS)[number],
+  );
 }
 
 export function resolveHttpEndpoint(baseUrl: string, path: string): string | null {
@@ -89,7 +93,10 @@ export function buildOpenAiCompatibleBody(
 ): Record<string, unknown> {
   return {
     model,
-    messages: normalizeMessages(request).map((message) => ({ role: message.role, content: message.content })),
+    messages: normalizeMessages(request).map((message) => ({
+      role: message.role,
+      content: message.content,
+    })),
     temperature: request.temperature,
     max_tokens: request.maxOutputTokens,
     stream,
@@ -108,7 +115,10 @@ export function buildGithubModelsBody(
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model,
-    messages: normalizeMessages(request).map((message) => ({ role: message.role, content: message.content })),
+    messages: normalizeMessages(request).map((message) => ({
+      role: message.role,
+      content: message.content,
+    })),
     temperature: request.temperature,
     stream,
   };
@@ -210,7 +220,10 @@ export async function sendOpenAiCompatibleRequest(
   input: OpenAiCompatibleRequestInput,
 ): Promise<ProviderResult<ProviderResponse>> {
   const model = input.model || input.request.model || input.provider.model;
-  const url = resolveHttpEndpoint(input.provider.baseUrl, input.path || OPENAI_CHAT_COMPLETIONS_PATH);
+  const url = resolveHttpEndpoint(
+    input.provider.baseUrl,
+    input.path || OPENAI_CHAT_COMPLETIONS_PATH,
+  );
   if (!url) {
     return invalidRequest("invalid_provider_base_url");
   }
@@ -224,7 +237,11 @@ export async function sendOpenAiCompatibleRequest(
 
   if (!posted.ok) {
     const mapped = posted.error;
-    return errorResult(mapped?.kind || "network", mapped?.message || "network_error", mapped?.statusCode);
+    return errorResult(
+      mapped?.kind || "network",
+      mapped?.message || "network_error",
+      mapped?.statusCode,
+    );
   }
 
   const parsed = parseOpenAiCompatibleResponse(posted.payload);
@@ -242,7 +259,12 @@ export async function sendOpenAiCompatibleRequest(
   );
 }
 
-export async function postJson(fetchLike: FetchLike, url: string, headers: Record<string, string>, body: unknown): Promise<{
+export async function postJson(
+  fetchLike: FetchLike,
+  url: string,
+  headers: Record<string, string>,
+  body: unknown,
+): Promise<{
   ok: boolean;
   payload?: unknown;
   error?: ProviderError;

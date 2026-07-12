@@ -1,18 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import {
-  ProviderOps,
-  ProviderRequest,
-  errorResult,
-} from "../provider_core.ts";
+import { errorResult, ProviderOps, ProviderRequest } from "../provider_core.ts";
 import {
   ANTHROPIC_MESSAGES_PATH,
   ANTHROPIC_VERSION_HEADER,
-  CONTENT_TYPE_JSON_HEADER,
-  FetchLike,
   authMissing,
-  endpoint,
+  CONTENT_TYPE_JSON_HEADER,
   createBufferedProviderOps,
+  endpoint,
+  FetchLike,
   invalidRequest,
   postJson,
   toResponse,
@@ -71,48 +67,54 @@ function parseAnthropicResponse(payload: unknown): {
 
 export function createAnthropicProviderOps(fetchLike: FetchLike = fetch): ProviderOps {
   return createBufferedProviderOps(async (provider, request) => {
-      if (!request.messages || request.messages.length === 0) {
-        return invalidRequest("messages_required");
-      }
-      if (!provider.apiKey.trim()) {
-        return authMissing("anthropic");
-      }
+    if (!request.messages || request.messages.length === 0) {
+      return invalidRequest("messages_required");
+    }
+    if (!provider.apiKey.trim()) {
+      return authMissing("anthropic");
+    }
 
-      const model = request.model || provider.model;
-      const body: Record<string, unknown> = {
-        model,
-        max_tokens: request.maxOutputTokens || 4096,
-        temperature: request.temperature,
-        messages: toAnthropicMessages(request),
-      };
-      if (request.systemPrompt?.trim()) {
-        body.system = request.systemPrompt.trim();
-      }
+    const model = request.model || provider.model;
+    const body: Record<string, unknown> = {
+      model,
+      max_tokens: request.maxOutputTokens || 4096,
+      temperature: request.temperature,
+      messages: toAnthropicMessages(request),
+    };
+    if (request.systemPrompt?.trim()) {
+      body.system = request.systemPrompt.trim();
+    }
 
-      const posted = await postJson(
-        fetchLike,
-        endpoint(provider.baseUrl, ANTHROPIC_MESSAGES_PATH),
-        anthropicHeaders(provider.apiKey),
-        body,
+    const posted = await postJson(
+      fetchLike,
+      endpoint(provider.baseUrl, ANTHROPIC_MESSAGES_PATH),
+      anthropicHeaders(provider.apiKey),
+      body,
+    );
+
+    if (!posted.ok) {
+      const mapped = posted.error;
+      return errorResult(
+        mapped?.kind || "network",
+        mapped?.message || "network_error",
+        mapped?.statusCode,
       );
+    }
 
-      if (!posted.ok) {
-        const mapped = posted.error;
-        return errorResult(mapped?.kind || "network", mapped?.message || "network_error", mapped?.statusCode);
-      }
+    const parsed = parseAnthropicResponse(posted.payload);
+    if (!parsed) {
+      return errorResult("server_error", "provider_response_invalid", 502);
+    }
 
-      const parsed = parseAnthropicResponse(posted.payload);
-      if (!parsed) {
-        return errorResult("server_error", "provider_response_invalid", 502);
-      }
-
-      return toResponse(
-        provider,
-        model,
-        parsed.content,
-        parsed.stopReason === "completed" || parsed.stopReason === "end_turn" ? "completed" : "failed",
-        parsed.inputTokens,
-        parsed.outputTokens,
-      );
-    });
+    return toResponse(
+      provider,
+      model,
+      parsed.content,
+      parsed.stopReason === "completed" || parsed.stopReason === "end_turn"
+        ? "completed"
+        : "failed",
+      parsed.inputTokens,
+      parsed.outputTokens,
+    );
+  });
 }

@@ -345,6 +345,10 @@ export interface RetvCdpRunRecord {
   traceEnabled: boolean;
   /** Full per-step trace and screenshots; present only when traceEnabled. */
   trace?: RetvCdpRunTrace;
+  /** Model usage for the run — the auditable token meter. */
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
 }
 
 /** Lightweight run-history row (no heavy trace/report payload). */
@@ -440,6 +444,10 @@ export interface ReviewAgentRunRecord {
   traceEnabled: boolean;
   /** Full per-step trace and capture manifest; present only when traceEnabled. */
   trace?: ReviewAgentRunTrace;
+  /** Model usage for the run — the auditable token meter. */
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
 }
 
 /** Lightweight review-history row (no heavy trace/report/findings payload). */

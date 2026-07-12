@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { ProviderError, ProviderRequest, ProviderStreamCallback, ProviderStreamEvent } from "../provider_core.ts";
+import {
+  ProviderError,
+  ProviderRequest,
+  ProviderStreamCallback,
+  ProviderStreamEvent,
+} from "../provider_core.ts";
 
 // Minimal JSON-RPC 2.0 client for the Codex app-server protocol.
 //
@@ -134,7 +139,8 @@ function resolveReasoningEffort(runContextId: string | undefined): string | unde
 
   const normalized = runContextId?.trim().toLowerCase() || "";
   if (isAgentRunContext(normalized)) {
-    return normalizeReasoningEffort(Deno.env.get("CODEX_APP_SERVER_AGENT_REASONING_EFFORT")) || "low";
+    return normalizeReasoningEffort(Deno.env.get("CODEX_APP_SERVER_AGENT_REASONING_EFFORT")) ||
+      "low";
   }
 
   return undefined;
@@ -418,7 +424,8 @@ export class CodexAppServerSession {
       return false;
     }
     const message = (error.message || "").toLowerCase();
-    return message.includes("thread") || message.includes("unknown") || message.includes("not found");
+    return message.includes("thread") || message.includes("unknown") ||
+      message.includes("not found");
   }
 
   private beginTurn(onStream?: ProviderStreamCallback): TurnState {

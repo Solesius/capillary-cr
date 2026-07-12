@@ -223,6 +223,8 @@ export class ReviewAgentService {
     let cycleCount = 0;
     let llmReport: string | null = null;
     let unexaminedHotPaths: string[] = [];
+    let runInputTokens = 0;
+    let runOutputTokens = 0;
 
     if (config) {
       const loop = await this.runToolLoop(input, capture, config, recordedFindings, traceCycles);
@@ -233,6 +235,8 @@ export class ReviewAgentService {
       }
       summary = loop.summary;
       unexaminedHotPaths = loop.unexaminedHotPaths;
+      runInputTokens += loop.inputTokens;
+      runOutputTokens += loop.outputTokens;
 
       // Coverage teeth: an approval that skipped hot paths is not an
       // approval. Downgrade to comment and say why — "LGTM" on a large
@@ -247,14 +251,21 @@ export class ReviewAgentService {
 
       // A stopped run must exit now, not spend another model turn narrating —
       // the deterministic report covers whatever was recorded before the stop.
-      llmReport = stopReason === "cancelled" ? null : await this.generateLlmReport(
-        capture,
-        recordedFindings,
-        verdict,
-        summary,
-        config,
-        unexaminedHotPaths,
-      );
+      if (stopReason === "cancelled") {
+        llmReport = null;
+      } else {
+        const generated = await this.generateLlmReport(
+          capture,
+          recordedFindings,
+          verdict,
+          summary,
+          config,
+          unexaminedHotPaths,
+        );
+        llmReport = generated.text;
+        runInputTokens += generated.inputTokens;
+        runOutputTokens += generated.outputTokens;
+      }
     }
 
     // The deterministic torus baseline is a fallback, not a co-author: when the
@@ -294,8 +305,16 @@ export class ReviewAgentService {
       highCount,
     }));
 
-    const report = llmReport ??
+    const baseReport = llmReport ??
       buildDeterministicReport(capture, merged, verdict, summary, unexaminedHotPaths);
+    // Auditable token meter: stamped into the report itself so every export,
+    // download and history view carries the run's model cost.
+    const report = runInputTokens + runOutputTokens > 0
+      ? `${baseReport}\n\n---\n<sub>Model usage — in ${runInputTokens.toLocaleString()} · ` +
+        `out ${runOutputTokens.toLocaleString()} · total ${
+          (runInputTokens + runOutputTokens).toLocaleString()
+        } tokens</sub>`
+      : baseReport;
     input.emit({ type: "report", markdown: report });
 
     const finishedAt = new Date();
@@ -324,6 +343,9 @@ export class ReviewAgentService {
       findings: merged,
       summary,
       report,
+      inputTokens: runInputTokens,
+      outputTokens: runOutputTokens,
+      totalTokens: runInputTokens + runOutputTokens,
       traceEnabled: input.trace,
       trace: input.trace
         ? {
@@ -528,6 +550,8 @@ export class ReviewAgentService {
   ): Promise<{
     cycleCount: number;
     stopReason: string;
+    inputTokens: number;
+    outputTokens: number;
     verdict: string;
     summary: string;
     unexaminedHotPaths: string[];
@@ -642,6 +666,8 @@ export class ReviewAgentService {
             verdict: "",
             summary: "",
             unexaminedHotPaths: hotPaths,
+            inputTokens,
+            outputTokens,
           };
         }
         stopReason = "planner_error";
@@ -809,6 +835,8 @@ export class ReviewAgentService {
       verdict,
       summary,
       unexaminedHotPaths: hotPaths.filter((path) => !examinedPaths.has(path)),
+      inputTokens,
+      outputTokens,
     };
   }
 
@@ -998,7 +1026,7 @@ export class ReviewAgentService {
     summary: string,
     config: PlannerChatConfig,
     unexaminedHotPaths: string[] = [],
-  ): Promise<string | null> {
+  ): Promise<{ text: string | null; inputTokens: number; outputTokens: number }> {
     const userMessage = buildReportUserMessage(
       capture,
       findings,
@@ -1011,10 +1039,14 @@ export class ReviewAgentService {
       temperature: 0.2,
     });
     if (!reply.ok || !reply.value) {
-      return null;
+      return { text: null, inputTokens: 0, outputTokens: 0 };
     }
     const content = reply.value.content.trim();
-    return content.length > 0 ? content : null;
+    return {
+      text: content.length > 0 ? content : null,
+      inputTokens: reply.value.inputTokens ?? 0,
+      outputTokens: reply.value.outputTokens ?? 0,
+    };
   }
 }
 

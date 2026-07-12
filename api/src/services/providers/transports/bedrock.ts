@@ -1,17 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import {
-  ProviderOps,
-  ProviderRequest,
-  errorResult,
-} from "../provider_core.ts";
+import { errorResult, ProviderOps, ProviderRequest } from "../provider_core.ts";
 import { estimateTokens } from "../provider_helpers.ts";
 import {
-  CONTENT_TYPE_JSON_HEADER,
-  FetchLike,
   authMissing,
+  CONTENT_TYPE_JSON_HEADER,
   createBufferedProviderOps,
   endpoint,
+  FetchLike,
   invalidRequest,
   postJson,
   toResponse,
@@ -37,7 +33,9 @@ function parseBedrockResponse(payload: unknown): {
   outputTokens: number;
 } | null {
   const data = payload as Record<string, unknown> | null;
-  const message = (data?.output as Record<string, unknown> | undefined)?.message as Record<string, unknown> | undefined;
+  const message = (data?.output as Record<string, unknown> | undefined)?.message as
+    | Record<string, unknown>
+    | undefined;
   const contentItems = (message?.content as Array<Record<string, unknown>> | undefined) || [];
   const text = contentItems
     .flatMap((item) => typeof item.text === "string" ? [item.text] : [])
@@ -71,50 +69,56 @@ function bedrockHeaders(apiKey: string): Record<string, string> {
 
 export function createBedrockProviderOps(fetchLike: FetchLike = fetch): ProviderOps {
   return createBufferedProviderOps(async (provider, request) => {
-      if (!request.messages || request.messages.length === 0) {
-        return invalidRequest("messages_required");
-      }
-      if (!provider.apiKey.trim()) {
-        return authMissing("ihhi_bedrock");
-      }
+    if (!request.messages || request.messages.length === 0) {
+      return invalidRequest("messages_required");
+    }
+    if (!provider.apiKey.trim()) {
+      return authMissing("ihhi_bedrock");
+    }
 
-      const model = request.model || provider.model;
-      const body: Record<string, unknown> = {
-        messages: toBedrockMessages(request),
-        inferenceConfig: {
-          temperature: request.temperature,
-          maxTokens: request.maxOutputTokens,
-        },
-      };
+    const model = request.model || provider.model;
+    const body: Record<string, unknown> = {
+      messages: toBedrockMessages(request),
+      inferenceConfig: {
+        temperature: request.temperature,
+        maxTokens: request.maxOutputTokens,
+      },
+    };
 
-      if (request.systemPrompt?.trim()) {
-        body.system = [{ text: request.systemPrompt.trim() }];
-      }
+    if (request.systemPrompt?.trim()) {
+      body.system = [{ text: request.systemPrompt.trim() }];
+    }
 
-      const posted = await postJson(
-        fetchLike,
-        endpoint(provider.baseUrl, buildBedrockConversePath(model)),
-        bedrockHeaders(provider.apiKey),
-        body,
+    const posted = await postJson(
+      fetchLike,
+      endpoint(provider.baseUrl, buildBedrockConversePath(model)),
+      bedrockHeaders(provider.apiKey),
+      body,
+    );
+
+    if (!posted.ok) {
+      const mapped = posted.error;
+      return errorResult(
+        mapped?.kind || "network",
+        mapped?.message || "network_error",
+        mapped?.statusCode,
       );
+    }
 
-      if (!posted.ok) {
-        const mapped = posted.error;
-        return errorResult(mapped?.kind || "network", mapped?.message || "network_error", mapped?.statusCode);
-      }
+    const parsed = parseBedrockResponse(posted.payload);
+    if (!parsed) {
+      return errorResult("server_error", "provider_response_invalid", 502);
+    }
 
-      const parsed = parseBedrockResponse(posted.payload);
-      if (!parsed) {
-        return errorResult("server_error", "provider_response_invalid", 502);
-      }
-
-      return toResponse(
-        provider,
-        model,
-        parsed.content,
-        parsed.stopReason === "completed" || parsed.stopReason === "end_turn" ? "completed" : "failed",
-        parsed.inputTokens,
-        parsed.outputTokens,
-      );
-    });
+    return toResponse(
+      provider,
+      model,
+      parsed.content,
+      parsed.stopReason === "completed" || parsed.stopReason === "end_turn"
+        ? "completed"
+        : "failed",
+      parsed.inputTokens,
+      parsed.outputTokens,
+    );
+  });
 }
