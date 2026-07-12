@@ -116,7 +116,9 @@ const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]", "0.0.0.0"
 export function rewriteLoopbackToHostGateway(url: string): string | null {
   try {
     const parsed = new URL(url);
-    if (!LOOPBACK_HOSTNAMES.has(parsed.hostname) && !LOOPBACK_HOSTNAMES.has(`[${parsed.hostname}]`)) {
+    if (
+      !LOOPBACK_HOSTNAMES.has(parsed.hostname) && !LOOPBACK_HOSTNAMES.has(`[${parsed.hostname}]`)
+    ) {
       return null;
     }
     parsed.hostname = "host.docker.internal";
@@ -202,7 +204,10 @@ function launchBrowser(executablePath: string, args: string[]): Deno.ChildProces
 class CdpConnection {
   #socket: WebSocket | null = null;
   #requestId = 0;
-  #pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: unknown) => void }>();
+  #pending = new Map<
+    number,
+    { resolve: (value: unknown) => void; reject: (error: unknown) => void }
+  >();
 
   async connect(url: string): Promise<void> {
     if (this.#socket) {
@@ -244,7 +249,9 @@ class CdpConnection {
 
       this.#pending.delete(payload.id);
       if (payload.error) {
-        pending.reject(new AppError(payload.error.message || "cdp_command_failed", 400, "cdp_command_failed"));
+        pending.reject(
+          new AppError(payload.error.message || "cdp_command_failed", 400, "cdp_command_failed"),
+        );
         return;
       }
 
@@ -335,7 +342,10 @@ export class CdpDriverService {
     }));
   }
 
-  async executeWorkUnit(sessionId: string, request: CdpWorkUnitRequest): Promise<CdpWorkUnitResult> {
+  async executeWorkUnit(
+    sessionId: string,
+    request: CdpWorkUnitRequest,
+  ): Promise<CdpWorkUnitResult> {
     const session = this.getSession(sessionId);
     if (!request.steps || request.steps.length === 0) {
       throw new AppError("work_unit_steps_required", 400, "work_unit_steps_required");
@@ -400,7 +410,12 @@ export class CdpDriverService {
   private async executeStep(session: CdpSessionState, step: CdpWorkStep): Promise<unknown> {
     switch (step.action) {
       case "navigate":
-        await this.navigate(session.connection, step.url, step.waitUntil || "load", step.timeoutMs || 15000);
+        await this.navigate(
+          session.connection,
+          step.url,
+          step.waitUntil || "load",
+          step.timeoutMs || 15000,
+        );
         return { url: step.url, waitUntil: step.waitUntil || "load" };
       case "waitForSelector":
         await this.waitForSelector(session.connection, step.selector, step.timeoutMs || 10000);
@@ -426,7 +441,11 @@ export class CdpDriverService {
         await this.waitForSelector(session.connection, step.selector, step.timeoutMs || 10000);
         return await this.extractSelectorText(session.connection, step.selector);
       case "evaluate":
-        return await this.evaluateExpression(session.connection, step.expression, step.returnByValue ?? true);
+        return await this.evaluateExpression(
+          session.connection,
+          step.expression,
+          step.returnByValue ?? true,
+        );
       case "screenshot":
         return await this.captureScreenshot(session.connection, step.format || "png", step.quality);
       default:
@@ -491,7 +510,8 @@ export class CdpDriverService {
   private isLocalBaseUrl(): boolean {
     try {
       const url = new URL(this.#baseUrl);
-      return url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "0.0.0.0";
+      return url.hostname === "127.0.0.1" || url.hostname === "localhost" ||
+        url.hostname === "0.0.0.0";
     } catch {
       return false;
     }
@@ -627,7 +647,9 @@ export class CdpDriverService {
     waitUntil: CdpWaitUntil,
     timeoutMs: number,
   ): Promise<void> {
-    const expectedState = waitUntil === "domcontentloaded" ? ["interactive", "complete"] : ["complete"];
+    const expectedState = waitUntil === "domcontentloaded"
+      ? ["interactive", "complete"]
+      : ["complete"];
 
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
@@ -798,7 +820,8 @@ export class CdpDriverService {
     });
 
     if (payload.exceptionDetails) {
-      const details = payload.exceptionDetails.exception?.description || payload.exceptionDetails.text || "evaluation_error";
+      const details = payload.exceptionDetails.exception?.description ||
+        payload.exceptionDetails.text || "evaluation_error";
       throw new AppError(details, 400, "evaluation_error");
     }
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
 import { assert, assertEquals, assertRejects, assertThrows } from "jsr:@std/assert";
-import { InMemoryReviewRepository } from "../src/repositories/review_repository.ts";
+import { CelerReviewRepository } from "../src/repositories/review_repository.ts";
 import { ArtifactService } from "../src/services/artifact_service.ts";
 import { BuildOrchestrationService } from "../src/services/build_orchestration_service.ts";
 import { ClickClackCoordinationService } from "../src/services/click_clack_coordination_service.ts";
@@ -34,88 +34,117 @@ import { TcsrctReviewService } from "../src/services/tcsrct_review_service.ts";
 
 function createMockGitHubFetch(): typeof fetch {
   return (input: string | URL | Request): Promise<Response> => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    const url = typeof input === "string"
+      ? input
+      : input instanceof URL
+      ? input.toString()
+      : input.url;
 
     if (url.endsWith("/user")) {
-      return Promise.resolve(new Response(JSON.stringify({
-        id: 38218017,
-        login: "Solesius",
-        name: "Khalil Warren",
-        avatar_url: "https://avatars.githubusercontent.com/u/38218017?v=4",
-      }), { status: 200 }));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: 38218017,
+            login: "Solesius",
+            name: "Khalil Warren",
+            avatar_url: "https://avatars.githubusercontent.com/u/38218017?v=4",
+          }),
+          { status: 200 },
+        ),
+      );
     }
 
     if (url.includes("/user/repos")) {
-      return Promise.resolve(new Response(JSON.stringify([
-        {
-          id: 1207713294,
-          owner: { login: "Solesius" },
-          name: "celer-mem",
-          full_name: "Solesius/celer-mem",
-          default_branch: "main",
-          private: false,
-          html_url: "https://github.com/Solesius/celer-mem",
-          language: "C++",
-          open_issues_count: 0,
-        },
-      ]), { status: 200 }));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify([
+            {
+              id: 1207713294,
+              owner: { login: "Solesius" },
+              name: "celer-mem",
+              full_name: "Solesius/celer-mem",
+              default_branch: "main",
+              private: false,
+              html_url: "https://github.com/Solesius/celer-mem",
+              language: "C++",
+              open_issues_count: 0,
+            },
+          ]),
+          { status: 200 },
+        ),
+      );
     }
 
     if (url.includes("/repos/Solesius/celer-mem/pulls?")) {
-      return Promise.resolve(new Response(JSON.stringify([
-        {
-          number: 8,
-          title: "Amazon S3 backend and async streaming",
-          user: { login: "Solesius" },
-          head: { ref: "feat-async-s3" },
-          base: { ref: "main" },
-          state: "open",
-          draft: false,
-          html_url: "https://github.com/Solesius/celer-mem/pull/8",
-          created_at: "2026-04-15T01:26:48Z",
-          updated_at: "2026-04-15T11:12:53Z",
-        },
-      ]), { status: 200 }));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify([
+            {
+              number: 8,
+              title: "Amazon S3 backend and async streaming",
+              user: { login: "Solesius" },
+              head: { ref: "feat-async-s3" },
+              base: { ref: "main" },
+              state: "open",
+              draft: false,
+              html_url: "https://github.com/Solesius/celer-mem/pull/8",
+              created_at: "2026-04-15T01:26:48Z",
+              updated_at: "2026-04-15T11:12:53Z",
+            },
+          ]),
+          { status: 200 },
+        ),
+      );
     }
 
     if (url.includes("/repos/Solesius/celer-mem/pulls/8/files")) {
-      return Promise.resolve(new Response(JSON.stringify([
-        {
-          filename: "src/backend/s3.cpp",
-          status: "modified",
-          additions: 638,
-          deletions: 0,
-          patch:
-            "@@ -1,5 +1,9 @@\n+#include \"celer/core/async_stream.hpp\"\n+#include \"celer/core/scheduler.hpp\"\n+\n+void init_s3_stream() {\n+  auto sched = Scheduler{};\n+  auto stream = AsyncStream{};\n+}\n",
-        },
-        {
-          filename: "include/celer/core/async_stream.hpp",
-          status: "added",
-          additions: 477,
-          deletions: 0,
-          patch:
-            "@@ -0,0 +1,8 @@\n+#pragma once\n+class AsyncStream {\n+public:\n+  void poll_next();\n+};\n+\n+class Scheduler;\n",
-        },
-      ]), { status: 200 }));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify([
+            {
+              filename: "src/backend/s3.cpp",
+              status: "modified",
+              additions: 638,
+              deletions: 0,
+              patch:
+                '@@ -1,5 +1,9 @@\n+#include "celer/core/async_stream.hpp"\n+#include "celer/core/scheduler.hpp"\n+\n+void init_s3_stream() {\n+  auto sched = Scheduler{};\n+  auto stream = AsyncStream{};\n+}\n',
+            },
+            {
+              filename: "include/celer/core/async_stream.hpp",
+              status: "added",
+              additions: 477,
+              deletions: 0,
+              patch:
+                "@@ -0,0 +1,8 @@\n+#pragma once\n+class AsyncStream {\n+public:\n+  void poll_next();\n+};\n+\n+class Scheduler;\n",
+            },
+          ]),
+          { status: 200 },
+        ),
+      );
     }
 
     if (url.includes("/repos/Solesius/celer-mem/pulls/8")) {
-      return Promise.resolve(new Response(JSON.stringify({
-        number: 8,
-        title: "Amazon S3 backend and async streaming",
-        user: { login: "Solesius" },
-        head: { ref: "feat-async-s3" },
-        base: { ref: "main" },
-        state: "open",
-        draft: false,
-        html_url: "https://github.com/Solesius/celer-mem/pull/8",
-        created_at: "2026-04-15T01:26:48Z",
-        updated_at: "2026-04-15T11:12:53Z",
-        additions: 5663,
-        deletions: 27,
-        changed_files: 28,
-        merged_at: null,
-      }), { status: 200 }));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            number: 8,
+            title: "Amazon S3 backend and async streaming",
+            user: { login: "Solesius" },
+            head: { ref: "feat-async-s3" },
+            base: { ref: "main" },
+            state: "open",
+            draft: false,
+            html_url: "https://github.com/Solesius/celer-mem/pull/8",
+            created_at: "2026-04-15T01:26:48Z",
+            updated_at: "2026-04-15T11:12:53Z",
+            additions: 5663,
+            deletions: 27,
+            changed_files: 28,
+            merged_at: null,
+          }),
+          { status: 200 },
+        ),
+      );
     }
 
     return Promise.resolve(new Response(JSON.stringify({ message: "not_found" }), { status: 404 }));
@@ -123,7 +152,7 @@ function createMockGitHubFetch(): typeof fetch {
 }
 
 function buildFixture() {
-  const repository = new InMemoryReviewRepository();
+  const repository = new CelerReviewRepository();
   const graphMath = new GraphMathService();
   // null embeddings: unit tests stay hermetic (no model download/inference).
   const diffDagService = new DiffDagService(repository, graphMath, null);
@@ -154,42 +183,66 @@ function createMockGitHubOAuthDeviceFetch(): typeof fetch {
   let pollCount = 0;
 
   return (input: string | URL | Request): Promise<Response> => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    const url = typeof input === "string"
+      ? input
+      : input instanceof URL
+      ? input.toString()
+      : input.url;
 
     if (url === "https://github.com/login/device/code") {
-      return Promise.resolve(new Response(JSON.stringify({
-        device_code: "dev_code_123",
-        user_code: "ABCD-EFGH",
-        verification_uri: "https://github.com/login/device",
-        verification_uri_complete: "https://github.com/login/device?user_code=ABCD-EFGH",
-        expires_in: 600,
-        interval: 1,
-      }), { status: 200 }));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            device_code: "dev_code_123",
+            user_code: "ABCD-EFGH",
+            verification_uri: "https://github.com/login/device",
+            verification_uri_complete: "https://github.com/login/device?user_code=ABCD-EFGH",
+            expires_in: 600,
+            interval: 1,
+          }),
+          { status: 200 },
+        ),
+      );
     }
 
     if (url === "https://github.com/login/oauth/access_token") {
       pollCount += 1;
       if (pollCount === 1) {
-        return Promise.resolve(new Response(JSON.stringify({
-          error: "authorization_pending",
-          error_description: "waiting for user approval",
-        }), { status: 200 }));
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              error: "authorization_pending",
+              error_description: "waiting for user approval",
+            }),
+            { status: 200 },
+          ),
+        );
       }
 
-      return Promise.resolve(new Response(JSON.stringify({
-        access_token: "ghu_device_token",
-        token_type: "bearer",
-        scope: "repo read:org read:user",
-      }), { status: 200 }));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            access_token: "ghu_device_token",
+            token_type: "bearer",
+            scope: "repo read:org read:user",
+          }),
+          { status: 200 },
+        ),
+      );
     }
 
     if (url.endsWith("/user")) {
-      return Promise.resolve(new Response(JSON.stringify({
-        id: 38218017,
-        login: "Solesius",
-        name: "Khalil Warren",
-        avatar_url: "https://avatars.githubusercontent.com/u/38218017?v=4",
-      }), { status: 200 }));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: 38218017,
+            login: "Solesius",
+            name: "Khalil Warren",
+            avatar_url: "https://avatars.githubusercontent.com/u/38218017?v=4",
+          }),
+          { status: 200 },
+        ),
+      );
     }
 
     return Promise.resolve(new Response(JSON.stringify({ message: "not_found" }), { status: 404 }));
@@ -203,7 +256,7 @@ Deno.test("should_connect_github_when_oauth_state_is_valid", async () => {
 });
 
 Deno.test("should_start_device_oauth_when_secret_is_missing", async () => {
-  const repository = new InMemoryReviewRepository();
+  const repository = new CelerReviewRepository();
   const githubService = new GitHubOakService(repository, createMockGitHubOAuthDeviceFetch());
 
   const previousClientId = Deno.env.get("GITHUB_OAUTH_CLIENT_ID");
@@ -213,7 +266,10 @@ Deno.test("should_start_device_oauth_when_secret_is_missing", async () => {
     Deno.env.set("GITHUB_OAUTH_CLIENT_ID", "test-client-id");
     Deno.env.delete("GITHUB_OAUTH_CLIENT_SECRET");
 
-    const start = await githubService.beginGithubOAuth("http://localhost:8080", "http://localhost:4200");
+    const start = await githubService.beginGithubOAuth(
+      "http://localhost:8080",
+      "http://localhost:4200",
+    );
     assertEquals(start.mode, "device");
     if (start.mode !== "device") {
       throw new Error("expected device oauth mode");
@@ -236,7 +292,7 @@ Deno.test("should_start_device_oauth_when_secret_is_missing", async () => {
 });
 
 Deno.test("should_poll_device_oauth_session_until_connected", async () => {
-  const repository = new InMemoryReviewRepository();
+  const repository = new CelerReviewRepository();
   const githubService = new GitHubOakService(repository, createMockGitHubOAuthDeviceFetch());
 
   const previousClientId = Deno.env.get("GITHUB_OAUTH_CLIENT_ID");
@@ -246,7 +302,10 @@ Deno.test("should_poll_device_oauth_session_until_connected", async () => {
     Deno.env.set("GITHUB_OAUTH_CLIENT_ID", "test-client-id");
     Deno.env.delete("GITHUB_OAUTH_CLIENT_SECRET");
 
-    const start = await githubService.beginGithubOAuth("http://localhost:8080", "http://localhost:4200");
+    const start = await githubService.beginGithubOAuth(
+      "http://localhost:8080",
+      "http://localhost:4200",
+    );
     assertEquals(start.mode, "device");
     if (start.mode !== "device") {
       throw new Error("expected device oauth mode");
@@ -278,7 +337,7 @@ Deno.test("should_poll_device_oauth_session_until_connected", async () => {
 });
 
 Deno.test("should_start_device_oauth_with_default_client_id_when_env_is_unset", async () => {
-  const repository = new InMemoryReviewRepository();
+  const repository = new CelerReviewRepository();
   const githubService = new GitHubOakService(repository, createMockGitHubOAuthDeviceFetch());
 
   const previousClientId = Deno.env.get("GITHUB_OAUTH_CLIENT_ID");
@@ -288,7 +347,10 @@ Deno.test("should_start_device_oauth_with_default_client_id_when_env_is_unset", 
     Deno.env.delete("GITHUB_OAUTH_CLIENT_ID");
     Deno.env.delete("GITHUB_OAUTH_CLIENT_SECRET");
 
-    const start = await githubService.beginGithubOAuth("http://localhost:8080", "http://localhost:4200");
+    const start = await githubService.beginGithubOAuth(
+      "http://localhost:8080",
+      "http://localhost:4200",
+    );
     assertEquals(start.mode, "device");
     if (start.mode !== "device") {
       throw new Error("expected device oauth mode");
@@ -352,7 +414,12 @@ Deno.test("should_floor_milestone_progress_with_clean_cycle_evidence", async () 
   );
   // Planner silent + clean cycle: auto-advance, capped at total.
   assertEquals(
-    reconcileCompletedMilestones({ ...base, plannerReported: undefined, prior: 4, cycleSucceeded: true }),
+    reconcileCompletedMilestones({
+      ...base,
+      plannerReported: undefined,
+      prior: 4,
+      cycleSucceeded: true,
+    }),
     4,
   );
   // Unreachable planner disables auto-advance.
@@ -422,14 +489,23 @@ Deno.test("should_paginate_past_100_visible_repositories", async () => {
     open_issues_count: 0,
   });
   const paginatingFetch = ((input: string | URL | Request): Promise<Response> => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    const url = typeof input === "string"
+      ? input
+      : input instanceof URL
+      ? input.toString()
+      : input.url;
     if (url.endsWith("/user")) {
-      return Promise.resolve(new Response(JSON.stringify({
-        id: 1,
-        login: "acme-user",
-        name: "Acme User",
-        avatar_url: "https://example.com/a.png",
-      }), { status: 200 }));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: 1,
+            login: "acme-user",
+            name: "Acme User",
+            avatar_url: "https://example.com/a.png",
+          }),
+          { status: 200 },
+        ),
+      );
     }
     if (url.includes("/user/repos")) {
       const page = Number(new URL(url).searchParams.get("page") || "1");
@@ -443,7 +519,7 @@ Deno.test("should_paginate_past_100_visible_repositories", async () => {
     return Promise.resolve(new Response("{}", { status: 404 }));
   }) as typeof fetch;
 
-  const repository = new InMemoryReviewRepository();
+  const repository = new CelerReviewRepository();
   const githubService = new GitHubOakService(repository, paginatingFetch);
   await githubService.connectGithub("valid", "ghp_test_token");
 
@@ -483,7 +559,7 @@ Deno.test("should_build_diff_dag_when_pull_request_diff_is_available", async () 
   await githubService.listRepositories();
   await githubService.listPullRequests("1207713294");
   await githubService.getPullRequestDiff("1207713294", "8");
-  const dag = diffDagService.buildDiffDag("8");
+  const dag = await diffDagService.buildDiffDag("8");
   assertEquals(dag.nodeCount > 0, true);
   assertEquals(dag.edgeCount > 0, true);
 });
@@ -496,7 +572,7 @@ Deno.test("should_build_diff_dag_with_explicit_repository_when_pr_numbers_collid
   await githubService.getPullRequestDiff("1207713294", "8");
 
   // Simulate another repository containing the same pull request number without a saved diff.
-  repository.upsertPullRequest({
+  await repository.upsertPullRequest({
     id: "8",
     repositoryId: "999999",
     number: 8,
@@ -514,7 +590,7 @@ Deno.test("should_build_diff_dag_with_explicit_repository_when_pr_numbers_collid
     riskHint: "low",
   });
 
-  const dag = diffDagService.buildDiffDag("8", "1207713294");
+  const dag = await diffDagService.buildDiffDag("8", "1207713294");
   assertEquals(dag.repositoryId, "1207713294");
   assertEquals(dag.nodeCount > 0, true);
 });
@@ -525,8 +601,8 @@ Deno.test("should_expand_dependency_wetting_when_neighbors_exist", async () => {
   await githubService.listRepositories();
   await githubService.listPullRequests("1207713294");
   await githubService.getPullRequestDiff("1207713294", "8");
-  const dag = diffDagService.buildDiffDag("8");
-  const wetted = diffDagService.expandDependencyWetting(dag.id);
+  const dag = await diffDagService.buildDiffDag("8");
+  const wetted = await diffDagService.expandDependencyWetting(dag.id);
   assertEquals(wetted.saturation > 0, true);
 });
 
@@ -536,9 +612,9 @@ Deno.test("should_compute_program_shape_when_diff_state_and_interop_exist", asyn
   await githubService.listRepositories();
   await githubService.listPullRequests("1207713294");
   await githubService.getPullRequestDiff("1207713294", "8");
-  const dag = diffDagService.buildDiffDag("8");
-  diffDagService.expandDependencyWetting(dag.id);
-  const samples = diffDagService.computeProgramShape(dag.id);
+  const dag = await diffDagService.buildDiffDag("8");
+  await diffDagService.expandDependencyWetting(dag.id);
+  const samples = await diffDagService.computeProgramShape(dag.id);
   assertEquals(samples.length > 0, true);
 });
 
@@ -559,7 +635,7 @@ Deno.test("should_persist_review_agent_record_with_report_when_review_completes"
   await githubService.listPullRequests("1207713294");
 
   const run = await reviewService.beginReview("8", "1207713294");
-  const record = reviewService.getReviewAgentRun(run.id);
+  const record = await reviewService.getReviewAgentRun(run.id);
 
   assert(record !== null);
   assertEquals(record.runId, run.id);
@@ -568,10 +644,10 @@ Deno.test("should_persist_review_agent_record_with_report_when_review_completes"
   assertEquals(record.findingCount, run.findingCount);
 
   // History exposes the run; untraced runs are not exportable.
-  const history = reviewService.listReviewAgentRuns();
+  const history = await reviewService.listReviewAgentRuns();
   assertEquals(history.some((item) => item.runId === run.id), true);
   assertEquals(record.traceEnabled, false);
-  assertEquals(reviewService.buildReviewExport(run.id), null);
+  assertEquals(await reviewService.buildReviewExport(run.id), null);
 });
 
 Deno.test("should_export_markdown_review_when_run_is_complete", async () => {
@@ -580,7 +656,7 @@ Deno.test("should_export_markdown_review_when_run_is_complete", async () => {
   await githubService.listRepositories();
   await githubService.listPullRequests("1207713294");
   const run = await reviewService.beginReview("8", "1207713294");
-  const markdown = artifactService.exportMarkdownReview(run.id);
+  const markdown = await artifactService.exportMarkdownReview(run.id);
   assertEquals(markdown.includes("# Capillary Review"), true);
   assertEquals(markdown.includes("## LLM Stage"), true);
   assertEquals(markdown.includes("## Findings (TCSRTC Gates)"), true);
@@ -597,10 +673,13 @@ Deno.test("should_include_line_numbers_on_tcsrct_findings_when_patch_data_exists
   await githubService.listPullRequests("1207713294");
 
   const run = await reviewService.beginReview("8", "1207713294");
-  const findings = repository.getFindings(run.id);
+  const findings = await repository.getFindings(run.id);
 
   assertEquals(findings.length > 0, true);
-  assertEquals(findings.some((finding) => typeof finding.line === "number" && finding.line > 0), true);
+  assertEquals(
+    findings.some((finding) => typeof finding.line === "number" && finding.line > 0),
+    true,
+  );
 });
 
 Deno.test("should_fail_make_dev_when_deno_is_missing", () => {
@@ -682,7 +761,7 @@ Deno.test("should_generate_retv_evidence_when_reviewing_packet_with_model", asyn
   await githubService.listRepositories();
   await githubService.listPullRequests("1207713294");
   const run = await reviewService.beginReview("8", "1207713294");
-  const packetId = repository.getReviewRun(run.id).packetId || "";
+  const packetId = (await repository.getReviewRun(run.id)).packetId || "";
 
   const llm = new LlmProviderService(repository, {
     kind: "github_copilot",
@@ -691,7 +770,12 @@ Deno.test("should_generate_retv_evidence_when_reviewing_packet_with_model", asyn
   const findings = await llm.reviewPacketWithModel(packetId);
 
   assertEquals(findings.length > 0, true);
-  assertEquals(findings[0].evidence.some((line) => line.includes("retv.loop=reason->toolform->act->observe->update->decide")), true);
+  assertEquals(
+    findings[0].evidence.some((line) =>
+      line.includes("retv.loop=reason->toolform->act->observe->update->decide")
+    ),
+    true,
+  );
   assertEquals(findings[0].evidence.some((line) => line.includes("tdd_gate=enabled")), true);
 });
 
@@ -701,9 +785,9 @@ Deno.test("should_prefer_runtime_llm_config_when_reviewing_packet", async () => 
   await githubService.listRepositories();
   await githubService.listPullRequests("1207713294");
   const run = await reviewService.beginReview("8", "1207713294");
-  const packetId = repository.getReviewRun(run.id).packetId || "";
+  const packetId = (await repository.getReviewRun(run.id)).packetId || "";
 
-  repository.setRuntimeLlmConfig({
+  await repository.setRuntimeLlmConfig({
     providerKind: "gemini",
     model: "gemini-2.5-flash",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta",
@@ -736,34 +820,34 @@ Deno.test({
   name: "should_route_codex_alias_runtime_config_through_review_flow",
   ignore: !hasCodexAppServer,
   fn: async () => {
-  const { repository, githubService, reviewService } = buildFixture();
-  await githubService.connectGithub("valid", "ghp_test_token");
-  await githubService.listRepositories();
-  await githubService.listPullRequests("1207713294");
-  const run = await reviewService.beginReview("8", "1207713294");
-  const packetId = repository.getReviewRun(run.id).packetId || "";
+    const { repository, githubService, reviewService } = buildFixture();
+    await githubService.connectGithub("valid", "ghp_test_token");
+    await githubService.listRepositories();
+    await githubService.listPullRequests("1207713294");
+    const run = await reviewService.beginReview("8", "1207713294");
+    const packetId = (await repository.getReviewRun(run.id)).packetId || "";
 
-  // A misspelled/alias provider kind must still resolve to the Codex
-  // app-server provider in the review flow (and stale codex model ids are
-  // normalized to the recommended default).
-  repository.setRuntimeLlmConfig({
-    providerKind: "codefx",
-    model: "gpt-5.3-codex",
-    baseUrl: "stdio://codex-app-server",
-    apiKey: "",
-  });
+    // A misspelled/alias provider kind must still resolve to the Codex
+    // app-server provider in the review flow (and stale codex model ids are
+    // normalized to the recommended default).
+    await repository.setRuntimeLlmConfig({
+      providerKind: "codefx",
+      model: "gpt-5.3-codex",
+      baseUrl: "stdio://codex-app-server",
+      apiKey: "",
+    });
 
-  const llm = new LlmProviderService(repository, {
-    kind: "github_copilot",
-    model: "openai/gpt-4.1",
-  });
-  const findings = await llm.reviewPacketWithModel(packetId);
+    const llm = new LlmProviderService(repository, {
+      kind: "github_copilot",
+      model: "openai/gpt-4.1",
+    });
+    const findings = await llm.reviewPacketWithModel(packetId);
 
-  assertEquals(findings.length > 0, true);
-  assertEquals(
-    findings[0].evidence.some((line) => line.includes("provider.kind=codex_app_server")),
-    true,
-  );
+    assertEquals(findings.length > 0, true);
+    assertEquals(
+      findings[0].evidence.some((line) => line.includes("provider.kind=codex_app_server")),
+      true,
+    );
   },
 });
 
@@ -773,8 +857,8 @@ Deno.test("should_build_retv_loop_from_top_risk_surfaces", async () => {
   await githubService.listRepositories();
   await githubService.listPullRequests("1207713294");
   const run = await reviewService.beginReview("8", "1207713294");
-  const packetId = repository.getReviewRun(run.id).packetId || "";
-  const packet = repository.getReviewPacket(packetId);
+  const packetId = (await repository.getReviewRun(run.id)).packetId || "";
+  const packet = await repository.getReviewPacket(packetId);
 
   const loop = buildRetvLoop(packet);
   assertEquals(loop.length > 0, true);
@@ -788,15 +872,27 @@ Deno.test("should_emit_well_formed_retv_phases_and_stop_reason", async () => {
   await githubService.listRepositories();
   await githubService.listPullRequests("1207713294");
   const run = await reviewService.beginReview("8", "1207713294");
-  const packetId = repository.getReviewRun(run.id).packetId || "";
-  const packet = repository.getReviewPacket(packetId);
+  const packetId = (await repository.getReviewRun(run.id)).packetId || "";
+  const packet = await repository.getReviewPacket(packetId);
 
   const result = runRetvLoop(packet, { maxIterations: 3 });
   assertEquals(result.iterations.length > 0, true);
   assertEquals(result.traces.length >= result.iterations.length * 6, true);
-  assertEquals(result.stopReason.startsWith("stop_at_retv_") || result.stopReason === "iteration_budget_exhausted", true);
-  assertEquals(["risk_threshold_met", "iteration_budget_exhausted", "no_surfaces"].includes(result.stopCondition.kind), true);
-  assertEquals(result.iterations[0].phases.map((phase) => phase.phase).join(","), "reason,toolform,act,observe,update,decide");
+  assertEquals(
+    result.stopReason.startsWith("stop_at_retv_") ||
+      result.stopReason === "iteration_budget_exhausted",
+    true,
+  );
+  assertEquals(
+    ["risk_threshold_met", "iteration_budget_exhausted", "no_surfaces"].includes(
+      result.stopCondition.kind,
+    ),
+    true,
+  );
+  assertEquals(
+    result.iterations[0].phases.map((phase) => phase.phase).join(","),
+    "reason,toolform,act,observe,update,decide",
+  );
   assertEquals(result.iterations[0].toolPlan.length > 0, true);
   assertEquals(result.iterations[0].toolPlan[0].toolName.length > 0, true);
 });
@@ -807,8 +903,8 @@ Deno.test("should_normalize_invalid_retv_policy_values", async () => {
   await githubService.listRepositories();
   await githubService.listPullRequests("1207713294");
   const run = await reviewService.beginReview("8", "1207713294");
-  const packetId = repository.getReviewRun(run.id).packetId || "";
-  const packet = repository.getReviewPacket(packetId);
+  const packetId = (await repository.getReviewRun(run.id)).packetId || "";
+  const packet = await repository.getReviewPacket(packetId);
 
   const result = runRetvLoop(packet, {
     maxIterations: 0,
@@ -827,8 +923,8 @@ Deno.test("should_emit_no_surfaces_stop_condition_when_packet_has_no_risk_surfac
   await githubService.listRepositories();
   await githubService.listPullRequests("1207713294");
   const run = await reviewService.beginReview("8", "1207713294");
-  const packetId = repository.getReviewRun(run.id).packetId || "";
-  const packet = repository.getReviewPacket(packetId);
+  const packetId = (await repository.getReviewRun(run.id)).packetId || "";
+  const packet = await repository.getReviewPacket(packetId);
 
   const result = runRetvLoop({
     ...packet,
@@ -844,10 +940,15 @@ Deno.test("should_shape_and_parse_openrouter_transport", async () => {
   let capturedBody = "";
   const ops = createOpenRouterProviderOps((_url, init) => {
     capturedBody = String(init?.body || "");
-    return Promise.resolve(new Response(JSON.stringify({
-      choices: [{ message: { content: "openrouter ok" }, finish_reason: "stop" }],
-      usage: { prompt_tokens: 11, completion_tokens: 7 },
-    }), { status: 200 }));
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "openrouter ok" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 11, completion_tokens: 7 },
+        }),
+        { status: 200 },
+      ),
+    );
   });
 
   const result = await ops.send(
@@ -864,7 +965,7 @@ Deno.test("should_shape_and_parse_openrouter_transport", async () => {
   );
 
   assertEquals(result.ok, true);
-  assertEquals(capturedBody.includes("\"model\""), true);
+  assertEquals(capturedBody.includes('"model"'), true);
   assertEquals(result.value?.content, "openrouter ok");
 });
 
@@ -873,10 +974,15 @@ Deno.test("should_stream_openrouter_transport_with_buffered_events", async () =>
   const chunks: string[] = [];
 
   const ops = createOpenRouterProviderOps(() => {
-    return Promise.resolve(new Response(JSON.stringify({
-      choices: [{ message: { content: "openrouter stream" }, finish_reason: "stop" }],
-      usage: { prompt_tokens: 3, completion_tokens: 2 },
-    }), { status: 200 }));
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "openrouter stream" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 3, completion_tokens: 2 },
+        }),
+        { status: 200 },
+      ),
+    );
   });
 
   const result = await ops.sendStream(
@@ -934,15 +1040,23 @@ Deno.test("should_shape_and_parse_gemini_transport", async () => {
   const ops = createGeminiProviderOps((url, init) => {
     capturedUrl = String(url);
     capturedBody = String(init?.body || "");
-    return Promise.resolve(new Response(JSON.stringify({
-      candidates: [{
-        content: {
-          parts: [{ text: '{"findings":[{"severity":"low","passName":"Runtime","filePath":"src/main.ts","title":"Test","finding":"Test finding","evidence":["e1"],"confidence":0.7}]}' }],
-        },
-        finishReason: "STOP",
-      }],
-      usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 11 },
-    }), { status: 200 }));
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          candidates: [{
+            content: {
+              parts: [{
+                text:
+                  '{"findings":[{"severity":"low","passName":"Runtime","filePath":"src/main.ts","title":"Test","finding":"Test finding","evidence":["e1"],"confidence":0.7}]}',
+              }],
+            },
+            finishReason: "STOP",
+          }],
+          usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 11 },
+        }),
+        { status: 200 },
+      ),
+    );
   });
 
   const result = await ops.send(
@@ -961,9 +1075,9 @@ Deno.test("should_shape_and_parse_gemini_transport", async () => {
   assertEquals(result.ok, true);
   assertEquals(capturedUrl.includes("/models/gemini-2.5-pro:generateContent"), true);
   assertEquals(capturedUrl.includes("key=gem-test"), true);
-  assertEquals(capturedBody.includes("\"contents\""), true);
-  assertEquals(capturedBody.includes("\"systemInstruction\""), true);
-  assertEquals(result.value?.content.includes("\"findings\""), true);
+  assertEquals(capturedBody.includes('"contents"'), true);
+  assertEquals(capturedBody.includes('"systemInstruction"'), true);
+  assertEquals(result.value?.content.includes('"findings"'), true);
 });
 
 Deno.test("should_shape_and_parse_bedrock_transport", async () => {
@@ -974,17 +1088,24 @@ Deno.test("should_shape_and_parse_bedrock_transport", async () => {
   const ops = createBedrockProviderOps((url, init) => {
     capturedUrl = String(url);
     capturedBody = String(init?.body || "");
-    capturedAuth = String((init?.headers as Record<string, string> | undefined)?.authorization || "");
+    capturedAuth = String(
+      (init?.headers as Record<string, string> | undefined)?.authorization || "",
+    );
 
-    return Promise.resolve(new Response(JSON.stringify({
-      output: {
-        message: {
-          content: [{ text: "bedrock ok" }],
-        },
-      },
-      stopReason: "end_turn",
-      usage: { inputTokens: 17, outputTokens: 8 },
-    }), { status: 200 }));
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          output: {
+            message: {
+              content: [{ text: "bedrock ok" }],
+            },
+          },
+          stopReason: "end_turn",
+          usage: { inputTokens: 17, outputTokens: 8 },
+        }),
+        { status: 200 },
+      ),
+    );
   });
 
   const result = await ops.send(
@@ -1001,8 +1122,11 @@ Deno.test("should_shape_and_parse_bedrock_transport", async () => {
   );
 
   assertEquals(result.ok, true);
-  assertEquals(capturedUrl.includes("/model/us.anthropic.claude-haiku-4-5-20251001-v1%3A0/converse"), true);
-  assertEquals(capturedBody.includes("\"messages\""), true);
+  assertEquals(
+    capturedUrl.includes("/model/us.anthropic.claude-haiku-4-5-20251001-v1%3A0/converse"),
+    true,
+  );
+  assertEquals(capturedBody.includes('"messages"'), true);
   assertEquals(capturedAuth, "Bearer br-test");
   assertEquals(result.value?.content, "bedrock ok");
 });
@@ -1015,10 +1139,15 @@ Deno.test("should_shape_and_parse_codex_transport_with_http_endpoint", async () 
     capturedUrl = String(url);
     capturedBody = String(init?.body || "");
 
-    return Promise.resolve(new Response(JSON.stringify({
-      choices: [{ message: { content: "codex http ok" }, finish_reason: "stop" }],
-      usage: { prompt_tokens: 15, completion_tokens: 6 },
-    }), { status: 200 }));
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "codex http ok" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 15, completion_tokens: 6 },
+        }),
+        { status: 200 },
+      ),
+    );
   });
 
   const result = await ops.send(
@@ -1035,7 +1164,7 @@ Deno.test("should_shape_and_parse_codex_transport_with_http_endpoint", async () 
 
   assertEquals(result.ok, true);
   assertEquals(capturedUrl, "http://localhost:1234/v1/chat/completions");
-  assertEquals(capturedBody.includes("\"model\":\"gpt-5.3-codex\""), true);
+  assertEquals(capturedBody.includes('"model":"gpt-5.3-codex"'), true);
   assertEquals(result.value?.content, "codex http ok");
 });
 
@@ -1163,11 +1292,19 @@ Deno.test("should_stream_claude_code_text_deltas_and_parse_result", async () => 
       JSON.stringify({ type: "system", subtype: "init", apiKeySource: "none" }),
       JSON.stringify({
         type: "stream_event",
-        event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hello" } },
+        event: {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "text_delta", text: "Hello" },
+        },
       }),
       JSON.stringify({
         type: "stream_event",
-        event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: ", world" } },
+        event: {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "text_delta", text: ", world" },
+        },
       }),
       JSON.stringify({
         type: "result",
@@ -1212,7 +1349,10 @@ Deno.test("should_stream_claude_code_text_deltas_and_parse_result", async () => 
   assertEquals(invocation?.args.includes("--append-system-prompt"), true);
   assertEquals(invocation?.args.includes("--model"), true);
   assertEquals(invocation?.stdin, "say hi");
-  assertEquals(Object.prototype.hasOwnProperty.call(invocation?.env ?? {}, "ANTHROPIC_API_KEY"), false);
+  assertEquals(
+    Object.prototype.hasOwnProperty.call(invocation?.env ?? {}, "ANTHROPIC_API_KEY"),
+    false,
+  );
 });
 
 Deno.test("should_map_claude_code_result_error_to_provider_error", async () => {
@@ -1266,7 +1406,10 @@ Deno.test("should_request_low_reasoning_for_agent_context_and_full_reasoning_for
             messageHandler({ id: m.id, result: {} });
           } else if (m.method === "thread/start") {
             capturedThreadStarts.push(m.params || {});
-            messageHandler({ id: m.id, result: { thread: { id: `thread-${capturedThreadStarts.length}` } } });
+            messageHandler({
+              id: m.id,
+              result: { thread: { id: `thread-${capturedThreadStarts.length}` } },
+            });
           } else if (m.method === "turn/start") {
             messageHandler({ id: m.id, result: {} });
             messageHandler({ method: "item/agentMessage/delta", params: { delta: "ok" } });
@@ -1303,7 +1446,9 @@ Deno.test("should_request_low_reasoning_for_agent_context_and_full_reasoning_for
   assertEquals(review.ok, true);
   assertEquals(capturedThreadStarts.length, 2);
 
-  const agentConfig = capturedThreadStarts[0].config as { model_reasoning_effort?: string } | undefined;
+  const agentConfig = capturedThreadStarts[0].config as
+    | { model_reasoning_effort?: string }
+    | undefined;
   assertEquals(agentConfig?.model_reasoning_effort, "low");
 
   // Review threads must keep full (server-default) reasoning: no override sent.
@@ -1368,11 +1513,14 @@ Deno.test("should_stream_codex_app_server_turn_deltas_over_send_stream", async (
 });
 
 Deno.test("should_map_codex_app_server_failed_turn_to_error", async () => {
-  const ops = createCodexAppServerProviderOps(undefined, () =>
-    Promise.resolve(createFakeCodexChannel({
-      failTurn: true,
-      turnError: { message: "Unauthorized", codexErrorInfo: { httpStatusCode: 401 } },
-    })));
+  const ops = createCodexAppServerProviderOps(
+    undefined,
+    () =>
+      Promise.resolve(createFakeCodexChannel({
+        failTurn: true,
+        turnError: { message: "Unauthorized", codexErrorInfo: { httpStatusCode: 401 } },
+      })),
+  );
 
   const result = await ops.send(
     {
@@ -1468,7 +1616,10 @@ Deno.test("should_create_distinct_codex_threads_for_distinct_run_contexts", asyn
           messageHandler({ id: m.id, result: {} });
         } else if (m.method === "thread/start") {
           threadStartCalls += 1;
-          messageHandler({ id: m.id, result: { thread: { id: `ctx-thread-${threadStartCalls}` } } });
+          messageHandler({
+            id: m.id,
+            result: { thread: { id: `ctx-thread-${threadStartCalls}` } },
+          });
         } else if (m.method === "turn/start") {
           messageHandler({ id: m.id, result: {} });
           messageHandler({
@@ -1518,11 +1669,18 @@ Deno.test("should_shape_and_parse_copilot_transport", async () => {
   const ops = createCopilotProviderOps((url, init) => {
     capturedUrl = String(url);
     capturedBody = String(init?.body || "");
-    capturedVersion = String((init?.headers as Record<string, string> | undefined)?.["x-github-api-version"] || "");
-    return Promise.resolve(new Response(JSON.stringify({
-      choices: [{ message: { content: "copilot ok" }, finish_reason: "stop" }],
-      usage: { prompt_tokens: 13, completion_tokens: 5 },
-    }), { status: 200 }));
+    capturedVersion = String(
+      (init?.headers as Record<string, string> | undefined)?.["x-github-api-version"] || "",
+    );
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "copilot ok" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 13, completion_tokens: 5 },
+        }),
+        { status: 200 },
+      ),
+    );
   });
 
   const result = await ops.send(
@@ -1549,10 +1707,15 @@ Deno.test("should_use_max_completion_tokens_for_gpt_5_models_on_copilot_transpor
   let capturedBody = "";
   const ops = createCopilotProviderOps((_url, init) => {
     capturedBody = String(init?.body || "");
-    return Promise.resolve(new Response(JSON.stringify({
-      choices: [{ message: { content: "copilot ok" }, finish_reason: "stop" }],
-      usage: { prompt_tokens: 7, completion_tokens: 3 },
-    }), { status: 200 }));
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "copilot ok" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 7, completion_tokens: 3 },
+        }),
+        { status: 200 },
+      ),
+    );
   });
 
   const result = await ops.send(
@@ -1581,22 +1744,36 @@ Deno.test("should_retry_copilot_transport_with_token_exchange_on_auth_error", as
     const target = String(url);
     if (target.includes("/copilot_internal/v2/token")) {
       exchangeAttempts += 1;
-      return Promise.resolve(new Response(JSON.stringify({ token: "copilot-exchanged-token" }), { status: 200 }));
+      return Promise.resolve(
+        new Response(JSON.stringify({ token: "copilot-exchanged-token" }), { status: 200 }),
+      );
     }
 
     if (target.includes("/inference/chat/completions")) {
       chatAttempts += 1;
-      const auth = String((init?.headers as Record<string, string> | undefined)?.authorization || "");
+      const auth = String(
+        (init?.headers as Record<string, string> | undefined)?.authorization || "",
+      );
       if (auth === "Bearer gho_source_token") {
-        return Promise.resolve(new Response(JSON.stringify({
-          message: "Unauthorized",
-        }), { status: 401 }));
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              message: "Unauthorized",
+            }),
+            { status: 401 },
+          ),
+        );
       }
 
-      return Promise.resolve(new Response(JSON.stringify({
-        choices: [{ message: { content: "copilot exchanged ok" }, finish_reason: "stop" }],
-        usage: { prompt_tokens: 9, completion_tokens: 4 },
-      }), { status: 200 }));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "copilot exchanged ok" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 9, completion_tokens: 4 },
+          }),
+          { status: 200 },
+        ),
+      );
     }
 
     return Promise.resolve(new Response(JSON.stringify({ message: "not_found" }), { status: 404 }));
@@ -1630,22 +1807,34 @@ Deno.test("should_fallback_to_copilot_api_when_github_models_is_rate_limited", a
 
     if (target.includes("/copilot_internal/v2/token")) {
       exchangeAttempts += 1;
-      return Promise.resolve(new Response(JSON.stringify({ token: "copilot-exchanged-token" }), { status: 200 }));
+      return Promise.resolve(
+        new Response(JSON.stringify({ token: "copilot-exchanged-token" }), { status: 200 }),
+      );
     }
 
     if (target.includes("models.github.ai/inference/chat/completions")) {
       githubModelsAttempts += 1;
-      return Promise.resolve(new Response(JSON.stringify({
-        message: "GitHub Models budget exceeded",
-      }), { status: 403 }));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            message: "GitHub Models budget exceeded",
+          }),
+          { status: 403 },
+        ),
+      );
     }
 
     if (target.includes("api.githubcopilot.com/chat/completions")) {
       copilotApiAttempts += 1;
-      return Promise.resolve(new Response(JSON.stringify({
-        choices: [{ message: { content: "copilot api fallback ok" }, finish_reason: "stop" }],
-        usage: { prompt_tokens: 5, completion_tokens: 3 },
-      }), { status: 200 }));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "copilot api fallback ok" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 5, completion_tokens: 3 },
+          }),
+          { status: 200 },
+        ),
+      );
     }
 
     return Promise.resolve(new Response(JSON.stringify({ message: "not_found" }), { status: 404 }));
@@ -1672,11 +1861,16 @@ Deno.test("should_fallback_to_copilot_api_when_github_models_is_rate_limited", a
 
 Deno.test("should_shape_and_parse_anthropic_transport", async () => {
   const ops = createAnthropicProviderOps(() => {
-    return Promise.resolve(new Response(JSON.stringify({
-      content: [{ type: "text", text: "anthropic ok" }],
-      stop_reason: "end_turn",
-      usage: { input_tokens: 19, output_tokens: 9 },
-    }), { status: 200 }));
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          content: [{ type: "text", text: "anthropic ok" }],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 19, output_tokens: 9 },
+        }),
+        { status: 200 },
+      ),
+    );
   });
 
   const result = await ops.send(

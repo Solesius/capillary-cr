@@ -8,32 +8,66 @@
 // reads, writes, scans and batches run on Deno's FFI thread pool and never
 // stall the event loop — matching celer-mem's own async-first design.
 //
-// celer-mem organizes data as scope -> table -> key/value. One SQLite file is
-// created per scope; each logical table is a real SQL table inside it.
+// celer-mem organizes data as scope -> table -> key/value. The concrete storage
+// engine (RocksDB by default, SQLite as a fallback) is chosen by the native
+// build and resolved at open time; this binding is backend-agnostic.
 //
 // The native library is optional: callers should use `CelerStore.tryOpen()` and
 // fall back gracefully when FFI is unavailable (library not built, or the
 // process lacks `--allow-ffi`).
 //
-// Buffer lifetime note: nonblocking FFI calls execute on a worker thread, so
-// any input buffer must outlive the dispatch. We therefore pass explicit
-// pointers via `Deno.UnsafePointer.of()` and hold the backing buffers in a
-// keep-alive list referenced after the await — V8 never relocates an
-// ArrayBuffer's backing store, so a live reference keeps the pointer valid.
+// Buffer lifetime note (memory-safety critical): a nonblocking FFI call runs on
+// a worker thread while JS keeps executing, so every argument buffer whose raw
+// pointer we hand across (via `Deno.UnsafePointer.of()`) must stay alive until
+// the call resolves. We push each such buffer into `keepAlive` and reference it
+// *after* the await — that post-await use makes the async state machine capture
+// `keepAlive` (and therefore the buffers) for the full duration of the call, so
+// V8 cannot collect them mid-flight. V8 never relocates an ArrayBuffer's backing
+// store, so the pointer stays valid as long as the buffer is reachable. The
+// returned response is copied out of native memory before `celer_free` runs.
 
 const LIB_URL = new URL("../../../native/libceler_ffi.so", import.meta.url);
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
+// Sink for the FFI keep-alive anchor in #invoke. Exported so it is provably
+// observable module state — the optimizer cannot treat the writes that pin
+// argument buffers past a nonblocking call as dead code. Never read for logic.
+export let ffiKeepAliveSink = 0;
+
 const SYMBOLS = {
-  celer_open: { parameters: ["pointer", "pointer", "pointer", "i32"], result: "pointer", nonblocking: true },
+  celer_open: {
+    parameters: ["pointer", "pointer", "pointer", "i32"],
+    result: "pointer",
+    nonblocking: true,
+  },
   celer_close_store: { parameters: [], result: "pointer", nonblocking: true },
-  celer_put: { parameters: ["pointer", "pointer", "pointer", "i32", "pointer", "i32"], result: "pointer", nonblocking: true },
-  celer_get: { parameters: ["pointer", "pointer", "pointer", "i32"], result: "pointer", nonblocking: true },
-  celer_del: { parameters: ["pointer", "pointer", "pointer", "i32"], result: "pointer", nonblocking: true },
-  celer_prefix_scan: { parameters: ["pointer", "pointer", "pointer", "i32"], result: "pointer", nonblocking: true },
-  celer_batch: { parameters: ["pointer", "pointer", "pointer", "i32"], result: "pointer", nonblocking: true },
+  celer_put: {
+    parameters: ["pointer", "pointer", "pointer", "i32", "pointer", "i32"],
+    result: "pointer",
+    nonblocking: true,
+  },
+  celer_get: {
+    parameters: ["pointer", "pointer", "pointer", "i32"],
+    result: "pointer",
+    nonblocking: true,
+  },
+  celer_del: {
+    parameters: ["pointer", "pointer", "pointer", "i32"],
+    result: "pointer",
+    nonblocking: true,
+  },
+  celer_prefix_scan: {
+    parameters: ["pointer", "pointer", "pointer", "i32"],
+    result: "pointer",
+    nonblocking: true,
+  },
+  celer_batch: {
+    parameters: ["pointer", "pointer", "pointer", "i32"],
+    result: "pointer",
+    nonblocking: true,
+  },
   celer_compact: { parameters: ["pointer", "pointer"], result: "pointer", nonblocking: true },
   celer_free: { parameters: ["pointer"], result: "void" },
 } as const;
@@ -55,9 +89,13 @@ export interface CelerTableDescriptor {
 }
 
 export interface CelerStoreOptions {
-  /** Backend kind. Only "sqlite" is wired through the shim today. */
-  backend?: "sqlite";
-  /** Directory where per-scope SQLite files are created. */
+  /**
+   * Storage engine. Omit (or pass "auto") to use whatever the native library
+   * was built with — RocksDB when compiled in, else SQLite. Only override when
+   * you specifically need one engine and know the build supports it.
+   */
+  backend?: "sqlite" | "rocksdb" | "auto";
+  /** Directory where the backend's data files are created. */
   path: string;
   /** Scope/table pairs to provision on open. */
   schema: CelerTableDescriptor[];
@@ -183,7 +221,10 @@ export class CelerStore {
     try {
       const response = await store.#invoke(
         lib.symbols.celer_open,
-        cstr(options.backend ?? "sqlite"),
+        // "auto" lets the native layer pick the best backend it was built
+        // with (RocksDB when compiled in, else SQLite), so the runtime default
+        // always matches the compiled engine.
+        cstr(options.backend ?? "auto"),
         cstr(options.path),
         buf(schema),
         schema.length,
@@ -213,8 +254,9 @@ export class CelerStore {
 
   /**
    * Invoke a nonblocking native symbol. Buffer args are passed as explicit
-   * pointers and held in `keepAlive` (referenced after the await) so the worker
-   * thread always sees valid memory.
+   * pointers and held in `keepAlive`, which is referenced after the await so the
+   * async state machine keeps the buffers (and their native pointers) valid for
+   * the whole call on the FFI worker thread. See the buffer-lifetime note above.
    */
   async #invoke(
     // deno-lint-ignore no-explicit-any
@@ -230,12 +272,16 @@ export class CelerStore {
       return Deno.UnsafePointer.of(arg);
     });
     const ptr = await fn(...params);
-    // Touch keepAlive after the await so V8 cannot collect the buffers while
-    // the worker thread is still reading them.
-    if (keepAlive.length === Number.NEGATIVE_INFINITY) {
-      throw new Error("unreachable");
+    const response = readResponse(this.#lib, ptr);
+    // Anchor: a real use of every kept buffer *after* the await and the native
+    // read. Folding their byte lengths into a module sink is an observable side
+    // effect the optimizer cannot elide, guaranteeing the buffers outlive the
+    // worker thread's access — unlike a self-evidently-false branch, which DCE
+    // could drop.
+    for (const buffer of keepAlive) {
+      ffiKeepAliveSink = (ffiKeepAliveSink + buffer.byteLength) >>> 0;
     }
-    return readResponse(this.#lib, ptr);
+    return response;
   }
 
   async put(scope: string, table: string, key: string, value: string | Uint8Array): Promise<void> {

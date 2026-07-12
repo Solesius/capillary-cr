@@ -26,24 +26,19 @@ import {
   ReviewAgentTraceCycle,
   ReviewAgentTraceStep,
   ReviewFinding,
-  ReviewSuggestion,
   ReviewPacket,
   ReviewSeverity,
+  ReviewSuggestion,
 } from "../domain/entities.ts";
-import {
-  ReviewRunEvent,
-  TCSRTC_GATES,
-  TcsrtcGate,
-  toTcsrtcGate,
-} from "../domain/review_phase.ts";
+import { ReviewRunEvent, TCSRTC_GATES, TcsrtcGate, toTcsrtcGate } from "../domain/review_phase.ts";
 import { ReviewRepository } from "../repositories/review_repository.ts";
 import { GitHubOakService } from "./github_service.ts";
 import { TcsrctReviewService } from "./tcsrct_review_service.ts";
 import { providerUsesGithubToken } from "./providers/provider_registry.ts";
 import {
   extractJsonObject,
-  type PlannerChatConfig,
   plannerChat,
+  type PlannerChatConfig,
 } from "./providers/planner_chat.ts";
 import { createZipArchive } from "./storage/zip_writer.ts";
 
@@ -177,7 +172,7 @@ export class ReviewAgentService {
     const startedAt = new Date();
     const capture = await this.buildCapture(input);
 
-    const config = this.resolvePlannerConfig();
+    const config = await this.resolvePlannerConfig();
     const recordedFindings: ReviewFinding[] = [];
     const traceCycles: ReviewAgentTraceCycle[] = [];
 
@@ -203,7 +198,8 @@ export class ReviewAgentService {
       // review with unexamined risk is the failure mode this exists to kill.
       if (verdict === "approve" && unexaminedHotPaths.length > 0) {
         verdict = "comment";
-        const note = `Downgraded from approve: ${unexaminedHotPaths.length} hot path(s) were not examined.`;
+        const note =
+          `Downgraded from approve: ${unexaminedHotPaths.length} hot path(s) were not examined.`;
         summary = summary ? `${summary} ${note}` : note;
         input.emit({ type: "log", level: "warn", message: note });
       }
@@ -247,8 +243,8 @@ export class ReviewAgentService {
       }
     }
 
-    this.repository.saveFindings(input.runId, merged);
-    this.repository.updateReviewRun(input.runId, (current) => ({
+    await this.repository.saveFindings(input.runId, merged);
+    await this.repository.updateReviewRun(input.runId, (current) => ({
       ...current,
       findingCount: merged.length,
       blockerCount,
@@ -287,11 +283,14 @@ export class ReviewAgentService {
       report,
       traceEnabled: input.trace,
       trace: input.trace
-        ? { cycles: traceCycles, captureManifest: JSON.stringify(toCaptureManifest(capture), null, 2) }
+        ? {
+          cycles: traceCycles,
+          captureManifest: JSON.stringify(toCaptureManifest(capture), null, 2),
+        }
         : undefined,
     };
 
-    this.repository.saveReviewAgentRun(record);
+    await this.repository.saveReviewAgentRun(record);
 
     return {
       findings: merged,
@@ -308,8 +307,8 @@ export class ReviewAgentService {
    * Build a self-contained, exportable bundle for a traced review run.
    * Returns null when the run is unknown; the caller distinguishes "not traced".
    */
-  buildReviewExport(runId: string): Uint8Array | null {
-    const record = this.repository.getReviewAgentRun(runId);
+  async buildReviewExport(runId: string): Promise<Uint8Array | null> {
+    const record = await this.repository.getReviewAgentRun(runId);
     if (!record || !record.traceEnabled) {
       return null;
     }
@@ -356,14 +355,14 @@ export class ReviewAgentService {
   // --- capture -------------------------------------------------------------
 
   private async buildCapture(input: ReviewAgentPassInput): Promise<ReviewCapture> {
-    const packet: ReviewPacket = this.repository.getReviewPacket(input.packetId);
-    const pull = this.repository.getPullRequest(input.repositoryId, input.pullRequestId);
-    const graph = this.repository.findGraphByPullRequest(input.pullRequestId);
+    const packet: ReviewPacket = await this.repository.getReviewPacket(input.packetId);
+    const pull = await this.repository.getPullRequest(input.repositoryId, input.pullRequestId);
+    const graph = await this.repository.findGraphByPullRequest(input.pullRequestId);
 
     // Source changed files from the real diff (carries the unified patch); the
     // packet's graph-derived files have no patch. Neighbor names come from the
     // packet (graph) and are read on demand.
-    const diff = this.repository.getPullRequestDiff(input.repositoryId, input.pullRequestId);
+    const diff = await this.repository.getPullRequestDiff(input.repositoryId, input.pullRequestId);
     const changedPaths = new Set(diff.map((file) => file.path));
     const changedFiles = diff.map(toCapturedFile);
     const neighborFiles = packet.neighborFiles
@@ -456,15 +455,15 @@ export class ReviewAgentService {
 
   // --- LLM config ----------------------------------------------------------
 
-  private resolvePlannerConfig(): PlannerChatConfig | null {
-    const runtime = this.repository.getRuntimeLlmConfig();
+  private async resolvePlannerConfig(): Promise<PlannerChatConfig | null> {
+    const runtime = await this.repository.getRuntimeLlmConfig();
     if (!runtime) {
       return null;
     }
     // Only Copilot / Codex-via-Copilot are authenticated by the GitHub token;
     // never fall it back into a third-party provider's Authorization header.
     const githubFallback = providerUsesGithubToken(runtime.providerKind)
-      ? (this.repository.getGithubToken() || "")
+      ? ((await this.repository.getGithubToken()) || "")
       : "";
     const apiKey = runtime.apiKey?.trim() || githubFallback;
     return {
@@ -562,7 +561,12 @@ export class ReviewAgentService {
         recordedFindings,
         cycle,
         budget,
-        { hot: hotPaths.length, examined: hotPaths.length - unexamined.length, unexamined, overRead },
+        {
+          hot: hotPaths.length,
+          examined: hotPaths.length - unexamined.length,
+          unexamined,
+          overRead,
+        },
       );
       const systemPrompt = input.suggest
         ? `${REVIEW_SYSTEM_PROMPT}\n\n${SUGGESTION_DIRECTIVE}`
@@ -592,7 +596,11 @@ export class ReviewAgentService {
 
       const payload = extractJsonObject(reply.value.content);
       if (!payload) {
-        input.emit({ type: "log", level: "warn", message: `cycle ${cycle}: planner reply unparseable` });
+        input.emit({
+          type: "log",
+          level: "warn",
+          message: `cycle ${cycle}: planner reply unparseable`,
+        });
         observations.push(`cycle ${cycle}: planner produced no actionable JSON.`);
         continue;
       }
@@ -605,7 +613,7 @@ export class ReviewAgentService {
       const reasoning = typeof payload.reasoning === "string" ? payload.reasoning.trim() : "";
       if (reasoning.length > 0) {
         input.emit({ type: "thinking", cycle, gate, text: clamp(reasoning, 700) });
-        this.repository.appendReviewEvent(
+        await this.repository.appendReviewEvent(
           input.runId,
           `thinking:${gate}:${clamp(reasoning, 300)}`,
         );
@@ -625,7 +633,14 @@ export class ReviewAgentService {
         const stepStart = Date.now();
 
         const argPath = typeof args.path === "string" ? args.path.trim() : "";
-        const result = await this.executeTool(input, capture, fileCache, recordedFindings, tool, args);
+        const result = await this.executeTool(
+          input,
+          capture,
+          fileCache,
+          recordedFindings,
+          tool,
+          args,
+        );
         if (result.ok && argPath && READ_TOOLS.has(tool)) {
           examinedPaths.add(argPath);
           readCounts.set(argPath, (readCounts.get(argPath) ?? 0) + 1);
@@ -649,7 +664,9 @@ export class ReviewAgentService {
             output: clamp(result.output, MAX_READ_FEEDBACK_CHARS),
           });
         }
-        observations.push(`cycle ${cycle} ${tool}${argPath ? ` ${argPath}` : ""}: ${clamp(result.output, 200)}`);
+        observations.push(
+          `cycle ${cycle} ${tool}${argPath ? ` ${argPath}` : ""}: ${clamp(result.output, 200)}`,
+        );
         steps.push({
           index: stepIndex,
           tool,
@@ -704,13 +721,15 @@ export class ReviewAgentService {
         inputTokens,
         outputTokens,
       });
-      this.repository.appendReviewEvent(
+      await this.repository.appendReviewEvent(
         input.runId,
         `gate:${gate}:cycle=${cycle}:tools=${toolCalls.length}:findings=${cycleFindings.length}`,
       );
 
       const isDone = payload.done === true ||
-        toolCalls.some((call) => String((call as Record<string, unknown>)?.tool || "") === "complete");
+        toolCalls.some((call) =>
+          String((call as Record<string, unknown>)?.tool || "") === "complete"
+        );
       if (isDone) {
         verdict = typeof payload.verdict === "string" ? payload.verdict : verdict;
         summary = typeof payload.summary === "string" ? payload.summary : summary;
@@ -909,7 +928,13 @@ export class ReviewAgentService {
     config: PlannerChatConfig,
     unexaminedHotPaths: string[] = [],
   ): Promise<string | null> {
-    const userMessage = buildReportUserMessage(capture, findings, verdict, summary, unexaminedHotPaths);
+    const userMessage = buildReportUserMessage(
+      capture,
+      findings,
+      verdict,
+      summary,
+      unexaminedHotPaths,
+    );
     const reply = await plannerChat(config, REVIEW_REPORT_PROMPT, userMessage, {
       maxOutputTokens: 2200,
       temperature: 0.2,
@@ -1055,7 +1080,11 @@ function listFiles(files: readonly CapturedFile[]): string {
     return "(none)";
   }
   return files
-    .map((file) => `${file.path} [${file.status}] +${file.additions}/-${file.deletions}${file.isTest ? " (test)" : ""}`)
+    .map((file) =>
+      `${file.path} [${file.status}] +${file.additions}/-${file.deletions}${
+        file.isTest ? " (test)" : ""
+      }`
+    )
     .join("\n");
 }
 
@@ -1139,7 +1168,10 @@ function parseSuggestion(raw: unknown): ReviewSuggestion | undefined {
 
 function normalizeSeverity(raw: string): ReviewSeverity {
   const value = raw.trim().toLowerCase();
-  if (value === "blocker" || value === "high" || value === "medium" || value === "low" || value === "note") {
+  if (
+    value === "blocker" || value === "high" || value === "medium" || value === "low" ||
+    value === "note"
+  ) {
     return value;
   }
   if (value === "critical") {
@@ -1337,7 +1369,9 @@ function buildReportUserMessage(
   if (summary.trim().length > 0) {
     lines.push(`Reviewer summary: ${summary}`);
   }
-  lines.push(`Changed files: ${capture.changedFiles.length}; risk surfaces: ${capture.riskSurfaces.length}.`);
+  lines.push(
+    `Changed files: ${capture.changedFiles.length}; risk surfaces: ${capture.riskSurfaces.length}.`,
+  );
   if (unexaminedHotPaths.length > 0) {
     lines.push(
       `Unexamined hot paths (MUST appear in the report as explicit follow-ups): ` +
@@ -1431,12 +1465,22 @@ function buildDeterministicReport(
   }
   lines.push("");
   lines.push("## TCSRTC Gates");
-  lines.push(`- **Target**: ${capture.changedFiles.length} file(s) in scope; blast radius ${capture.dag.changedNodeCount} node(s).`);
+  lines.push(
+    `- **Target**: ${capture.changedFiles.length} file(s) in scope; blast radius ${capture.dag.changedNodeCount} node(s).`,
+  );
   lines.push(`- **Constrain**: review bounded to changed files; neighbors expanded on demand.`);
-  lines.push(`- **Sanitize**: ${capture.riskSurfaces.length} risk surface(s) evaluated for boundary/auth/persistence exposure.`);
-  lines.push(`- **Review**: ${findings.length} finding(s) recorded across plan/diff/risk analysis.`);
+  lines.push(
+    `- **Sanitize**: ${capture.riskSurfaces.length} risk surface(s) evaluated for boundary/auth/persistence exposure.`,
+  );
+  lines.push(
+    `- **Review**: ${findings.length} finding(s) recorded across plan/diff/risk analysis.`,
+  );
   const testFiles = capture.changedFiles.filter((file) => file.isTest).length;
-  lines.push(`- **Test**: ${testFiles} test file(s) touched; ${testFiles === 0 ? "no test changes — verify coverage" : "coverage present"}.`);
+  lines.push(
+    `- **Test**: ${testFiles} test file(s) touched; ${
+      testFiles === 0 ? "no test changes — verify coverage" : "coverage present"
+    }.`,
+  );
   lines.push(`- **Confirm**: verdict **${verdict}**.`);
   lines.push("");
   lines.push("## Recommendations");

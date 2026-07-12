@@ -44,6 +44,10 @@ services:
       GITHUB_OAUTH_CLIENT_SECRET: "${GITHUB_OAUTH_CLIENT_SECRET:-}"
       GITHUB_OAUTH_REDIRECT_URI: "${GITHUB_OAUTH_REDIRECT_URI:-}"
       GITHUB_OAUTH_SCOPES: "${GITHUB_OAUTH_SCOPES:-repo workflow read:org read:user}"
+      # Default LLM planner selected at boot (e.g. claude_code, github_copilot,
+      # anthropic, openrouter). The runtime provider config is in-memory only —
+      # never persisted — so set this to keep a selection across container rolls.
+      CAPILLARY_LLM_PROVIDER: "${CAPILLARY_LLM_PROVIDER:-}"
       # LLM planner credentials are read from the server environment only; pass
       # whichever provider key(s) you use. See .env.example / ARCHITECTURE.md.
       CAPILLARY_LLM_API_KEY: "${CAPILLARY_LLM_API_KEY:-}"
@@ -56,6 +60,7 @@ services:
       CODEX_APP_SERVER_URL: "${CODEX_APP_SERVER_URL:-}"
       # Same pattern for the claude CLI — see api/scripts/claude_ws_bridge.ts.
       CLAUDE_CODE_URL: "${CLAUDE_CODE_URL:-}"
+      CLAUDE_CODE_MODEL: "${CLAUDE_CODE_MODEL:-}"
       # RetV browser agent: the image bundles chromium with headless launch
       # flags baked in — functional tests work out of the box. Point
       # CDP_BASE_URL at an external endpoint to use a different browser, or

@@ -82,7 +82,15 @@ export interface RetvPlannerConfigView {
 }
 
 export interface RetvCdpToolDefinition {
-  name: "navigate" | "waitForSelector" | "click" | "type" | "extractText" | "assertText" | "evaluate" | "readPage";
+  name:
+    | "navigate"
+    | "waitForSelector"
+    | "click"
+    | "type"
+    | "extractText"
+    | "assertText"
+    | "evaluate"
+    | "readPage";
   description: string;
   requiredArgs: string[];
 }
@@ -156,7 +164,13 @@ export type RetvCdpRunEvent =
   | { type: "plan"; structuredPlan: RetvCdpStructuredPlan }
   | { type: "observation"; cycle: number; observation: RetvCdpObservation }
   | { type: "planner_delta"; cycle: number; text: string }
-  | { type: "planner"; cycle: number; rawContent: string; toolCalls: RetvCdpToolCall[]; findings: string[] }
+  | {
+    type: "planner";
+    cycle: number;
+    rawContent: string;
+    toolCalls: RetvCdpToolCall[];
+    findings: string[];
+  }
   | { type: "screenshot"; cycle: number; dataUrl: string }
   | { type: "cycle"; cycle: RetvCdpCycleSummary; progress: RetvCdpProgress }
   | { type: "log"; level: "info" | "warn" | "error"; message: string }
@@ -351,7 +365,7 @@ export class CdpRetvAgentService {
     });
   }
 
-  #resolvePlannerApiKey(): string {
+  async #resolvePlannerApiKey(): Promise<string> {
     // Only fall back to the connected GitHub token for providers it actually
     // authenticates (Copilot / Codex-via-Copilot); never leak it to a
     // third-party LLM endpoint.
@@ -359,7 +373,7 @@ export class CdpRetvAgentService {
       return this.#plannerConfig.apiKey;
     }
     return providerUsesGithubToken(this.#plannerConfig.providerKind)
-      ? (this.repository.getGithubToken() || "")
+      ? ((await this.repository.getGithubToken()) || "")
       : "";
   }
 
@@ -473,13 +487,13 @@ export class CdpRetvAgentService {
     const requestedMaxCycles = Number(request.maxCycles);
     // maxCycles is now an OPTIONAL hard cap; when omitted the run is bounded by
     // the wall-clock budget (plus the natural goal/drift/no-progress stops).
-    const explicitMaxCycles =
-      Number.isFinite(requestedMaxCycles) && requestedMaxCycles > 0
-        ? Math.min(HARD_CYCLE_CAP, Math.trunc(requestedMaxCycles))
-        : undefined;
+    const explicitMaxCycles = Number.isFinite(requestedMaxCycles) && requestedMaxCycles > 0
+      ? Math.min(HARD_CYCLE_CAP, Math.trunc(requestedMaxCycles))
+      : undefined;
     const maxDurationMs = resolveAgentMaxDurationMs(request.maxDurationMs);
     const deadlineAt = Date.now() + maxDurationMs;
-    const startUrl = String(request.startUrl || "http://localhost:4200").trim() || "http://localhost:4200";
+    const startUrl = String(request.startUrl || "http://localhost:4200").trim() ||
+      "http://localhost:4200";
     const allowedOriginSet = resolveAllowedOrigins(startUrl, request.allowedOrigins);
     const driftScopeDisabled = allowedOriginSet.has("*");
     const allowedOrigin = driftScopeDisabled
@@ -699,7 +713,9 @@ export class CdpRetvAgentService {
 
     const findings = dedupe(cycles.flatMap((cycle) => cycle.findings));
     const progress = {
-      percent: Math.round((completedMilestones / Math.max(1, structuredPlan.milestones.length)) * 100),
+      percent: Math.round(
+        (completedMilestones / Math.max(1, structuredPlan.milestones.length)) * 100,
+      ),
       completedMilestones,
       totalMilestones: structuredPlan.milestones.length,
       nextMilestone: structuredPlan.milestones[completedMilestones] || "complete",
@@ -762,7 +778,7 @@ export class CdpRetvAgentService {
       traceEnabled,
       trace,
     };
-    this.repository.saveRetvRun(record);
+    await this.repository.saveRetvRun(record);
 
     const result: RetvCdpRunResult = {
       runId,
@@ -799,7 +815,7 @@ export class CdpRetvAgentService {
 
     const plannerConfig = {
       ...this.#plannerConfig,
-      apiKey: this.#resolvePlannerApiKey(),
+      apiKey: await this.#resolvePlannerApiKey(),
     };
 
     const systemPrompt = [
@@ -861,8 +877,12 @@ export class CdpRetvAgentService {
       : input.goalAchieved
       ? "reached the goal but had step failures"
       : "did not pass";
-    const blockers = input.findings.filter((finding) => finding.startsWith("step_failed") || finding.startsWith("planner_"));
-    const blockerText = blockers.length > 0 ? ` Key blockers: ${blockers.slice(0, 3).join("; ")}.` : "";
+    const blockers = input.findings.filter((finding) =>
+      finding.startsWith("step_failed") || finding.startsWith("planner_")
+    );
+    const blockerText = blockers.length > 0
+      ? ` Key blockers: ${blockers.slice(0, 3).join("; ")}.`
+      : "";
     return `Functional test for "${input.goal}" ${verdict} (stop=${input.stopReason}). ` +
       `Completed ${input.progress.completedMilestones}/${input.progress.totalMilestones} milestones ` +
       `(${input.progress.percent}%).${blockerText}`;
@@ -885,7 +905,7 @@ export class CdpRetvAgentService {
 
     const plannerConfig = {
       ...this.#plannerConfig,
-      apiKey: this.#resolvePlannerApiKey(),
+      apiKey: await this.#resolvePlannerApiKey(),
     };
 
     const systemPrompt = [
@@ -944,12 +964,12 @@ export class CdpRetvAgentService {
   }
 
   /** List persisted RetV runs (most recent first), without heavy payloads. */
-  listRuns(): RetvCdpRunListItem[] {
+  listRuns(): Promise<RetvCdpRunListItem[]> {
     return this.repository.listRetvRuns();
   }
 
   /** Fetch a full persisted run record (report + optional trace), or null. */
-  getRun(runId: string): RetvCdpRunRecord | null {
+  getRun(runId: string): Promise<RetvCdpRunRecord | null> {
     return this.repository.getRetvRun(runId);
   }
 
@@ -957,8 +977,8 @@ export class CdpRetvAgentService {
    * Build a downloadable bundle for a traced run: report.md + run.json + each
    * cycle screenshot. Returns null when the run is unknown or was not traced.
    */
-  buildRunExport(runId: string): { filename: string; bytes: Uint8Array } | null {
-    const record = this.repository.getRetvRun(runId);
+  async buildRunExport(runId: string): Promise<{ filename: string; bytes: Uint8Array } | null> {
+    const record = await this.repository.getRetvRun(runId);
     if (!record || !record.traceEnabled || !record.trace) {
       return null;
     }
@@ -991,7 +1011,10 @@ export class CdpRetvAgentService {
     for (const shot of record.trace.screenshots) {
       const decoded = decodeDataUrl(shot.dataUrl);
       if (decoded) {
-        entries.push({ name: `screenshots/cycle-${shot.cycle}.${decoded.ext}`, data: decoded.bytes });
+        entries.push({
+          name: `screenshots/cycle-${shot.cycle}.${decoded.ext}`,
+          data: decoded.bytes,
+        });
       }
     }
 
@@ -1084,7 +1107,7 @@ export class CdpRetvAgentService {
   ): Promise<PlannerResult> {
     const plannerConfig = {
       ...this.#plannerConfig,
-      apiKey: this.#resolvePlannerApiKey(),
+      apiKey: await this.#resolvePlannerApiKey(),
     };
 
     const lastCycle = history[history.length - 1];
@@ -1107,7 +1130,9 @@ export class CdpRetvAgentService {
       "Return ONLY JSON and no markdown.",
       "JSON schema:",
       '{"structuredPlan":{"milestones":[],"successCriteria":[],"antiDriftRules":[]},"nextToolCalls":[{"tool":"click","args":{},"reason":""}],"progress":{"percent":0,"completedMilestones":0,"goalAchieved":false,"nextMilestone":""},"findings":[]}',
-      `Allowed tools: ${TOOL_CATALOG.map((tool) => `${tool.name}(${tool.requiredArgs.join(",")})`).join(" | ")}`,
+      `Allowed tools: ${
+        TOOL_CATALOG.map((tool) => `${tool.name}(${tool.requiredArgs.join(",")})`).join(" | ")
+      }`,
       `Allowed origin: ${allowedOrigin || "none"}`,
       "Prefer 1-3 tool calls per cycle, but always make forward progress — every cycle should act (type/click/assert), not just observe.",
       "Selectors must be valid CSS only; never use xpath=, :contains(), or text= pseudo-selectors.",
@@ -1168,7 +1193,11 @@ export class CdpRetvAgentService {
     let repaired = false;
 
     if (!payload) {
-      payload = await this.repairPlannerPayload(plannerConfig, response.value.content, runContextId);
+      payload = await this.repairPlannerPayload(
+        plannerConfig,
+        response.value.content,
+        runContextId,
+      );
       repaired = Boolean(payload);
     }
 
@@ -1224,7 +1253,8 @@ export class CdpRetvAgentService {
         {
           tool: "evaluate",
           args: {
-            expression: "(() => ({ pageTabCount: document.querySelectorAll('.cap-page-tab').length, runTabCount: document.querySelectorAll('.cap-run-tab').length }))()",
+            expression:
+              "(() => ({ pageTabCount: document.querySelectorAll('.cap-page-tab').length, runTabCount: document.querySelectorAll('.cap-run-tab').length }))()",
           },
           reason: "Gather explicit page and run tab counts for goal evidence.",
         },
@@ -1299,7 +1329,11 @@ export class CdpRetvAgentService {
           const limit = Number.isFinite(requested) && requested > 0
             ? Math.min(80, Math.floor(requested))
             : 40;
-          steps.push({ action: "evaluate", expression: pageSnapshotExpression(limit), returnByValue: true });
+          steps.push({
+            action: "evaluate",
+            expression: pageSnapshotExpression(limit),
+            returnByValue: true,
+          });
           break;
         }
       }
@@ -1411,10 +1445,12 @@ export class CdpRetvAgentService {
       percent,
       completedMilestones: nextCompleted,
       totalMilestones,
-      nextMilestone: stringArg(plannerProgress?.nextMilestone) || structuredPlan.milestones[nextCompleted] || "complete",
+      nextMilestone: stringArg(plannerProgress?.nextMilestone) ||
+        structuredPlan.milestones[nextCompleted] || "complete",
       roundsWithoutProgress,
       driftWarnings,
-      goalAchieved: Boolean(plannerProgress?.goalAchieved) || (allowAutoAdvance && nextCompleted >= totalMilestones),
+      goalAchieved: Boolean(plannerProgress?.goalAchieved) ||
+        (allowAutoAdvance && nextCompleted >= totalMilestones),
     };
   }
 
@@ -1531,7 +1567,10 @@ export class CdpRetvAgentService {
     return this.parsePlannerPayload(response.value.content);
   }
 
-  private coercePlannerPayloadFromText(goal: string, content: string): Record<string, unknown> | null {
+  private coercePlannerPayloadFromText(
+    goal: string,
+    content: string,
+  ): Record<string, unknown> | null {
     const trimmed = content.trim();
 
     const nextToolCalls = inferToolCallsFromPlannerText(trimmed, goal);
@@ -1586,7 +1625,10 @@ export class CdpRetvAgentService {
 
       const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
       if (!response.ok) {
-        const message = String(payload?.message || (payload?.error as Record<string, unknown> | undefined)?.message || `HTTP ${response.status}`);
+        const message = String(
+          payload?.message || (payload?.error as Record<string, unknown> | undefined)?.message ||
+            `HTTP ${response.status}`,
+        );
         const kind = response.status === 401 || response.status === 403 ? "auth" : "network";
         return {
           ok: false,
@@ -1731,7 +1773,10 @@ function repairLooseJson(value: string): string {
   return value
     .replace(/,\s*([}\]])/g, "$1")
     .replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g, '$1"$2"$3')
-    .replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_m, group: string) => `"${group.replace(/"/g, "\\\"")}"`);
+    .replace(
+      /'([^'\\]*(?:\\.[^'\\]*)*)'/g,
+      (_m, group: string) => `"${group.replace(/"/g, '\\"')}"`,
+    );
 }
 
 function findFirstBalancedJsonObject(text: string): string | null {
@@ -1815,7 +1860,10 @@ function normalizeToolName(value: string): RetvCdpToolDefinition["name"] | "" {
   return aliases[normalized] || "";
 }
 
-function normalizeToolArgs(tool: RetvCdpToolDefinition["name"], raw: unknown): Record<string, unknown> {
+function normalizeToolArgs(
+  tool: RetvCdpToolDefinition["name"],
+  raw: unknown,
+): Record<string, unknown> {
   if (tool === "readPage") {
     const src = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
     const max = Number(src.maxElements);
@@ -1961,11 +2009,14 @@ function inferToolCallsFromPlannerText(text: string, goal: string): RetvCdpToolC
     }
   }
 
-  if (calls.length === 0 && goal.toLowerCase().includes("count") && goal.toLowerCase().includes("tab")) {
+  if (
+    calls.length === 0 && goal.toLowerCase().includes("count") && goal.toLowerCase().includes("tab")
+  ) {
     calls.push({
       tool: "evaluate",
       args: {
-        expression: "(() => ({ pageTabCount: document.querySelectorAll('.cap-page-tab').length, runTabCount: document.querySelectorAll('.cap-run-tab').length, activePageTab: document.querySelector('.cap-page-tab.active')?.textContent?.trim() || '', activeRunTab: document.querySelector('.cap-run-tab.active')?.textContent?.trim() || '' }))()",
+        expression:
+          "(() => ({ pageTabCount: document.querySelectorAll('.cap-page-tab').length, runTabCount: document.querySelectorAll('.cap-run-tab').length, activePageTab: document.querySelector('.cap-page-tab.active')?.textContent?.trim() || '', activeRunTab: document.querySelector('.cap-run-tab.active')?.textContent?.trim() || '' }))()",
       },
       reason: "Fallback coercion for tab counting goal",
     });
@@ -1996,9 +2047,14 @@ function extractSelectorCandidate(line: string): string {
 function inferPlannerProgressFromText(text: string): PlannerResult["progress"] | undefined {
   const percent = /\b(\d{1,3})\s*%/.exec(text)?.[1];
   const completed = /\bcompleted(?:Milestones)?\b\s*[:=]\s*(\d+)/i.exec(text)?.[1];
-  const nextMilestone = /\bnextMilestone\b\s*[:=]\s*([^\n,;]+)/i.exec(text)?.[1]?.trim().replace(/^['"`]|['"`]$/g, "");
-  const goalTrue = /\bgoalAchieved\b\s*[:=]\s*true\b/i.test(text) || /\bgoal achieved\b/i.test(text);
-  const goalFalse = /\bgoalAchieved\b\s*[:=]\s*false\b/i.test(text) || /\bgoal not achieved\b/i.test(text);
+  const nextMilestone = /\bnextMilestone\b\s*[:=]\s*([^\n,;]+)/i.exec(text)?.[1]?.trim().replace(
+    /^['"`]|['"`]$/g,
+    "",
+  );
+  const goalTrue = /\bgoalAchieved\b\s*[:=]\s*true\b/i.test(text) ||
+    /\bgoal achieved\b/i.test(text);
+  const goalFalse = /\bgoalAchieved\b\s*[:=]\s*false\b/i.test(text) ||
+    /\bgoal not achieved\b/i.test(text);
 
   if (!percent && !completed && !nextMilestone && !goalTrue && !goalFalse) {
     return undefined;
@@ -2052,7 +2108,8 @@ function asStringArray(value: unknown): string[] {
     return [];
   }
 
-  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).slice(0, 12);
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    .slice(0, 12);
 }
 
 function stringArg(value: unknown): string {
@@ -2150,7 +2207,9 @@ function buildDeterministicReport(input: {
   const milestoneRows = input.structuredPlan.milestones.length > 0
     ? input.structuredPlan.milestones
       .map((milestone, index) =>
-        `| ${mdCell(milestone)} | ${index < input.progress.completedMilestones ? "completed" : "pending"} |`
+        `| ${mdCell(milestone)} | ${
+          index < input.progress.completedMilestones ? "completed" : "pending"
+        } |`
       )
       .join("\n")
     : "| _none_ | _n/a_ |";
@@ -2171,7 +2230,9 @@ function buildDeterministicReport(input: {
     "# Functional Test Report",
     "",
     "## Verdict",
-    `**${verdict}** — goal achieved: ${input.goalAchieved ? "yes" : "no"}; stopped because \`${input.stopReason}\`.`,
+    `**${verdict}** — goal achieved: ${
+      input.goalAchieved ? "yes" : "no"
+    }; stopped because \`${input.stopReason}\`.`,
     "",
     "## Goal",
     mdCell(input.goal),

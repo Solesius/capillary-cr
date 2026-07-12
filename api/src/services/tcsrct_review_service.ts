@@ -21,21 +21,57 @@ function createId(prefix: string): string {
 }
 
 const PASSES: TcsrctPass[] = [
-  { id: "pass_trace", name: "Trace", description: "Runtime traversal path validation", enabled: true, maxFindings: 10 },
-  { id: "pass_contracts", name: "Contracts", description: "API and type contracts", enabled: true, maxFindings: 10 },
-  { id: "pass_state", name: "State", description: "State transition analysis", enabled: true, maxFindings: 10 },
-  { id: "pass_runtime", name: "Runtime", description: "Runtime hazards", enabled: true, maxFindings: 10 },
-  { id: "pass_codeshape", name: "CodeShape", description: "Structural drift and complexity", enabled: true, maxFindings: 10 },
-  { id: "pass_tests", name: "Tests", description: "Regression and coverage gaps", enabled: true, maxFindings: 10 },
+  {
+    id: "pass_trace",
+    name: "Trace",
+    description: "Runtime traversal path validation",
+    enabled: true,
+    maxFindings: 10,
+  },
+  {
+    id: "pass_contracts",
+    name: "Contracts",
+    description: "API and type contracts",
+    enabled: true,
+    maxFindings: 10,
+  },
+  {
+    id: "pass_state",
+    name: "State",
+    description: "State transition analysis",
+    enabled: true,
+    maxFindings: 10,
+  },
+  {
+    id: "pass_runtime",
+    name: "Runtime",
+    description: "Runtime hazards",
+    enabled: true,
+    maxFindings: 10,
+  },
+  {
+    id: "pass_codeshape",
+    name: "CodeShape",
+    description: "Structural drift and complexity",
+    enabled: true,
+    maxFindings: 10,
+  },
+  {
+    id: "pass_tests",
+    name: "Tests",
+    description: "Regression and coverage gaps",
+    enabled: true,
+    maxFindings: 10,
+  },
 ];
 
 export class TcsrctReviewService {
   constructor(private readonly repository: ReviewRepository) {}
 
-  buildReviewPacket(runId: string): ReviewPacket {
+  async buildReviewPacket(runId: string): Promise<ReviewPacket> {
     enforceDefensiveInput(runId, "run_id");
-    const run = this.repository.getReviewRun(runId);
-    const graph = this.repository.findGraphByPullRequest(run.pullRequestId);
+    const run = await this.repository.getReviewRun(runId);
+    const graph = await this.repository.findGraphByPullRequest(run.pullRequestId);
     if (!graph) {
       throw new AppError("diff_dag_not_found", 404, "diff_dag_not_found");
     }
@@ -70,8 +106,8 @@ export class TcsrctReviewService {
       tcsrctPasses: PASSES,
     };
 
-    this.repository.saveReviewPacket(packet);
-    this.repository.updateReviewRun(runId, (current) => ({
+    await this.repository.saveReviewPacket(packet);
+    await this.repository.updateReviewRun(runId, (current) => ({
       ...current,
       packetId: packet.id,
       currentPhase: "packet_built",
@@ -80,24 +116,26 @@ export class TcsrctReviewService {
     return packet;
   }
 
-  runModifiedTcsrct(runId: string): ReviewFinding[] {
+  async runModifiedTcsrct(runId: string): Promise<ReviewFinding[]> {
     enforceDefensiveInput(runId, "run_id");
-    const run = this.repository.getReviewRun(runId);
+    const run = await this.repository.getReviewRun(runId);
     if (!run.packetId) {
       throw new AppError("review_packet_not_found", 404, "review_packet_not_found");
     }
 
-    const packet = this.repository.getReviewPacket(run.packetId);
+    const packet = await this.repository.getReviewPacket(run.packetId);
 
-    const graph = this.repository.getGraphSnapshot(packet.diffDagId);
+    const graph = await this.repository.getGraphSnapshot(packet.diffDagId);
     const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
     const shapeByNodeId = new Map(graph.shapeSamples.map((sample) => [sample.nodeId, sample]));
     const graphStats = buildGraphStats(graph.nodes, graph.edges);
 
-    const repositoryId = this.repository.findPullRequestRepositoryId(packet.pullRequestId);
+    const repositoryId = await this.repository.findPullRequestRepositoryId(packet.pullRequestId);
     const diffByPath = new Map<string, DiffFile>();
     if (repositoryId) {
-      for (const diff of this.repository.getPullRequestDiff(repositoryId, packet.pullRequestId)) {
+      for (
+        const diff of await this.repository.getPullRequestDiff(repositoryId, packet.pullRequestId)
+      ) {
         diffByPath.set(normalizePath(diff.path), diff);
       }
     }
@@ -110,7 +148,8 @@ export class TcsrctReviewService {
         const shape = shapeByNodeId.get(surface.entryNodeId);
         const normalizedFilePath = normalizePath(extractNodeFilePath(entryNode?.path));
         const sourceDiff = diffByPath.get(normalizedFilePath);
-        const nodeStats = graphStats.get(surface.entryNodeId) || { inDegree: 0, outDegree: 0, neighbors: [] as string[] };
+        const nodeStats = graphStats.get(surface.entryNodeId) ||
+          { inDegree: 0, outDegree: 0, neighbors: [] as string[] };
         const patchSignals = collectPatchSignals(sourceDiff?.patch);
 
         const titleTarget = entryNode?.name || basenamePath(normalizedFilePath) || "entry-node";
@@ -138,8 +177,23 @@ export class TcsrctReviewService {
           filePath: normalizedFilePath || "unknown",
           line,
           title: `${surface.surfaceKind} instability around ${titleTarget}`,
-          finding: buildFindingNarrative(surface, entryNode, shape, nodeStats, sourceDiff, graph.dag),
-          evidence: buildEvidence(surface, entryNode, shape, nodeStats, sourceDiff, patchSignals, graph.dag),
+          finding: buildFindingNarrative(
+            surface,
+            entryNode,
+            shape,
+            nodeStats,
+            sourceDiff,
+            graph.dag,
+          ),
+          evidence: buildEvidence(
+            surface,
+            entryNode,
+            shape,
+            nodeStats,
+            sourceDiff,
+            patchSignals,
+            graph.dag,
+          ),
           suggestedFix: suggestedFixForSurface(surface.surfaceKind, normalizedFilePath),
           confidence: confidenceFromSignals(
             surface,
@@ -155,12 +209,12 @@ export class TcsrctReviewService {
 
     const deduped = dedupeFindings(findings);
     const prioritized = sortFindingsForPriority(deduped);
-    this.repository.saveFindings(runId, prioritized);
+    await this.repository.saveFindings(runId, prioritized);
 
     const blockerCount = prioritized.filter((f) => f.severity === "blocker").length;
     const highCount = prioritized.filter((f) => f.severity === "high").length;
 
-    this.repository.updateReviewRun(runId, (current) => ({
+    await this.repository.updateReviewRun(runId, (current) => ({
       ...current,
       status: "completed",
       currentPhase: "completed",
@@ -173,9 +227,9 @@ export class TcsrctReviewService {
     return prioritized;
   }
 
-  produceAuthorChecklist(runId: string): ReviewChecklistItem[] {
+  async produceAuthorChecklist(runId: string): Promise<ReviewChecklistItem[]> {
     enforceDefensiveInput(runId, "run_id");
-    const findings = this.repository.getFindings(runId);
+    const findings = await this.repository.getFindings(runId);
 
     const baseChecklist: ReviewChecklistItem[] = findings.map((finding) => ({
       id: createId("check"),
@@ -197,12 +251,15 @@ export class TcsrctReviewService {
       });
     }
 
-    this.repository.saveChecklist(runId, baseChecklist);
+    await this.repository.saveChecklist(runId, baseChecklist);
     return baseChecklist;
   }
 }
 
-function buildGraphStats(nodes: ModuleNode[], edges: ModuleEdge[]): Map<string, { inDegree: number; outDegree: number; neighbors: string[] }> {
+function buildGraphStats(
+  nodes: ModuleNode[],
+  edges: ModuleEdge[],
+): Map<string, { inDegree: number; outDegree: number; neighbors: string[] }> {
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const stats = new Map<string, { inDegree: number; outDegree: number; neighbors: Set<string> }>();
 
@@ -260,7 +317,9 @@ function buildFindingNarrative(
 
   return [
     `${surface.reason}.`,
-    `Surface ${surface.surfaceKind} scored ${risk} on DAG entry ${entryNode?.id || "unknown"} (${nodeKind}).`,
+    `Surface ${surface.surfaceKind} scored ${risk} on DAG entry ${
+      entryNode?.id || "unknown"
+    } (${nodeKind}).`,
     `Shape curvature=${curvature}, torsion=${torsion}; edge pressure in=${nodeStats.inDegree}, out=${nodeStats.outDegree}.`,
     `Changed-file churn at entry path is ${churn}.`,
     `Flow completeness=${flowCompleteness}, torus variance=${torusVariance}.`,
@@ -328,7 +387,9 @@ function severityFromSignals(
   let severity: ReviewFinding["severity"];
   if (riskScore >= 0.93 && (pressure >= 10 || churn >= 1000 || flowPenalty > 0)) {
     severity = "blocker";
-  } else if (riskScore >= 0.82 || (pressure >= 8 && churn >= 400) || (riskScore >= 0.74 && flowPenalty > 0)) {
+  } else if (
+    riskScore >= 0.82 || (pressure >= 8 && churn >= 400) || (riskScore >= 0.74 && flowPenalty > 0)
+  ) {
     severity = "high";
   } else if (riskScore >= 0.58 || pressure >= 4 || churn >= 120) {
     severity = "medium";
@@ -336,7 +397,10 @@ function severityFromSignals(
     severity = "low";
   }
 
-  if ((nodeKind === "config" || isConfigPath(filePath)) && !(riskScore >= 0.94 && flowCompleteness < 0.5)) {
+  if (
+    (nodeKind === "config" || isConfigPath(filePath)) &&
+    !(riskScore >= 0.94 && flowCompleteness < 0.5)
+  ) {
     severity = demoteSeverity(severity);
   }
 
@@ -389,19 +453,27 @@ function passForSurface(surfaceKind: RiskSurface["surfaceKind"], passes: TcsrctP
 
 function suggestedFixForSurface(surfaceKind: RiskSurface["surfaceKind"], filePath: string): string {
   if (surfaceKind === "auth") {
-    return `Harden authentication and authorization invariants around ${basenamePath(filePath)}; add explicit negative tests for bypass paths.`;
+    return `Harden authentication and authorization invariants around ${
+      basenamePath(filePath)
+    }; add explicit negative tests for bypass paths.`;
   }
   if (surfaceKind === "concurrency") {
-    return `Add deterministic stress tests and lock/order assertions for ${basenamePath(filePath)}; verify cancellation and timeout propagation.`;
+    return `Add deterministic stress tests and lock/order assertions for ${
+      basenamePath(filePath)
+    }; verify cancellation and timeout propagation.`;
   }
   if (surfaceKind === "persistence") {
-    return `Add persistence round-trip and rollback/error-path tests for ${basenamePath(filePath)}; enforce write/read consistency assertions.`;
+    return `Add persistence round-trip and rollback/error-path tests for ${
+      basenamePath(filePath)
+    }; enforce write/read consistency assertions.`;
   }
   if (surfaceKind === "test_gap") {
     return `Add focused regression tests that reproduce the entry-node change path and at least one failing negative scenario.`;
   }
 
-  return `Add targeted invariants and regression tests around ${basenamePath(filePath)} based on the DAG entry-node evidence.`;
+  return `Add targeted invariants and regression tests around ${
+    basenamePath(filePath)
+  } based on the DAG entry-node evidence.`;
 }
 
 function collectPatchSignals(patch?: string): string[] {
@@ -497,7 +569,11 @@ function estimateLineFromPatch(patch?: string, anchor?: string): number | undefi
   return firstChangedLine || firstHunkLine;
 }
 
-function buildLineAnchor(surfaceKind: RiskSurface["surfaceKind"], nodeName?: string, filePath?: string): string {
+function buildLineAnchor(
+  surfaceKind: RiskSurface["surfaceKind"],
+  nodeName?: string,
+  filePath?: string,
+): string {
   const parts: string[] = [];
   if (nodeName) {
     parts.push(nodeName);

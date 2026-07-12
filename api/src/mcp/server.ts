@@ -196,47 +196,69 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     switch (name) {
       case "github_connect":
-        return jsonResult(await deps.githubService.connectGithub(
-          asString(args.oauthState, "valid"),
-          optionalString(args.token),
-        ));
+        return jsonResult(
+          await deps.githubService.connectGithub(
+            asString(args.oauthState, "valid"),
+            optionalString(args.token),
+          ),
+        );
       case "github_list_repositories":
         return jsonResult(await deps.githubService.listRepositories());
       case "github_list_pull_requests":
-        return jsonResult(await deps.githubService.listPullRequests(
-          requiredString(args.repositoryId, "repositoryId"),
-          asState(args.state),
-        ));
+        return jsonResult(
+          await deps.githubService.listPullRequests(
+            requiredString(args.repositoryId, "repositoryId"),
+            asState(args.state),
+          ),
+        );
       case "github_get_pull_request_diff":
-        return jsonResult(await deps.githubService.getPullRequestDiff(
-          requiredString(args.repositoryId, "repositoryId"),
-          requiredString(args.pullRequestId, "pullRequestId"),
-        ));
+        return jsonResult(
+          await deps.githubService.getPullRequestDiff(
+            requiredString(args.repositoryId, "repositoryId"),
+            requiredString(args.pullRequestId, "pullRequestId"),
+          ),
+        );
       case "review_begin_run":
-        return jsonResult(await deps.reviewService.beginReview(
-          requiredString(args.pullRequestId, "pullRequestId"),
-          optionalString(args.repositoryId),
-        ));
+        return jsonResult(
+          await deps.reviewService.beginReview(
+            requiredString(args.pullRequestId, "pullRequestId"),
+            optionalString(args.repositoryId),
+          ),
+        );
       case "review_get_run":
-        return jsonResult(deps.reviewService.getReviewRun(requiredString(args.runId, "runId")));
+        return jsonResult(
+          await deps.reviewService.getReviewRun(requiredString(args.runId, "runId")),
+        );
       case "review_get_events":
-        return jsonResult(deps.reviewService.streamReviewEvents(requiredString(args.runId, "runId")));
+        return jsonResult(
+          await deps.reviewService.streamReviewEvents(requiredString(args.runId, "runId")),
+        );
       case "artifact_markdown":
-        return textResult(deps.artifactService.exportMarkdownReview(requiredString(args.runId, "runId")));
+        return textResult(
+          await deps.artifactService.exportMarkdownReview(requiredString(args.runId, "runId")),
+        );
       case "artifact_graph":
-        return jsonResult(deps.artifactService.exportGraphJson(requiredString(args.runId, "runId")));
+        return jsonResult(
+          await deps.artifactService.exportGraphJson(requiredString(args.runId, "runId")),
+        );
       case "cdp_create_session":
-        return jsonResult(await deps.cdpDriverService.createSession(asString(args.startUrl, "about:blank")));
+        return jsonResult(
+          await deps.cdpDriverService.createSession(asString(args.startUrl, "about:blank")),
+        );
       case "cdp_list_sessions":
         return jsonResult(deps.cdpDriverService.listSessions());
       case "cdp_execute_work_unit":
-        return jsonResult(await deps.cdpDriverService.executeWorkUnit(
-          requiredString(args.sessionId, "sessionId"),
-          normalizeWorkUnit(args.request),
-        ));
+        return jsonResult(
+          await deps.cdpDriverService.executeWorkUnit(
+            requiredString(args.sessionId, "sessionId"),
+            normalizeWorkUnit(args.request),
+          ),
+        );
       case "cdp_close_session":
         return jsonResult({
-          closed: await deps.cdpDriverService.closeSession(requiredString(args.sessionId, "sessionId")),
+          closed: await deps.cdpDriverService.closeSession(
+            requiredString(args.sessionId, "sessionId"),
+          ),
         });
       default:
         throw new AppError(`unsupported_tool: ${name}`, 400, "unsupported_tool");
