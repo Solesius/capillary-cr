@@ -39,9 +39,19 @@ const STATUS_GLYPH: Record<PullRequestDiffFile["status"], string> = {
           <span class="cap-fx-label">File Explorer</span>
           <span class="cap-fx-sub">{{ store.selectedPullRequest()?.title || 'no PR selected' }}</span>
         </div>
-        <button class="cap-button cap-button-ghost cap-button-sm" type="button" (click)="store.closeExplorer()">
-          Close ✕
-        </button>
+        <div class="cap-fx-head-actions">
+          <label class="cap-fx-toggle">
+            <input
+              type="checkbox"
+              [checked]="store.explorerDiffMode()"
+              (change)="onDiffToggle($event)" />
+            <span class="cap-fx-toggle-track"><span class="cap-fx-toggle-knob"></span></span>
+            <span class="cap-fx-toggle-label">Diff view</span>
+          </label>
+          <button class="cap-button cap-button-ghost cap-button-sm" type="button" (click)="store.closeExplorer()">
+            Close ✕
+          </button>
+        </div>
       </header>
 
       <div class="cap-fx-body">
@@ -79,7 +89,9 @@ const STATUS_GLYPH: Record<PullRequestDiffFile["status"], string> = {
               [path]="store.explorerActivePath()!"
               [content]="store.explorerContent()!"
               [findings]="store.explorerFindings()"
-              [revealLine]="store.explorerRevealLine()" />
+              [revealLine]="store.explorerRevealLine()"
+              [diffMode]="store.explorerDiffMode()"
+              [baseContent]="store.explorerBaseContent()" />
           } @else {
             <p class="cap-fx-state">Pick a file — contents load on demand, findings render in place.</p>
           }
@@ -102,11 +114,53 @@ const STATUS_GLYPH: Record<PullRequestDiffFile["status"], string> = {
       width: min(880px, 92vw);
       display: flex;
       flex-direction: column;
-      background: var(--cap-bg, #0b1220);
+      background: var(--cap-surface-panel, #0b1220);
+      color: var(--cap-text, inherit);
       border-right: 1px solid var(--cap-border, #24304a);
       transform: translateX(-102%);
       transition: transform 160ms cubic-bezier(0.2, 0, 0.38, 0.9);
       z-index: 71;
+    }
+    .cap-fx-head-actions { display: flex; align-items: center; gap: 16px; }
+    .cap-fx-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .cap-fx-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+    .cap-fx-toggle-track {
+      display: inline-flex;
+      align-items: center;
+      width: 32px;
+      height: 16px;
+      padding: 2px;
+      box-sizing: border-box;
+      border: 1px solid var(--cap-border, #24304a);
+      background: transparent;
+      transition: background 120ms, border-color 120ms;
+    }
+    .cap-fx-toggle-knob {
+      width: 10px;
+      height: 10px;
+      background: var(--cap-muted, #7f8db0);
+      transition: transform 120ms, background 120ms;
+    }
+    .cap-fx-toggle input:checked + .cap-fx-toggle-track {
+      border-color: var(--cap-primary, #4c9aff);
+      background: rgba(76, 154, 255, 0.14);
+    }
+    .cap-fx-toggle input:checked + .cap-fx-toggle-track .cap-fx-toggle-knob {
+      transform: translateX(16px);
+      background: var(--cap-primary, #4c9aff);
+    }
+    .cap-fx-toggle-label {
+      font-family: 'IBM Plex Mono', ui-monospace, monospace;
+      font-size: 0.68rem;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      color: var(--cap-muted, #7f8db0);
     }
     .cap-fx.open { transform: translateX(0); }
     .cap-fx-head {
@@ -165,10 +219,10 @@ const STATUS_GLYPH: Record<PullRequestDiffFile["status"], string> = {
       text-align: left;
       cursor: pointer;
     }
-    .cap-fx-row:hover { background: rgba(125, 155, 220, 0.07); }
+    .cap-fx-row:hover { background: rgba(100, 116, 139, 0.12); }
     .cap-fx-row.active {
-      border-left-color: var(--cap-accent, #4c9aff);
-      background: rgba(76, 154, 255, 0.09);
+      border-left-color: var(--cap-primary, #4c9aff);
+      background: rgba(76, 154, 255, 0.12);
     }
     .cap-fx-row:disabled { opacity: 0.45; cursor: not-allowed; }
     .cap-fx-glyph {
@@ -209,7 +263,7 @@ const STATUS_GLYPH: Record<PullRequestDiffFile["status"], string> = {
       flex-direction: column;
       overflow: hidden;
       position: relative;
-      background: #0d1526;
+      background: var(--cap-surface-raised, #0d1526);
     }
     .cap-fx-state { margin: auto; padding: 24px; color: var(--cap-muted, #7f8db0); font-size: 0.85rem; }
     .cap-fx-state--error { color: #fa4d56; }
@@ -249,6 +303,10 @@ export class FileExplorerComponent {
 
   openFile(file: PullRequestDiffFile): void {
     void this.store.openFileInExplorer(file.path);
+  }
+
+  onDiffToggle(event: Event): void {
+    void this.store.toggleExplorerDiff((event.target as HTMLInputElement).checked);
   }
 
   basename(path: string): string {

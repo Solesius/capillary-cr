@@ -76,15 +76,18 @@ router.get(
     const repositoryId = ctx.params.repositoryId || "";
     const pullRequestId = ctx.params.pullRequestId || "";
     const path = ctx.request.url.searchParams.get("path") || "";
+    // side=head (default) reads at the PR head; side=base reads the target
+    // branch — the "original" pane of the explorer's diff view.
+    const side = ctx.request.url.searchParams.get("side") === "base" ? "base" : "head";
     const pull = await deps.repository.getPullRequest(repositoryId, pullRequestId);
-    const ref = pull.headSha || pull.sourceBranch;
+    const ref = side === "base" ? pull.targetBranch : (pull.headSha || pull.sourceBranch);
     const content = await deps.githubService.getRepoFileContent(repositoryId, ref, path);
     if (content === null) {
       ctx.response.status = 404;
-      ctx.response.body = { error: "file_content_unavailable", path };
+      ctx.response.body = { error: "file_content_unavailable", path, side };
       return;
     }
-    ctx.response.body = { path, content };
+    ctx.response.body = { path, side, content };
   },
 );
 
