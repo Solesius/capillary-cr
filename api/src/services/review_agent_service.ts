@@ -83,8 +83,8 @@ function createId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().slice(0, 8)}`;
 }
 
-/** Sentinel returned by raceCancellation when a stop request wins the race. */
-const CANCELLED = Symbol("cancelled");
+/** Sentinel returned by raceCancellation when a stop request wins the race. Exported for tests. */
+export const CANCELLED = Symbol("cancelled");
 
 /**
  * Await `work`, but yield CANCELLED as soon as `isCancelled` reports true —
@@ -92,7 +92,7 @@ const CANCELLED = Symbol("cancelled");
  * The orphaned promise gets a no-op rejection handler so a late failure of
  * the abandoned call can never surface as an unhandled rejection.
  */
-async function raceCancellation<T>(
+export async function raceCancellation<T>(
   work: Promise<T>,
   isCancelled?: () => boolean,
 ): Promise<T | typeof CANCELLED> {

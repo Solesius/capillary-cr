@@ -29,7 +29,7 @@ import {
   TcsrtcGate,
 } from "../models";
 import { ApiClientService } from "../services/api-client.service";
-import { countOpenPullRequests } from "./rules";
+import { countOpenPullRequests, isStopArmed } from "./rules";
 
 interface FunctionalGoalMilestone {
   id: string;
@@ -218,14 +218,13 @@ export class CapillaryStore {
   );
 
   readonly canCancel = computed(() => {
-    const run = this.reviewRun();
-    if (run && run.status !== "completed" && run.status !== "cancelled" && run.status !== "failed") {
-      return true;
-    }
-    // After a refresh the local run object may not be rehydrated yet, but the
-    // attached server session knows a run is live — Stop must work there too.
+    // Predicate lives in rules.ts (pure, spec-covered): a local in-flight run
+    // OR a live attached server session (the post-refresh case) arms Stop.
     const activeId = this.activeSessionRunId();
-    return this.reviewSessions().some((session) => session.runId === activeId && session.active);
+    return isStopArmed(
+      this.reviewRun()?.status ?? null,
+      this.reviewSessions().some((session) => session.runId === activeId && session.active),
+    );
   });
 
   readonly selectedRepository = computed(() =>
