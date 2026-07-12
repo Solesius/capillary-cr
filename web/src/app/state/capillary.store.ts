@@ -1851,7 +1851,13 @@ export class CapillaryStore {
   readonly explorerActivePath = signal<string | null>(null);
   /** Line to reveal when the active file renders; consumed by the viewer. */
   readonly explorerRevealLine = signal<number | null>(null);
-  readonly explorerContent = signal<string | null>(null);
+  /**
+   * The loaded file as an atomic {path, content} pair. Kept whole so the Monaco
+   * viewer never sees a path/content mismatch mid-switch — and never unmounts:
+   * the previous file stays on screen under the loader overlay until the next
+   * one arrives, instead of tearing the editor down per click (the jitter).
+   */
+  readonly explorerFile = signal<{ path: string; content: string } | null>(null);
   /** Base-side (target branch) body for the diff view's original pane. */
   readonly explorerBaseContent = signal<string | null>(null);
   /** Diff view toggle: side-by-side base vs head instead of plain read. */
@@ -1902,7 +1908,7 @@ export class CapillaryStore {
     this.explorerFiles.set([]);
     this.explorerActivePath.set(null);
     this.explorerRevealLine.set(null);
-    this.explorerContent.set(null);
+    this.explorerFile.set(null);
     this.explorerBaseContent.set(null);
     this.explorerError.set(null);
   }
@@ -1933,17 +1939,28 @@ export class CapillaryStore {
       this.explorerError.set("Select a repository and pull request first.");
       return;
     }
+    // Deliberately do NOT clear explorerFile here: the previous file stays
+    // rendered under the loader overlay, so the editor never unmounts.
     this.explorerLoading.set(true);
-    this.explorerContent.set(null);
     try {
-      this.explorerContent.set(await this.#fetchFileSide(ids, path, "head"));
+      const content = await this.#fetchFileSide(ids, path, "head");
+      // Stale-response guard: the user may have clicked another file while
+      // this one was in flight — only the latest selection may render.
+      if (this.explorerActivePath() !== path) {
+        return;
+      }
+      this.explorerFile.set({ path, content });
       if (this.explorerDiffMode()) {
         await this.#loadBaseSide(path);
       }
     } catch (error) {
-      this.explorerError.set(`Unable to load ${path}: ${toMessage(error)}`);
+      if (this.explorerActivePath() === path) {
+        this.explorerError.set(`Unable to load ${path}: ${toMessage(error)}`);
+      }
     } finally {
-      this.explorerLoading.set(false);
+      if (this.explorerActivePath() === path) {
+        this.explorerLoading.set(false);
+      }
     }
   }
 
@@ -1964,9 +1981,15 @@ export class CapillaryStore {
       return;
     }
     try {
-      this.explorerBaseContent.set(await this.#fetchFileSide(ids, path, "base"));
+      const base = await this.#fetchFileSide(ids, path, "base");
+      // Stale-response guard: only the still-active file's base side may land.
+      if (this.explorerActivePath() === path) {
+        this.explorerBaseContent.set(base);
+      }
     } catch {
-      this.explorerBaseContent.set("");
+      if (this.explorerActivePath() === path) {
+        this.explorerBaseContent.set("");
+      }
     }
   }
 

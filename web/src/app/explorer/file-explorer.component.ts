@@ -80,20 +80,28 @@ const STATUS_GLYPH: Record<PullRequestDiffFile["status"], string> = {
         </nav>
 
         <section class="cap-fx-view">
-          @if (store.explorerError(); as error) {
-            <p class="cap-fx-state cap-fx-state--error">{{ error }}</p>
-          } @else if (store.explorerLoading()) {
-            <p class="cap-fx-state">Loading {{ store.explorerActivePath() }}…</p>
-          } @else if (store.explorerActivePath() && store.explorerContent() !== null) {
+          @if (store.explorerFile(); as file) {
+            <!-- Stays mounted across switches: the previous file remains under
+                 the loader strip until the next one lands — no editor teardown,
+                 no jitter. -->
             <app-monaco-viewer
-              [path]="store.explorerActivePath()!"
-              [content]="store.explorerContent()!"
+              [path]="file.path"
+              [content]="file.content"
               [findings]="store.explorerFindings()"
               [revealLine]="store.explorerRevealLine()"
               [diffMode]="store.explorerDiffMode()"
               [baseContent]="store.explorerBaseContent()" />
-          } @else {
+          } @else if (!store.explorerLoading() && !store.explorerError()) {
             <p class="cap-fx-state">Pick a file — contents load on demand, findings render in place.</p>
+          }
+          @if (store.explorerLoading()) {
+            <div class="cap-fx-loader" role="status">
+              <span class="cap-fx-loader-bar"></span>
+              <span class="cap-fx-loader-text">loading {{ store.explorerActivePath() }}</span>
+            </div>
+          }
+          @if (store.explorerError(); as error) {
+            <p class="cap-fx-state cap-fx-state--error cap-fx-state--overlay">{{ error }}</p>
           }
         </section>
       </div>
@@ -267,6 +275,48 @@ const STATUS_GLYPH: Record<PullRequestDiffFile["status"], string> = {
     }
     .cap-fx-state { margin: auto; padding: 24px; color: var(--cap-muted, #7f8db0); font-size: 0.85rem; }
     .cap-fx-state--error { color: #fa4d56; }
+    .cap-fx-state--overlay {
+      position: absolute;
+      inset: auto 0 0 0;
+      margin: 0;
+      padding: 10px 16px;
+      background: var(--cap-surface-panel, #0b1220);
+      border-top: 1px solid var(--cap-border, #24304a);
+      z-index: 3;
+    }
+    /* Slim indeterminate loader strip pinned to the top of the viewer — the
+       editor keeps rendering the previous file beneath it. */
+    .cap-fx-loader {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 3;
+      display: flex;
+      flex-direction: column;
+    }
+    .cap-fx-loader-bar {
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--cap-primary, #4c9aff), transparent);
+      background-size: 40% 100%;
+      background-repeat: no-repeat;
+      animation: cap-fx-sweep 0.9s linear infinite;
+    }
+    .cap-fx-loader-text {
+      align-self: flex-end;
+      margin: 6px 10px 0 0;
+      padding: 2px 8px;
+      font-family: 'IBM Plex Mono', ui-monospace, monospace;
+      font-size: 0.64rem;
+      letter-spacing: 0.06em;
+      color: var(--cap-muted, #7f8db0);
+      background: var(--cap-surface-panel, #0b1220);
+      border: 1px solid var(--cap-border, #24304a);
+    }
+    @keyframes cap-fx-sweep {
+      0% { background-position: -40% 0; }
+      100% { background-position: 140% 0; }
+    }
     .cap-fx-empty { padding: 14px; color: var(--cap-muted, #7f8db0); font-size: 0.8rem; }
   `],
   changeDetection: ChangeDetectionStrategy.OnPush,
