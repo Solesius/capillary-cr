@@ -181,6 +181,10 @@ export class ApiClientService {
     return this.get(`/api/review/agent/runs/${runId}`);
   }
 
+  buildRetvDriverUrl(runId: string, format: "playwright" | "runsheet"): string {
+    return `${this.baseUrl}/api/cdp/retv/runs/${runId}/driver?format=${format}`;
+  }
+
   buildReviewExportUrl(runId: string): string {
     return `${this.baseUrl}/api/review/agent/runs/${runId}/export`;
   }

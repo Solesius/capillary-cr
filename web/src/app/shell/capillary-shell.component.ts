@@ -469,6 +469,8 @@ import { FileExplorerComponent } from "../explorer/file-explorer.component";
                     <button class="cap-button" (click)="store.downloadSelectedReport()">Download report (.md)</button>
                     @if (store.cdpSelectedRunTraceEnabled()) {
                       <button class="cap-button cap-button-primary" (click)="store.exportSelectedRun()">Export bundle (.zip)</button>
+                      <button class="cap-button cap-button-ghost" (click)="store.exportSelectedDriver('playwright')" title="Deterministic Playwright spec generated from this run">Driver script (.spec.ts)</button>
+                      <button class="cap-button cap-button-ghost" (click)="store.exportSelectedDriver('runsheet')" title="Model-agnostic instructions for any coding agent to reproduce this run">Agent runsheet (.md)</button>
                     } @else {
                       <span class="cap-muted">run not traced — bundle export unavailable</span>
                     }

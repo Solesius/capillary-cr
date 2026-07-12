@@ -23,6 +23,7 @@ import { chat, chatStream } from "./providers/provider_client.ts";
 import type { ProviderStreamEvent } from "./providers/provider_core.ts";
 import { createZipArchive, type ZipEntryInput } from "./storage/zip_writer.ts";
 import { CANCELLED, raceCancellation } from "./review_agent_service.ts";
+import { buildAgentRunsheet, buildPlaywrightSpec } from "./driver_export.ts";
 
 // Agent runs are bounded by a wall-clock budget so big features that keep making
 // progress aren't cut short by a fixed iteration count. Default 10 minutes;
@@ -1098,6 +1099,23 @@ export class CdpRetvAgentService {
    * Build a downloadable bundle for a traced run: report.md + run.json + each
    * cycle screenshot. Returns null when the run is unknown or was not traced.
    */
+  /**
+   * Single-file driver export for a traced run: a deterministic Playwright
+   * spec or a model-agnostic agent runsheet. Null when unknown/untraced.
+   */
+  async buildDriverExport(
+    runId: string,
+    format: "playwright" | "runsheet",
+  ): Promise<{ filename: string; text: string } | null> {
+    const record = await this.repository.getRetvRun(runId);
+    if (!record || !record.traceEnabled || !record.trace) {
+      return null;
+    }
+    return format === "playwright"
+      ? { filename: `${record.runId}.spec.ts`, text: buildPlaywrightSpec(record) }
+      : { filename: `${record.runId}.runsheet.md`, text: buildAgentRunsheet(record) };
+  }
+
   async buildRunExport(runId: string): Promise<{ filename: string; bytes: Uint8Array } | null> {
     const record = await this.repository.getRetvRun(runId);
     if (!record || !record.traceEnabled || !record.trace) {
@@ -1107,6 +1125,17 @@ export class CdpRetvAgentService {
     const encoder = new TextEncoder();
     const entries: ZipEntryInput[] = [];
     entries.push({ name: "report.md", data: encoder.encode(record.report) });
+    // Run skeletons: the proven path as a deterministic Playwright spec and a
+    // model-agnostic agent runsheet — the bundle travels to teams that run
+    // neither capillary nor the same coding agent.
+    entries.push({
+      name: `${record.runId}.spec.ts`,
+      data: encoder.encode(buildPlaywrightSpec(record)),
+    });
+    entries.push({
+      name: "runsheet.md",
+      data: encoder.encode(buildAgentRunsheet(record)),
+    });
 
     const manifest = {
       runId: record.runId,

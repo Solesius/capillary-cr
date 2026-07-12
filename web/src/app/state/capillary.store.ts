@@ -1876,6 +1876,15 @@ export class CapillaryStore {
     }
   }
 
+  /** Download a run skeleton for the selected traced run. */
+  exportSelectedDriver(format: "playwright" | "runsheet"): void {
+    const runId = this.cdpSelectedRunId();
+    if (!runId) {
+      return;
+    }
+    window.open(this.api.buildRetvDriverUrl(runId, format), "_blank");
+  }
+
   exportSelectedRun(): void {
     const runId = this.cdpSelectedRunId();
     if (!runId) {
