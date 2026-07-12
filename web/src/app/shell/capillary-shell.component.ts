@@ -254,40 +254,105 @@ import { FileExplorerComponent } from "../explorer/file-explorer.component";
 
         @if (activePage() === 'agent') {
           <section class="cap-page-content">
-            <div class="cap-two-up">
-              <section class="cap-panel">
+            <div class="cap-qa-grid">
+              <section class="cap-panel cap-qa-mission">
                 <header class="cap-panel-title">
-                  <span>Agent Lab</span>
-                  <span class="cap-muted">CDP Async</span>
+                  <span>Functional QA</span>
+                  <span class="cap-qa-state" [class.live]="store.agentStreaming() || store.cdpRoundRunning()">
+                    {{ store.agentStreaming() ? 'streaming' : (store.cdpRoundRunning() ? 'running' : 'idle') }} · queue {{ store.cdpQueueDepth() }}
+                  </span>
                 </header>
-                <div class="cap-panel-body cap-list">
-                  <label class="cap-muted" for="agentStartUrl">Start URL / run domain</label>
+                <div class="cap-panel-body">
+                  <p class="cap-qa-kicker">Target</p>
                   <input
                     id="agentStartUrl"
                     class="cap-input"
                     placeholder="http://localhost:4200"
                     [value]="store.cdpStartUrl()"
                     (input)="store.cdpStartUrl.set($any($event.target).value)" />
-
-                  <label class="cap-muted" for="agentAllowedDomains">Allowed domains (drift scope)</label>
                   <input
                     id="agentAllowedDomains"
-                    class="cap-input"
-                    placeholder="example.com, app.example.com  ·  use * to roam anywhere"
+                    class="cap-input cap-qa-gap"
+                    placeholder="allowed domains — example.com, app.example.com · * roams"
                     [value]="store.cdpAllowedDomains()"
                     (input)="store.cdpAllowedDomains.set($any($event.target).value)" />
                   <p class="cap-muted cap-field-hint">
-                    Scope: {{ store.cdpStartUrl() || 'localhost:4200' }}{{ store.cdpAllowedDomains().trim() ? ', ' + store.cdpAllowedDomains().trim() : '' }}
+                    Drift scope: {{ store.cdpStartUrl() || 'localhost:4200' }}{{ store.cdpAllowedDomains().trim() ? ' · ' + store.cdpAllowedDomains().trim() : '' }}
                   </p>
 
-                  <div class="cap-row">
-                    <button class="cap-button cap-button-primary" (click)="launchAgentBrowser()">Launch Browser</button>
-                    <button class="cap-button" (click)="refreshAgentSessions()">Refresh Sessions</button>
-                    <button class="cap-button" (click)="closeAgentBrowser()" [disabled]="!store.activeCdpSession()">Close Session</button>
+                  <p class="cap-qa-kicker">Goal</p>
+                  <textarea
+                    id="agentGoal"
+                    class="cap-input cap-textarea"
+                    placeholder="validate login flow and verify dashboard widgets load"
+                    [value]="agentGoalInput()"
+                    (input)="agentGoalInput.set($any($event.target).value)"></textarea>
+
+                  <label class="cap-qa-option">
+                    <input
+                      type="checkbox"
+                      [checked]="store.cdpTraceEnabled()"
+                      (change)="store.cdpTraceEnabled.set($any($event.target).checked)" />
+                    <span class="cap-qa-option-name">Trace run</span>
+                    <span class="cap-muted">per-step trace + screenshots, bundle export</span>
+                  </label>
+
+                  <div class="cap-row cap-qa-actions">
+                    <button class="cap-button cap-button-primary" (click)="runLiveFunctionalRound()" [disabled]="store.agentStreaming()">Run Live ▶</button>
+                    <button class="cap-button" (click)="beginFunctionalRound()" [disabled]="store.cdpRoundRunning()">Run batch</button>
+                    <button class="cap-button" (click)="stopLiveRound()" [disabled]="!store.agentStreaming()">Stop</button>
                   </div>
 
-                  <label class="cap-muted" for="agentNavUrl">Navigate to any page</label>
-                  <div class="cap-inline-input">
+                  @if (store.cdpRoundRunning() || store.agentStreaming()) {
+                    <div class="cap-agent-loader active" [attr.data-phase]="store.agentRunPhase()">
+                      <div class="cap-agent-loader-track"></div>
+                      <div class="cap-agent-loader-sheen"></div>
+                      <div class="cap-agent-loader-meta">
+                        <strong>{{ store.agentRunPhaseLabel() }}</strong>
+                        <span>
+                          @if (store.cdpGoalProgress()) {
+                            {{ store.cdpGoalProgress()!.completedMilestones }}/{{ store.cdpGoalProgress()!.totalMilestones }} milestones · {{ store.cdpGoalProgress()!.percent }}%
+                          } @else {
+                            waiting for first cycle telemetry
+                          }
+                        </span>
+                      </div>
+                    </div>
+                  }
+
+                  <div class="cap-qa-sessions">
+                    <div class="cap-qa-sessions-head">
+                      <span class="cap-qa-kicker">Sessions · {{ store.cdpSessions().length }}</span>
+                      <span class="cap-qa-session-tools">
+                        <button class="cap-button cap-button-ghost cap-button-sm" (click)="launchAgentBrowser()">Launch</button>
+                        <button class="cap-button cap-button-ghost cap-button-sm" (click)="refreshAgentSessions()">Refresh</button>
+                        <button class="cap-button cap-button-ghost cap-button-sm" (click)="closeAgentBrowser()" [disabled]="!store.activeCdpSession()">Close</button>
+                      </span>
+                    </div>
+                    @if (store.cdpSessions().length === 0) {
+                      <p class="cap-muted cap-qa-empty">No browser yet — Launch one, or Run Live and it auto-starts.</p>
+                    } @else {
+                      <div class="cap-qa-session-strip">
+                        @for (session of store.cdpSessions(); track session.sessionId) {
+                          <button
+                            type="button"
+                            class="cap-qa-session-chip"
+                            [class.current]="store.activeCdpSessionId() === session.sessionId"
+                            [attr.title]="session.targetUrl"
+                            (click)="selectSession(session.sessionId)">
+                            <span class="cap-qa-session-dot"></span>{{ session.sessionId.slice(-6) }}
+                          </button>
+                        }
+                      </div>
+                    }
+                  </div>
+                </div>
+              </section>
+
+              <section class="cap-panel cap-qa-stage">
+                <header class="cap-panel-title cap-qa-stage-head">
+                  <span class="cap-qa-stage-title">Live Browser</span>
+                  <div class="cap-qa-address">
                     <input
                       id="agentNavUrl"
                       class="cap-input"
@@ -295,48 +360,23 @@ import { FileExplorerComponent } from "../explorer/file-explorer.component";
                       [value]="agentNavUrlInput()"
                       (input)="agentNavUrlInput.set($any($event.target).value)"
                       (keydown.enter)="requestNavigate()" />
-                    <button class="cap-button" (click)="requestNavigate()" [disabled]="!store.activeCdpSession()">Go</button>
+                    <button class="cap-button cap-button-sm" (click)="requestNavigate()" [disabled]="!store.activeCdpSession()">Go</button>
                   </div>
-
-                  <label class="cap-muted" for="agentGoal">Functional Goal</label>
-                  <textarea
-                    id="agentGoal"
-                    class="cap-input cap-textarea"
-                    placeholder="Example: validate login flow and verify dashboard widgets load"
-                    [value]="agentGoalInput()"
-                    (input)="agentGoalInput.set($any($event.target).value)"></textarea>
-
-                  <div class="cap-row">
-                    <button class="cap-button cap-button-primary" (click)="runLiveFunctionalRound()" [disabled]="store.agentStreaming()">Run Live ▶</button>
-                    <button class="cap-button" (click)="stopLiveRound()" [disabled]="!store.agentStreaming()">Stop</button>
-                    <button class="cap-button" (click)="beginFunctionalRound()" [disabled]="store.cdpRoundRunning()">Run (batch)</button>
-                    <span class="cap-muted">{{ store.agentStreaming() ? 'streaming' : (store.cdpRoundRunning() ? 'running' : 'idle') }} / queue {{ store.cdpQueueDepth() }}</span>
-                  </div>
-
-                  <label class="cap-checkbox-row">
-                    <input
-                      type="checkbox"
-                      [checked]="store.cdpTraceEnabled()"
-                      (change)="store.cdpTraceEnabled.set($any($event.target).checked)" />
-                    <span>Trace this run <span class="cap-muted">(retain full per-step trace + screenshots and enable bundle export)</span></span>
-                  </label>
-
-                  <div class="cap-agent-loader" [class.active]="store.cdpRoundRunning() || store.agentStreaming()" [attr.data-phase]="store.agentRunPhase()">
-                    <div class="cap-agent-loader-track"></div>
-                    <div class="cap-agent-loader-sheen"></div>
-                    <div class="cap-agent-loader-meta">
-                      <strong>{{ store.agentRunPhaseLabel() }}</strong>
-                      <span>
-                        @if (store.cdpGoalProgress()) {
-                          {{ store.cdpGoalProgress()!.completedMilestones }}/{{ store.cdpGoalProgress()!.totalMilestones }} milestones · {{ store.cdpGoalProgress()!.percent }}%
-                        } @else {
-                          waiting for first cycle telemetry
-                        }
-                      </span>
+                  <span class="cap-muted cap-qa-frame-tag">{{ store.agentStreaming() ? 'live' : 'last frame' }}</span>
+                </header>
+                <div class="cap-qa-frame">
+                  @if (store.agentScreenshot()) {
+                    <img class="cap-agent-frame" [src]="store.agentScreenshot()" alt="Live browser frame" />
+                  } @else {
+                    <div class="cap-qa-frame-empty">
+                      <strong>The stage is dark.</strong>
+                      <span>Point Target at your app, give it a Goal, hit Run Live — frames stream here.</span>
                     </div>
-                  </div>
+                  }
+                </div>
 
-                  <div class="cap-planner-strip" [class.active]="store.cdpRoundRunning() || store.agentStreaming()">
+                @if (store.cdpRoundRunning() || store.agentStreaming()) {
+                  <div class="cap-qa-telemetry">
                     <article class="cap-planner-pane">
                       <div class="cap-planner-head">
                         <strong>Reasoning Live</strong>
@@ -350,7 +390,6 @@ import { FileExplorerComponent } from "../explorer/file-explorer.component";
                       </div>
                       <p class="cap-planner-text">{{ store.agentPlannerLiveText() || 'planner tokens stream here as they are produced.' }}</p>
                     </article>
-
                     <article class="cap-planner-pane">
                       <div class="cap-planner-head">
                         <strong>Tool Picks</strong>
@@ -366,83 +405,45 @@ import { FileExplorerComponent } from "../explorer/file-explorer.component";
                       </div>
                     </article>
                   </div>
+                }
 
-                  <label class="cap-muted" for="agentSteer">Steer or Answer Agent</label>
-                  <div class="cap-inline-input">
+                @if (store.activeCdpSession()) {
+                  <div class="cap-qa-steer">
+                    <span class="cap-qa-steer-label">steer</span>
                     <input
                       id="agentSteer"
                       class="cap-input"
-                      placeholder="click .retry-button  |  type input[name=email] => test@capillary.dev"
+                      placeholder="click .retry-button · type input[name=email] => test@capillary.dev"
                       [value]="agentInstructionInput()"
                       (input)="agentInstructionInput.set($any($event.target).value)"
                       (keydown.enter)="sendSteerInstruction()" />
-                    <button class="cap-button" (click)="sendSteerInstruction()">Send</button>
+                    <button class="cap-button cap-button-sm" (click)="sendSteerInstruction()">Send</button>
                   </div>
-                </div>
-              </section>
-
-              <section class="cap-panel">
-                <header class="cap-panel-title">
-                  <span>Sessions</span>
-                  <span class="cap-muted">{{ store.cdpSessions().length }}</span>
-                </header>
-                <div class="cap-panel-body cap-list">
-                  @if (store.cdpSessions().length === 0) {
-                    <p class="cap-muted">No CDP sessions yet. Launch browser to begin.</p>
-                  }
-                  @for (session of store.cdpSessions(); track session.sessionId) {
-                    <button
-                      class="cap-card cap-session-card"
-                      [class.active]="store.activeCdpSessionId() === session.sessionId"
-                      (click)="selectSession(session.sessionId)">
-                      <div class="cap-row">
-                        <strong>{{ session.sessionId }}</strong>
-                        <span class="cap-muted">{{ session.targetId }}</span>
-                      </div>
-                      <p class="cap-muted" style="margin-top: 6px;">{{ session.targetUrl }}</p>
-                    </button>
-                  }
-                </div>
+                }
               </section>
             </div>
 
-            <div class="cap-two-up cap-agent-live">
-              <section class="cap-panel">
-                <header class="cap-panel-title">
-                  <span>Live Browser</span>
-                  <span class="cap-muted">{{ store.agentStreaming() ? 'live' : 'last frame' }}</span>
-                </header>
-                <div class="cap-panel-body">
-                  @if (store.agentScreenshot()) {
-                    <img class="cap-agent-frame" [src]="store.agentScreenshot()" alt="Live browser frame" />
-                  } @else {
-                    <p class="cap-muted">Browser frames stream here during a live round.</p>
-                  }
-                </div>
-              </section>
-
-              <section class="cap-panel">
-                <header class="cap-panel-title">
-                  <span>Live Console</span>
-                  <span class="cap-muted">
-                    {{ store.agentConsole().length }} lines
-                    <button class="cap-button cap-button-mini" (click)="store.clearAgentConsole()">clear</button>
-                  </span>
-                </header>
-                <div class="cap-panel-body cap-agent-console" #agentConsoleBox>
-                  @if (store.agentConsole().length === 0) {
-                    <p class="cap-muted">Planner trace streams here.</p>
-                  }
-                  @for (line of store.agentConsole(); track line.id) {
-                    <div class="cap-console-line" [attr.data-channel]="line.channel">
-                      <span class="cap-console-time">{{ line.at }}</span>
-                      <span class="cap-console-badge">{{ line.channel }}</span>
-                      <pre class="cap-console-text">{{ line.text }}</pre>
-                    </div>
-                  }
-                </div>
-              </section>
-            </div>
+            <section class="cap-panel">
+              <header class="cap-panel-title">
+                <span>Live Console</span>
+                <span class="cap-muted">
+                  {{ store.agentConsole().length }} lines
+                  <button class="cap-button cap-button-mini" (click)="store.clearAgentConsole()">clear</button>
+                </span>
+              </header>
+              <div class="cap-panel-body cap-agent-console" #agentConsoleBox>
+                @if (store.agentConsole().length === 0) {
+                  <p class="cap-muted">Planner trace streams here during a run.</p>
+                }
+                @for (line of store.agentConsole(); track line.id) {
+                  <div class="cap-console-line" [attr.data-channel]="line.channel">
+                    <span class="cap-console-time">{{ line.at }}</span>
+                    <span class="cap-console-badge">{{ line.channel }}</span>
+                    <pre class="cap-console-text">{{ line.text }}</pre>
+                  </div>
+                }
+              </div>
+            </section>
 
             <section class="cap-panel">
               <header class="cap-panel-title">
