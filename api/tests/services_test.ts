@@ -1889,3 +1889,63 @@ Deno.test("should_shape_and_parse_anthropic_transport", async () => {
   assertEquals(result.ok, true);
   assertEquals(result.value?.content, "anthropic ok");
 });
+
+Deno.test("should_count_cached_prompt_tokens_in_claude_code_input_usage", async () => {
+  // The claude CLI reports input_tokens as the UNCACHED slice only; the bulk
+  // of capillary's repeated prompt lands in the cache fields. The transport
+  // must sum all three — and must never fabricate input from the output text.
+  const ops = createClaudeCodeProviderOps(() =>
+    makeClaudeProcess([
+      JSON.stringify({ type: "system", subtype: "init", apiKeySource: "none" }),
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "ok",
+        usage: {
+          input_tokens: 42,
+          cache_read_input_tokens: 18_000,
+          cache_creation_input_tokens: 2_500,
+          output_tokens: 350,
+        },
+      }),
+    ])
+  );
+
+  const result = await ops.sendStream(
+    { kind: "claude_code", apiKey: "", baseUrl: "stdio://claude-code", model: "sonnet" },
+    { messages: [{ role: "user", content: "review" }], systemPrompt: "s" },
+    () => {},
+  );
+
+  assertEquals(result.ok, true);
+  assertEquals(result.value?.inputTokens, 42 + 18_000 + 2_500);
+  assertEquals(result.value?.outputTokens, 350);
+});
+
+Deno.test("should_report_zero_input_not_output_estimate_when_claude_usage_is_absent", async () => {
+  const ops = createClaudeCodeProviderOps(() =>
+    makeClaudeProcess([
+      JSON.stringify({ type: "system", subtype: "init", apiKeySource: "none" }),
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result:
+          "a fairly long response body that would previously have been fed into estimateTokens and reported as INPUT, which is fiction",
+      }),
+    ])
+  );
+
+  const result = await ops.sendStream(
+    { kind: "claude_code", apiKey: "", baseUrl: "stdio://claude-code", model: "sonnet" },
+    { messages: [{ role: "user", content: "review" }], systemPrompt: "s" },
+    () => {},
+  );
+
+  assertEquals(result.ok, true);
+  // Honest zero: input is unknown, not derivable from the response text.
+  assertEquals(result.value?.inputTokens, 0);
+  // Output MAY be estimated from the response — that is the right direction.
+  assertEquals((result.value?.outputTokens ?? 0) > 0, true);
+});
