@@ -434,6 +434,14 @@ router.get("/api/cdp/retv/run/stream", async (ctx) => {
   }
 });
 
+// Live stop for an in-flight functional run. Closing the SSE stream alone
+// never stopped the server-side round; this lands the stop at the loop's next
+// boundary (racing any in-flight planner turn).
+router.post("/api/cdp/retv/runs/:runId/cancel", (ctx) => {
+  const runId = ctx.params.runId || "";
+  ctx.response.body = { cancelled: deps.cdpRetvAgentService.cancelRetvRun(runId) };
+});
+
 router.get("/api/cdp/retv/runs", async (ctx) => {
   ctx.response.body = { runs: await deps.cdpRetvAgentService.listRuns() };
 });
@@ -458,6 +466,28 @@ router.get("/api/cdp/retv/runs/:runId/report", async (ctx) => {
   ctx.response.headers.set("content-type", "text/markdown; charset=utf-8");
   ctx.response.headers.set("content-disposition", `inline; filename="${record.runId}.md"`);
   ctx.response.body = record.report;
+});
+
+// Run skeleton: export a traced run as a deterministic Playwright spec or a
+// model-agnostic agent runsheet (?format=playwright|runsheet).
+router.get("/api/cdp/retv/runs/:runId/driver", async (ctx) => {
+  const runId = ctx.params.runId || "";
+  const format = ctx.request.url.searchParams.get("format") === "runsheet"
+    ? "runsheet" as const
+    : "playwright" as const;
+  const driver = await deps.cdpRetvAgentService.buildDriverExport(runId, format);
+  if (!driver) {
+    const record = await deps.cdpRetvAgentService.getRun(runId);
+    ctx.response.status = record ? 409 : 404;
+    ctx.response.body = { error: record ? "retv_run_not_traced" : "retv_run_not_found" };
+    return;
+  }
+  ctx.response.headers.set(
+    "content-type",
+    format === "playwright" ? "text/typescript; charset=utf-8" : "text/markdown; charset=utf-8",
+  );
+  ctx.response.headers.set("content-disposition", `attachment; filename="${driver.filename}"`);
+  ctx.response.body = driver.text;
 });
 
 router.get("/api/cdp/retv/runs/:runId/export", async (ctx) => {

@@ -181,6 +181,10 @@ export class ApiClientService {
     return this.get(`/api/review/agent/runs/${runId}`);
   }
 
+  buildRetvDriverUrl(runId: string, format: "playwright" | "runsheet"): string {
+    return `${this.baseUrl}/api/cdp/retv/runs/${runId}/driver?format=${format}`;
+  }
+
   buildReviewExportUrl(runId: string): string {
     return `${this.baseUrl}/api/review/agent/runs/${runId}/export`;
   }
@@ -213,6 +217,11 @@ export class ApiClientService {
 
   async executeCdpWorkUnit(sessionId: string, request: CdpWorkUnitRequest): Promise<CdpWorkUnitResult> {
     return this.post(`/api/cdp/sessions/${sessionId}/work-units`, request);
+  }
+
+  /** Live stop for an in-flight functional run — the loop lands it in moments. */
+  async cancelRetvRun(runId: string): Promise<{ cancelled: boolean }> {
+    return this.post(`/api/cdp/retv/runs/${runId}/cancel`, {});
   }
 
   async runRetvCdpGoalRound(request: {

@@ -2,7 +2,14 @@
 // Copyright 2026 Khalil Warren — capillary
 import { ReviewPacket, RiskSurface, TcsrctPass } from "../../domain/entities.ts";
 
-export const RETV_PHASE_SEQUENCE = ["reason", "toolform", "act", "observe", "update", "decide"] as const;
+export const RETV_PHASE_SEQUENCE = [
+  "reason",
+  "toolform",
+  "act",
+  "observe",
+  "update",
+  "decide",
+] as const;
 
 export type RetvDecision = "continue" | "stop" | "backtrack";
 export type RetvPhase = (typeof RETV_PHASE_SEQUENCE)[number];
@@ -11,7 +18,10 @@ export type RetvTask =
   | "graph.expand_persistence_path"
   | "graph.expand_auth_boundary"
   | "graph.expand_runtime_path";
-export type RetvStopConditionKind = "iteration_budget_exhausted" | "no_surfaces" | "risk_threshold_met";
+export type RetvStopConditionKind =
+  | "iteration_budget_exhausted"
+  | "no_surfaces"
+  | "risk_threshold_met";
 
 /// TCSRTC Feature Process gates (Target -> Constrain -> Sanitize -> Review -> Test -> Confirm).
 export type TcsrtcGate = "Target" | "Constrain" | "Sanitize" | "Review" | "Test" | "Confirm";
@@ -157,7 +167,11 @@ function clampRatio(value: number, min: number, max: number): number {
 
 function normalizePolicy(policy: Partial<RetvLoopPolicy>): RetvLoopPolicy {
   return {
-    maxIterations: clampInteger(policy.maxIterations ?? DEFAULT_POLICY.maxIterations, MIN_POLICY.maxIterations, MAX_POLICY.maxIterations),
+    maxIterations: clampInteger(
+      policy.maxIterations ?? DEFAULT_POLICY.maxIterations,
+      MIN_POLICY.maxIterations,
+      MAX_POLICY.maxIterations,
+    ),
     minEvidencePerIteration: clampInteger(
       policy.minEvidencePerIteration ?? DEFAULT_POLICY.minEvidencePerIteration,
       MIN_POLICY.minEvidencePerIteration,
@@ -272,7 +286,10 @@ export function buildRetvLoop(packet: ReviewPacket): RetvLoopIteration[] {
   return runRetvLoop(packet).iterations;
 }
 
-export function runRetvLoop(packet: ReviewPacket, policy: Partial<RetvLoopPolicy> = {}): RetvLoopResult {
+export function runRetvLoop(
+  packet: ReviewPacket,
+  policy: Partial<RetvLoopPolicy> = {},
+): RetvLoopResult {
   const effectivePolicy = normalizePolicy(policy);
 
   const graphCompleteness = deriveGraphCompleteness(packet);
@@ -289,7 +306,14 @@ export function runRetvLoop(packet: ReviewPacket, policy: Partial<RetvLoopPolicy
 
   for (let index = 0; index < sorted.length; index += 1) {
     const surface = sorted[index];
-    const iteration = toIteration(packet, surface, index, sorted.length, graphCompleteness, effectivePolicy);
+    const iteration = toIteration(
+      packet,
+      surface,
+      index,
+      sorted.length,
+      graphCompleteness,
+      effectivePolicy,
+    );
     iterations.push(iteration);
 
     for (const phase of iteration.phases) {
@@ -340,8 +364,11 @@ function toIteration(
   const evidence = buildEvidence(surface, graphCompleteness, packet, tcsrtcGate);
   const decision = decide(surface, index, total, graphCompleteness, evidence.length, policy);
   const iterationId = `retv_${index + 1}`;
-  const reasoningSummary = `Prioritize ${surface.surfaceKind} due to risk ${surface.riskScore.toFixed(3)} on entry ${surface.entryNodeId}`;
-  const observationSummary = `TCSRTC ${tcsrtcGate} gate validates evidence for ${surface.surfaceKind}`;
+  const reasoningSummary = `Prioritize ${surface.surfaceKind} due to risk ${
+    surface.riskScore.toFixed(3)
+  } on entry ${surface.entryNodeId}`;
+  const observationSummary =
+    `TCSRTC ${tcsrtcGate} gate validates evidence for ${surface.surfaceKind}`;
 
   const phases: RetvObservation[] = [
     {
@@ -352,7 +379,9 @@ function toIteration(
     },
     {
       phase: RETV_PHASE_SEQUENCE[1],
-      summary: `selected_task=${selectedTask}; tools=${toolPlan.map((tool) => tool.toolName).join(",")}`,
+      summary: `selected_task=${selectedTask}; tools=${
+        toolPlan.map((tool) => tool.toolName).join(",")
+      }`,
       evidence: [`pass=${passName}`, `tool_count=${toolPlan.length}`],
       success: true,
     },

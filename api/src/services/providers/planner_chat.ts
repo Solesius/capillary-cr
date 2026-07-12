@@ -11,10 +11,7 @@
 //
 // The review agent reuses these so we do not duplicate the provider plumbing.
 
-import {
-  buildProviderFromKind,
-  type ProviderKind,
-} from "./provider_registry.ts";
+import { buildProviderFromKind, type ProviderKind } from "./provider_registry.ts";
 import { chat, chatStream } from "./provider_client.ts";
 import type { ProviderStreamEvent } from "./provider_core.ts";
 
@@ -79,7 +76,14 @@ export async function plannerChat(
     };
   }
 
-  return { ok: true, value: { content: response.value.content, inputTokens: response.value.inputTokens, outputTokens: response.value.outputTokens } };
+  return {
+    ok: true,
+    value: {
+      content: response.value.content,
+      inputTokens: response.value.inputTokens,
+      outputTokens: response.value.outputTokens,
+    },
+  };
 }
 
 /** Streaming planner chat (provider-backed only; OpenAI-compatible falls back to single-shot). */
@@ -124,7 +128,14 @@ export async function plannerChatStream(
     };
   }
 
-  return { ok: true, value: { content: response.value.content, inputTokens: response.value.inputTokens, outputTokens: response.value.outputTokens } };
+  return {
+    ok: true,
+    value: {
+      content: response.value.content,
+      inputTokens: response.value.inputTokens,
+      outputTokens: response.value.outputTokens,
+    },
+  };
 }
 
 async function openAiCompatibleChat(
@@ -173,7 +184,10 @@ async function openAiCompatibleChat(
       : "";
 
     if (!content) {
-      return { ok: false, error: { kind: "invalid_request", message: "provider_response_invalid" } };
+      return {
+        ok: false,
+        error: { kind: "invalid_request", message: "provider_response_invalid" },
+      };
     }
 
     return { ok: true, value: { content } };
@@ -251,7 +265,10 @@ function repairLooseJson(value: string): string {
   return value
     .replace(/,\s*([}\]])/g, "$1")
     .replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g, '$1"$2"$3')
-    .replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_m, group: string) => `"${group.replace(/"/g, "\\\"")}"`);
+    .replace(
+      /'([^'\\]*(?:\\.[^'\\]*)*)'/g,
+      (_m, group: string) => `"${group.replace(/"/g, '\\"')}"`,
+    );
 }
 
 function findFirstBalancedJsonObject(text: string): string | null {

@@ -111,3 +111,11 @@ Deno.test("cancelReview on an unknown run rejects instead of inventing state", a
   const service = buildOrchestrator(repository);
   await assertRejects(() => service.cancelReview("run-ghost"));
 });
+
+Deno.test("cancelRetvRun refuses ghosts — false when no such run is live", async () => {
+  const { CdpRetvAgentService } = await import("../src/services/cdp_retv_agent_service.ts");
+  const { CdpDriverService } = await import("../src/services/cdp_driver_service.ts");
+  const repository = new CelerReviewRepository();
+  const service = new CdpRetvAgentService(repository, new CdpDriverService());
+  assertEquals(service.cancelRetvRun("retv_cdp_ghost123"), false);
+});

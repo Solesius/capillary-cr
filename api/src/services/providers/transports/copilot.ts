@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
+import { errorResult, ProviderOps } from "../provider_core.ts";
 import {
-  ProviderOps,
-  errorResult,
-} from "../provider_core.ts";
-import {
-  buildOpenAiCompatibleBody,
+  authMissing,
   buildGithubModelsBody,
+  buildOpenAiCompatibleBody,
   CONTENT_TYPE_JSON_HEADER,
   createBufferedProviderOps,
-  FetchLike,
-  authMissing,
   endpoint,
+  FetchLike,
   GITHUB_ACCEPT_HEADER,
   GITHUB_API_VERSION_HEADER,
   GITHUB_MODELS_INFERENCE_CHAT_COMPLETIONS_PATH,
@@ -102,31 +99,33 @@ async function exchangeGithubTokenForCopilotToken(
 
 export function createCopilotProviderOps(fetchLike: FetchLike = fetch): ProviderOps {
   return createBufferedProviderOps(async (provider, request) => {
-      if (!request.messages || request.messages.length === 0) {
-        return invalidRequest("messages_required");
-      }
-      const baseApiKey = provider.apiKey.trim();
-      if (!baseApiKey) {
-        return authMissing("github_copilot");
-      }
+    if (!request.messages || request.messages.length === 0) {
+      return invalidRequest("messages_required");
+    }
+    const baseApiKey = provider.apiKey.trim();
+    if (!baseApiKey) {
+      return authMissing("github_copilot");
+    }
 
-      const model = request.model || provider.model;
-      const copilotApiModel = normalizeCopilotApiModel(model);
-      const modelsUrl = endpoint(provider.baseUrl, GITHUB_MODELS_INFERENCE_CHAT_COMPLETIONS_PATH);
-      const copilotUrl = endpoint(
-        provider.baseUrl.includes("api.githubcopilot.com") ? provider.baseUrl : COPILOT_API_BASE_URL,
-        OPENAI_CHAT_COMPLETIONS_PATH,
-      );
-      const useGithubModels = provider.baseUrl.includes("models.github.ai");
+    const model = request.model || provider.model;
+    const copilotApiModel = normalizeCopilotApiModel(model);
+    const modelsUrl = endpoint(provider.baseUrl, GITHUB_MODELS_INFERENCE_CHAT_COMPLETIONS_PATH);
+    const copilotUrl = endpoint(
+      provider.baseUrl.includes("api.githubcopilot.com") ? provider.baseUrl : COPILOT_API_BASE_URL,
+      OPENAI_CHAT_COMPLETIONS_PATH,
+    );
+    const useGithubModels = provider.baseUrl.includes("models.github.ai");
 
-      const sendToGithubModels = (apiKey: string) => postJson(fetchLike, modelsUrl, {
+    const sendToGithubModels = (apiKey: string) =>
+      postJson(fetchLike, modelsUrl, {
         ...CONTENT_TYPE_JSON_HEADER,
         accept: GITHUB_ACCEPT_HEADER,
         "x-github-api-version": GITHUB_API_VERSION_HEADER,
         authorization: `Bearer ${apiKey}`,
       }, buildGithubModelsBody(request, model, false));
 
-      const sendToCopilotApi = (apiKey: string) => postJson(fetchLike, copilotUrl, {
+    const sendToCopilotApi = (apiKey: string) =>
+      postJson(fetchLike, copilotUrl, {
         ...CONTENT_TYPE_JSON_HEADER,
         accept: "application/json",
         "user-agent": "capillary",
@@ -136,52 +135,62 @@ export function createCopilotProviderOps(fetchLike: FetchLike = fetch): Provider
         authorization: `Bearer ${apiKey}`,
       }, buildOpenAiCompatibleBody(request, copilotApiModel, false));
 
-      let posted = useGithubModels ? await sendToGithubModels(baseApiKey) : await sendToCopilotApi(baseApiKey);
-      if (!posted.ok && posted.error?.kind === "auth") {
-        const exchanged = await exchangeGithubTokenForCopilotToken(fetchLike, baseApiKey);
-        if (exchanged && exchanged !== baseApiKey) {
-          posted = useGithubModels ? await sendToGithubModels(exchanged) : await sendToCopilotApi(exchanged);
+    let posted = useGithubModels
+      ? await sendToGithubModels(baseApiKey)
+      : await sendToCopilotApi(baseApiKey);
+    if (!posted.ok && posted.error?.kind === "auth") {
+      const exchanged = await exchangeGithubTokenForCopilotToken(fetchLike, baseApiKey);
+      if (exchanged && exchanged !== baseApiKey) {
+        posted = useGithubModels
+          ? await sendToGithubModels(exchanged)
+          : await sendToCopilotApi(exchanged);
+      }
+    }
+
+    // GitHub Models can hit budget/rate limits for DAG review workloads.
+    // If that happens, try Copilot API directly with exchanged token (IHHI-style path).
+    if (!posted.ok && useGithubModels && posted.error?.kind === "rate_limit") {
+      const exchanged = await exchangeGithubTokenForCopilotToken(fetchLike, baseApiKey);
+
+      if (exchanged) {
+        const exchangedPosted = await sendToCopilotApi(exchanged);
+        if (exchangedPosted.ok) {
+          posted = exchangedPosted;
         }
       }
 
-      // GitHub Models can hit budget/rate limits for DAG review workloads.
-      // If that happens, try Copilot API directly with exchanged token (IHHI-style path).
-      if (!posted.ok && useGithubModels && posted.error?.kind === "rate_limit") {
-        const exchanged = await exchangeGithubTokenForCopilotToken(fetchLike, baseApiKey);
-
-        if (exchanged) {
-          const exchangedPosted = await sendToCopilotApi(exchanged);
-          if (exchangedPosted.ok) {
-            posted = exchangedPosted;
-          }
-        }
-
-        // Some device/OAuth tokens can call Copilot API directly even when exchange fails.
-        if (!posted.ok) {
-          const directPosted = await sendToCopilotApi(baseApiKey);
-          if (directPosted.ok) {
-            posted = directPosted;
-          }
-        }
-      }
-
+      // Some device/OAuth tokens can call Copilot API directly even when exchange fails.
       if (!posted.ok) {
-        const mapped = posted.error;
-        return errorResult(mapped?.kind || "network", mapped?.message || "network_error", mapped?.statusCode);
+        const directPosted = await sendToCopilotApi(baseApiKey);
+        if (directPosted.ok) {
+          posted = directPosted;
+        }
       }
+    }
 
-      const parsed = parseOpenAiCompatibleResponse(posted.payload);
-      if (!parsed) {
-        return errorResult("server_error", "provider_response_invalid", 502);
-      }
-
-      return toResponse(
-        provider,
-        model,
-        parsed.content,
-        parsed.finishReason === "completed" || parsed.finishReason === "stop" ? "completed" : "failed",
-        parsed.promptTokens,
-        parsed.completionTokens,
+    if (!posted.ok) {
+      const mapped = posted.error;
+      return errorResult(
+        mapped?.kind || "network",
+        mapped?.message || "network_error",
+        mapped?.statusCode,
       );
-    });
+    }
+
+    const parsed = parseOpenAiCompatibleResponse(posted.payload);
+    if (!parsed) {
+      return errorResult("server_error", "provider_response_invalid", 502);
+    }
+
+    return toResponse(
+      provider,
+      model,
+      parsed.content,
+      parsed.finishReason === "completed" || parsed.finishReason === "stop"
+        ? "completed"
+        : "failed",
+      parsed.promptTokens,
+      parsed.completionTokens,
+    );
+  });
 }

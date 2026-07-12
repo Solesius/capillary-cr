@@ -1,17 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import {
-  ProviderOps,
-  ProviderRequest,
-  errorResult,
-} from "../provider_core.ts";
+import { errorResult, ProviderOps, ProviderRequest } from "../provider_core.ts";
 import { estimateTokens } from "../provider_helpers.ts";
 import {
-  CONTENT_TYPE_JSON_HEADER,
-  FetchLike,
   authMissing,
+  CONTENT_TYPE_JSON_HEADER,
   createBufferedProviderOps,
   endpoint,
+  FetchLike,
   invalidRequest,
   mapHttpError,
   parseJsonSafe,
@@ -44,7 +40,9 @@ function parseGeminiResponse(payload: unknown): {
   const data = payload as Record<string, unknown> | null;
   const candidates = (data?.candidates as Array<Record<string, unknown>> | undefined) || [];
   const first = candidates[0] || null;
-  const parts = (first?.content as Record<string, unknown> | undefined)?.parts as Array<Record<string, unknown>> | undefined;
+  const parts = (first?.content as Record<string, unknown> | undefined)?.parts as
+    | Array<Record<string, unknown>>
+    | undefined;
   const content = (parts || [])
     .map((part) => String(part.text || ""))
     .join("\n")
@@ -65,61 +63,63 @@ function parseGeminiResponse(payload: unknown): {
 
 export function createGeminiProviderOps(fetchLike: FetchLike = fetch): ProviderOps {
   return createBufferedProviderOps(async (provider, request) => {
-      if (!request.messages || request.messages.length === 0) {
-        return invalidRequest("messages_required");
-      }
-      if (!provider.apiKey.trim()) {
-        return authMissing("gemini");
-      }
+    if (!request.messages || request.messages.length === 0) {
+      return invalidRequest("messages_required");
+    }
+    if (!provider.apiKey.trim()) {
+      return authMissing("gemini");
+    }
 
-      const model = request.model || provider.model;
-      const url = buildGeminiUrl(provider.baseUrl, model, provider.apiKey);
+    const model = request.model || provider.model;
+    const url = buildGeminiUrl(provider.baseUrl, model, provider.apiKey);
 
-      const body: Record<string, unknown> = {
-        contents: toGeminiContents(request),
-        generationConfig: {
-          temperature: request.temperature,
-          maxOutputTokens: request.maxOutputTokens,
-        },
+    const body: Record<string, unknown> = {
+      contents: toGeminiContents(request),
+      generationConfig: {
+        temperature: request.temperature,
+        maxOutputTokens: request.maxOutputTokens,
+      },
+    };
+
+    if (request.systemPrompt?.trim()) {
+      body.systemInstruction = {
+        role: "user",
+        parts: [{ text: request.systemPrompt.trim() }],
       };
+    }
 
-      if (request.systemPrompt?.trim()) {
-        body.systemInstruction = {
-          role: "user",
-          parts: [{ text: request.systemPrompt.trim() }],
-        };
+    try {
+      const response = await fetchLike(url, {
+        method: "POST",
+        headers: {
+          ...CONTENT_TYPE_JSON_HEADER,
+        },
+        body: JSON.stringify(body),
+      });
+
+      const payload = await parseJsonSafe(response);
+      if (!response.ok) {
+        const mapped = mapHttpError(payload, response.status);
+        return errorResult(mapped.kind, mapped.message, mapped.statusCode);
       }
 
-      try {
-        const response = await fetchLike(url, {
-          method: "POST",
-          headers: {
-            ...CONTENT_TYPE_JSON_HEADER,
-          },
-          body: JSON.stringify(body),
-        });
-
-        const payload = await parseJsonSafe(response);
-        if (!response.ok) {
-          const mapped = mapHttpError(payload, response.status);
-          return errorResult(mapped.kind, mapped.message, mapped.statusCode);
-        }
-
-        const parsed = parseGeminiResponse(payload);
-        if (!parsed) {
-          return errorResult("server_error", "provider_response_invalid", 502);
-        }
-
-        return toResponse(
-          provider,
-          model,
-          parsed.content,
-          parsed.finishReason === "STOP" || parsed.finishReason === "MAX_TOKENS" ? "completed" : "failed",
-          parsed.inputTokens,
-          parsed.outputTokens,
-        );
-      } catch (error) {
-        return errorResult("network", error instanceof Error ? error.message : "network_error");
+      const parsed = parseGeminiResponse(payload);
+      if (!parsed) {
+        return errorResult("server_error", "provider_response_invalid", 502);
       }
-    });
+
+      return toResponse(
+        provider,
+        model,
+        parsed.content,
+        parsed.finishReason === "STOP" || parsed.finishReason === "MAX_TOKENS"
+          ? "completed"
+          : "failed",
+        parsed.inputTokens,
+        parsed.outputTokens,
+      );
+    } catch (error) {
+      return errorResult("network", error instanceof Error ? error.message : "network_error");
+    }
+  });
 }

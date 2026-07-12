@@ -15,8 +15,6 @@ export class AppError extends Error {
 export const unauthorized = (message = "Unauthorized") =>
   new AppError(message, 401, "unauthorized");
 
-export const notFound = (message = "Not found") =>
-  new AppError(message, 404, "not_found");
+export const notFound = (message = "Not found") => new AppError(message, 404, "not_found");
 
-export const conflict = (message = "Conflict") =>
-  new AppError(message, 409, "conflict");
+export const conflict = (message = "Conflict") => new AppError(message, 409, "conflict");

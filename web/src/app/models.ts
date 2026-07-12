@@ -519,7 +519,12 @@ export type RetvCdpRunEvent =
   | { type: "planner_delta"; cycle: number; text: string }
   | { type: "planner"; cycle: number; rawContent: string; toolCalls: RetvCdpToolCall[]; findings: string[] }
   | { type: "screenshot"; cycle: number; dataUrl: string }
-  | { type: "cycle"; cycle: RetvCdpCycleSummary; progress: RetvCdpRunResult["progress"] }
+  | {
+    type: "cycle";
+    cycle: RetvCdpCycleSummary;
+    progress: RetvCdpRunResult["progress"];
+    tokens?: { input: number; output: number; total: number };
+  }
   | { type: "log"; level: "info" | "warn" | "error"; message: string }
   | { type: "summary"; summary: string }
   | { type: "report"; report: string }

@@ -24,6 +24,15 @@
 //   CLAUDE_CODE_BIN     path to the claude binary (default "claude")
 
 const port = Number(Deno.env.get("CLAUDE_BRIDGE_PORT") || 7898);
+
+// One empty scratch directory per bridge process — see spawn comment.
+let scratchDir: string | null = null;
+function scratchCwd(): string {
+  if (!scratchDir) {
+    scratchDir = Deno.makeTempDirSync({ prefix: "capillary_claude_hermetic_" });
+  }
+  return scratchDir;
+}
 const hostname = Deno.env.get("CLAUDE_BRIDGE_HOST") || "0.0.0.0";
 
 // Deno.Command does not search PATH for a bare program name when the child
@@ -45,7 +54,12 @@ function resolveClaudeBin(): string {
   const home = Deno.env.get("HOME") || "";
   const searchDirs = (Deno.env.get("PATH") || "").split(":");
   if (home) {
-    searchDirs.push(`${home}/.local/bin`, `${home}/.claude/local`, `${home}/.npm-global/bin`, `${home}/bin`);
+    searchDirs.push(
+      `${home}/.local/bin`,
+      `${home}/.claude/local`,
+      `${home}/.npm-global/bin`,
+      `${home}/bin`,
+    );
   }
   searchDirs.push("/usr/local/bin", "/usr/bin");
   for (const dir of searchDirs) {
@@ -63,7 +77,10 @@ function resolveClaudeBin(): string {
 const claudeBin = resolveClaudeBin();
 
 // flag → does it consume a value token, and how is that value validated
-const ALLOWED_FLAGS: Record<string, { takesValue: boolean; validate?: (value: string) => boolean }> = {
+const ALLOWED_FLAGS: Record<
+  string,
+  { takesValue: boolean; validate?: (value: string) => boolean }
+> = {
   "-p": { takesValue: false },
   "--model": { takesValue: true, validate: (v) => /^[\w.@:-]+$/.test(v) },
   "--output-format": { takesValue: true, validate: (v) => v === "json" || v === "stream-json" },
@@ -129,6 +146,12 @@ function runInvocation(socket: WebSocket, args: string[], stdin: string): void {
   try {
     child = new Deno.Command(claudeBin, {
       args,
+      // Hermetic cwd: the bridge often runs from some repo checkout, and an
+      // agentic CLI grounds itself in whatever directory it lands in — when
+      // that repo differs from the PR under review, reviews derail on a
+      // phantom mismatch. An empty scratch dir removes disk from the picture;
+      // the packet capillary sends is the only ground truth.
+      cwd: scratchCwd(),
       stdin: "piped",
       stdout: "piped",
       stderr: "piped",
