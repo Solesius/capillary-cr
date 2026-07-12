@@ -218,18 +218,33 @@ export class ReviewAgentService {
       );
     }
 
-    // Merge agent findings with the deterministic baseline (dedupe by signature).
-    const merged = this.mergeFindings(input.runId, input.baselineFindings, recordedFindings);
+    // The deterministic torus baseline is a fallback, not a co-author: when the
+    // LLM actually reviewed (reached a verdict, or ran and was cut by budget),
+    // its findings are THE findings — heuristic "instability around X,
+    // curvature=…" narratives must not surface as review findings next to a
+    // real review, least of all on a clean PR where they read as hallucinated
+    // noise. Baseline fills in only when the LLM never effectively ran: no
+    // provider configured, provider unavailable, or planner error.
+    const llmReviewed = Boolean(config) &&
+      stopReason !== "llm_unavailable" && stopReason !== "planner_error";
+    const merged = llmReviewed
+      ? this.mergeFindings(input.runId, [], recordedFindings)
+      : this.mergeFindings(input.runId, input.baselineFindings, recordedFindings);
     const blockerCount = merged.filter((finding) => finding.severity === "blocker").length;
     const highCount = merged.filter((finding) => finding.severity === "high").length;
 
-    if (!config || recordedFindings.length === 0) {
+    if (!llmReviewed) {
       verdict = deriveVerdict(blockerCount, highCount, merged.length);
       if (summary.trim().length === 0) {
         summary = deriveSummary(capture, merged);
       }
     } else {
+      // The model's verdict stands — including a clean approve with zero
+      // findings. Only backfill what it left blank.
       verdict = verdict || deriveVerdict(blockerCount, highCount, merged.length);
+      if (summary.trim().length === 0) {
+        summary = deriveSummary(capture, merged);
+      }
     }
 
     this.repository.saveFindings(input.runId, merged);
