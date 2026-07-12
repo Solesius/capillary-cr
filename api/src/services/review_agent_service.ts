@@ -1336,6 +1336,10 @@ const REVIEW_SYSTEM_PROMPT =
   `- Tests: new logic with no test, a changed branch left uncovered, an assertion that can't fail.\n` +
   `A defect need not be a blocker to be worth recording — use note/low for minor issues, ` +
   `medium/high/blocker for real risk. Be specific, cite the line, back it with evidence.\n\n` +
+  `HERMETIC REVIEW: you have NO repository checkout and NO filesystem. The capture, ` +
+  `diffs and file contents delivered through these tools are the complete and only ` +
+  `ground truth for this PR — never attempt to read, grep or verify files on disk, ` +
+  `and never report a "missing files" mismatch against a local directory.\n\n` +
   `You work by calling tools. Available tools:\n` +
   `- listChangedFiles {} — list changed files in scope.\n` +
   `- readDiff {path} — read the unified diff for a changed file.\n` +

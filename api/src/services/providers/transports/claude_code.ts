@@ -126,9 +126,24 @@ function buildClaudeChildEnv(): { env: Record<string, string>; clearEnv: boolean
   }
 }
 
+// Hermetic working directory for the CLI. The review is grounded ONLY in the
+// packet capillary sends — but an agentic CLI will happily grep whatever repo
+// its cwd happens to be, and when that checkout is a DIFFERENT project than
+// the PR under review, the model either hallucinates a mismatch report or
+// (correctly) refuses to review at all. An empty scratch dir removes the
+// entire class: there is nothing on disk to consult.
+let hermeticCwd: string | null = null;
+function resolveHermeticCwd(): string {
+  if (!hermeticCwd) {
+    hermeticCwd = Deno.makeTempDirSync({ prefix: "capillary_claude_hermetic_" });
+  }
+  return hermeticCwd;
+}
+
 function defaultClaudeCliSpawner(invocation: ClaudeCliInvocation): ClaudeCliProcess {
   const command = new Deno.Command(resolveClaudeBin(), {
     args: invocation.args,
+    cwd: resolveHermeticCwd(),
     stdin: "piped",
     stdout: "piped",
     stderr: "piped",
@@ -268,7 +283,11 @@ function buildClaudePrompt(request: ProviderRequest): ClaudePrompt {
   return { systemPrompt, userText: parts.join("\n\n") };
 }
 
-function buildClaudeArgs(model: string, systemPrompt: string, outputFormat: "json" | "stream-json"): string[] {
+function buildClaudeArgs(
+  model: string,
+  systemPrompt: string,
+  outputFormat: "json" | "stream-json",
+): string[] {
   const args = [
     "-p",
     "--model",
@@ -288,7 +307,10 @@ function buildClaudeArgs(model: string, systemPrompt: string, outputFormat: "jso
 
 function mapClaudeResultError(subtype: string, message: string): ProviderError {
   const haystack = `${subtype} ${message}`.toLowerCase();
-  if (haystack.includes("rate") || haystack.includes("limit") || haystack.includes("credit") || haystack.includes("overage")) {
+  if (
+    haystack.includes("rate") || haystack.includes("limit") || haystack.includes("credit") ||
+    haystack.includes("overage")
+  ) {
     return { kind: "rate_limit", message: message || subtype || "claude_code_rate_limited" };
   }
   if (haystack.includes("auth") || haystack.includes("login") || haystack.includes("unauthor")) {
@@ -370,7 +392,10 @@ async function runClaudeStream(
   try {
     proc = spawner(invocation);
   } catch (error) {
-    return errorResult("network", `claude_code_spawn_failed: ${error instanceof Error ? error.message : String(error)}`);
+    return errorResult(
+      "network",
+      `claude_code_spawn_failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 
   const reader = proc.stdout.getReader();
@@ -380,7 +405,9 @@ async function runClaudeStream(
   let outcome: ClaudeOutcome | null = null;
   let streamFinalized = false;
 
-  const emit = (event: { kind: "chunk" | "completed" | "error"; text?: string; error?: string }) => {
+  const emit = (
+    event: { kind: "chunk" | "completed" | "error"; text?: string; error?: string },
+  ) => {
     if (!onStream || streamFinalized) {
       return;
     }
@@ -433,7 +460,9 @@ async function runClaudeStream(
       }
     }
   } catch (error) {
-    const message = `claude_code_stream_failed: ${error instanceof Error ? error.message : String(error)}`;
+    const message = `claude_code_stream_failed: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
     emit({ kind: "error", error: message });
     return errorResult("network", message);
   } finally {
