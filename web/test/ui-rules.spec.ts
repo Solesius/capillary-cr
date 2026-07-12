@@ -107,3 +107,29 @@ describe("countOpenPullRequests", () => {
     expect(countOpenPullRequests([])).to.equal(0);
   });
 });
+
+import { isStopArmed } from "../src/app/state/rules";
+
+describe("isStopArmed (cooperative cancellation, client side)", () => {
+  it("should_arm_stop_while_the_local_run_is_in_flight", () => {
+    expect(isStopArmed("reviewing", false)).to.equal(true);
+    expect(isStopArmed("graphing", false)).to.equal(true);
+    expect(isStopArmed("queued", false)).to.equal(true);
+  });
+
+  it("should_disarm_stop_for_terminal_run_states_without_a_live_session", () => {
+    expect(isStopArmed("completed", false)).to.equal(false);
+    expect(isStopArmed("cancelled", false)).to.equal(false);
+    expect(isStopArmed("failed", false)).to.equal(false);
+  });
+
+  it("should_arm_stop_from_the_attached_session_after_a_refresh", () => {
+    // Local run object not yet rehydrated (null), but the server session is live.
+    expect(isStopArmed(null, true)).to.equal(true);
+    expect(isStopArmed("completed", true)).to.equal(true);
+  });
+
+  it("should_disarm_stop_with_no_run_and_no_live_session", () => {
+    expect(isStopArmed(null, false)).to.equal(false);
+  });
+});
