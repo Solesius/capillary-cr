@@ -118,9 +118,7 @@ export class MiniLmEmbeddingService implements FileEmbeddingProvider {
 
     const extractor = await this.#loadPipeline();
     // Prefix with the path: filenames are strong semantic signal in code.
-    const texts = files.map((file) =>
-      `${file.path}\n${file.content.slice(0, MAX_CONTENT_CHARS)}`
-    );
+    const texts = files.map((file) => `${file.path}\n${file.content.slice(0, MAX_CONTENT_CHARS)}`);
     // Chunked inference: wasm memory grows to the peak batch size and never
     // shrinks for the process lifetime, so a 100-file PR embedded as one
     // batch permanently balloons the heap. Small sequential batches bound

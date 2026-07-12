@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import {
-  REVIEW_PASSES,
-  ReviewPass,
-  ReviewProgress,
-} from "../domain/review_phase.ts";
+import { REVIEW_PASSES, ReviewPass, ReviewProgress } from "../domain/review_phase.ts";
 
 /**
  * Immutable snapshot of agentic review state fed to the pure planner.
@@ -51,7 +47,9 @@ export function selectNextReviewPass(state: ReviewLoopState): ReviewPass | null 
 export function explainPassSelection(pass: ReviewPass, state: ReviewLoopState): string {
   const risk = state.passRisk[pass] ?? 0;
   if (risk > 0) {
-    return `${pass} carries the highest residual risk weight (${risk.toFixed(2)}) among uncovered passes.`;
+    return `${pass} carries the highest residual risk weight (${
+      risk.toFixed(2)
+    }) among uncovered passes.`;
   }
   return `${pass} selected by canonical TCSRCT order; no residual risk signal remaining.`;
 }

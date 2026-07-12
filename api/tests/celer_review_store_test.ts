@@ -3,7 +3,7 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import { CelerStore } from "../src/services/storage/celer_mem.ts";
 import { DurableReviewStore } from "../src/services/storage/celer_review_store.ts";
-import { InMemoryReviewRepository } from "../src/repositories/review_repository.ts";
+import { CelerReviewRepository } from "../src/repositories/review_repository.ts";
 import { RetvCdpRunRecord, ReviewFinding, ReviewRun } from "../src/domain/entities.ts";
 
 // Exercises the durable review store against the real native library. Self-skips
@@ -87,51 +87,50 @@ Deno.test({
   async fn() {
     const dir = await Deno.makeTempDir({ prefix: "celer_review_test_" });
     try {
-      // First lifecycle: write through the durable store.
-      const repoA = new InMemoryReviewRepository();
+      // First lifecycle: write through the durable store (celer is the source
+      // of truth; every write awaits its persistence).
+      const repoA = new CelerReviewRepository();
       const storeA = await DurableReviewStore.tryOpen({ path: dir });
       assert(storeA !== null, "durable store should open when native is available");
-      await repoA.attachDurableStore(storeA);
+      repoA.attachDurableStore(storeA);
 
-      repoA.createReviewRun(makeRun("run-1"));
-      repoA.appendReviewEvent("run-1", "phase:observe");
-      repoA.appendReviewEvent("run-1", "phase:plan");
-      repoA.updateReviewRun("run-1", (run) => ({ ...run, status: "completed", findingCount: 1, highCount: 1 }));
-      repoA.saveFindings("run-1", [makeFinding("finding-1", "run-1")]);
-      repoA.saveRetvRun(makeRetvRun("retv-traced", true));
-      repoA.saveRetvRun(makeRetvRun("retv-light", false));
-      // Allow the fire-and-forget write-through promises to settle.
-      await storeA.saveRun(repoA.getReviewRun("run-1"));
-      await storeA.saveEvents("run-1", repoA.listReviewEvents("run-1"));
-      await storeA.saveFindings("run-1", repoA.getFindings("run-1"));
-      await storeA.saveRetvRun(makeRetvRun("retv-traced", true));
-      await storeA.saveRetvRun(makeRetvRun("retv-light", false));
+      await repoA.createReviewRun(makeRun("run-1"));
+      await repoA.appendReviewEvent("run-1", "phase:observe");
+      await repoA.appendReviewEvent("run-1", "phase:plan");
+      await repoA.updateReviewRun(
+        "run-1",
+        (run) => ({ ...run, status: "completed", findingCount: 1, highCount: 1 }),
+      );
+      await repoA.saveFindings("run-1", [makeFinding("finding-1", "run-1")]);
+      await repoA.saveRetvRun(makeRetvRun("retv-traced", true));
+      await repoA.saveRetvRun(makeRetvRun("retv-light", false));
       await storeA.close();
 
-      // Second lifecycle: a fresh repository rehydrates from disk.
-      const repoB = new InMemoryReviewRepository();
+      // Second lifecycle: a fresh repository reads back from disk on demand
+      // (no boot-time replay — cache misses fault through to celer).
+      const repoB = new CelerReviewRepository();
       const storeB = await DurableReviewStore.tryOpen({ path: dir });
       assert(storeB !== null);
-      await repoB.attachDurableStore(storeB);
+      repoB.attachDurableStore(storeB);
 
-      const run = repoB.getReviewRun("run-1");
+      const run = await repoB.getReviewRun("run-1");
       assertEquals(run.status, "completed");
       assertEquals(run.findingCount, 1);
-      assertEquals(repoB.listReviewEvents("run-1"), ["phase:observe", "phase:plan"]);
+      assertEquals(await repoB.listReviewEvents("run-1"), ["phase:observe", "phase:plan"]);
 
-      const findings = repoB.getFindings("run-1");
+      const findings = await repoB.getFindings("run-1");
       assertEquals(findings.length, 1);
       assertEquals(findings[0].id, "finding-1");
       assertEquals(findings[0].evidence, ["tcsrtc.gate=Test"]);
 
-      const retvRuns = repoB.listRetvRuns();
+      const retvRuns = await repoB.listRetvRuns();
       assertEquals(retvRuns.length, 2);
-      const traced = repoB.getRetvRun("retv-traced");
+      const traced = await repoB.getRetvRun("retv-traced");
       assert(traced !== null);
       assertEquals(traced.traceEnabled, true);
       assertEquals(traced.trace?.cycles.length, 1);
       assertEquals(traced.report.includes("Functional Test Report"), true);
-      const light = repoB.getRetvRun("retv-light");
+      const light = await repoB.getRetvRun("retv-light");
       assert(light !== null);
       assertEquals(light.traceEnabled, false);
       assertEquals(light.trace, undefined);
@@ -156,10 +155,10 @@ Deno.test({
     assertEquals(store, null);
 
     // The repository still works purely in memory.
-    const repo = new InMemoryReviewRepository();
-    repo.createReviewRun(makeRun("run-x"));
-    repo.appendReviewEvent("run-x", "phase:observe");
-    assertEquals(repo.getReviewRun("run-x").id, "run-x");
-    assertEquals(repo.listReviewEvents("run-x"), ["phase:observe"]);
+    const repo = new CelerReviewRepository();
+    await repo.createReviewRun(makeRun("run-x"));
+    await repo.appendReviewEvent("run-x", "phase:observe");
+    assertEquals((await repo.getReviewRun("run-x")).id, "run-x");
+    assertEquals(await repo.listReviewEvents("run-x"), ["phase:observe"]);
   },
 });

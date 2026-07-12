@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
 import { assert, assertEquals } from "jsr:@std/assert";
-import { InMemoryReviewRepository } from "../src/repositories/review_repository.ts";
+import { CelerReviewRepository } from "../src/repositories/review_repository.ts";
 import { GitHubOakService } from "../src/services/github_service.ts";
 import { TcsrctReviewService } from "../src/services/tcsrct_review_service.ts";
 import { ReviewAgentService } from "../src/services/review_agent_service.ts";
@@ -51,44 +51,44 @@ function makeRecord(
   };
 }
 
-function makeService(repository: InMemoryReviewRepository): ReviewAgentService {
+function makeService(repository: CelerReviewRepository): ReviewAgentService {
   const github = new GitHubOakService(repository);
   const tcsrct = new TcsrctReviewService(repository);
   return new ReviewAgentService(repository, github, tcsrct);
 }
 
-Deno.test("should_list_review_agent_runs_most_recent_first_and_omit_trace", () => {
-  const repo = new InMemoryReviewRepository();
-  repo.saveReviewAgentRun(makeRecord("older", true, "2024-01-01T00:00:00.000Z"));
-  repo.saveReviewAgentRun(makeRecord("newer", false, "2024-02-01T00:00:00.000Z"));
+Deno.test("should_list_review_agent_runs_most_recent_first_and_omit_trace", async () => {
+  const repo = new CelerReviewRepository();
+  await repo.saveReviewAgentRun(makeRecord("older", true, "2024-01-01T00:00:00.000Z"));
+  await repo.saveReviewAgentRun(makeRecord("newer", false, "2024-02-01T00:00:00.000Z"));
 
-  const list = repo.listReviewAgentRuns();
+  const list = await repo.listReviewAgentRuns();
   assertEquals(list.map((item) => item.runId), ["newer", "older"]);
   assertEquals(list[0].traceEnabled, false);
   assertEquals(list[1].traceEnabled, true);
   assert(!("trace" in list[0]));
 
-  const full = repo.getReviewAgentRun("older");
+  const full = await repo.getReviewAgentRun("older");
   assert(full !== null);
   assertEquals(full.trace?.cycles.length, 1);
-  assertEquals(repo.getReviewAgentRun("missing"), null);
+  assertEquals(await repo.getReviewAgentRun("missing"), null);
 });
 
-Deno.test("should_not_export_untraced_or_missing_review_runs", () => {
-  const repo = new InMemoryReviewRepository();
-  repo.saveReviewAgentRun(makeRecord("plain", false, "2024-01-01T00:00:00.000Z"));
+Deno.test("should_not_export_untraced_or_missing_review_runs", async () => {
+  const repo = new CelerReviewRepository();
+  await repo.saveReviewAgentRun(makeRecord("plain", false, "2024-01-01T00:00:00.000Z"));
   const service = makeService(repo);
 
-  assertEquals(service.buildReviewExport("plain"), null);
-  assertEquals(service.buildReviewExport("missing"), null);
+  assertEquals(await service.buildReviewExport("plain"), null);
+  assertEquals(await service.buildReviewExport("missing"), null);
 });
 
-Deno.test("should_export_traced_review_run_as_valid_zip_bundle", () => {
-  const repo = new InMemoryReviewRepository();
-  repo.saveReviewAgentRun(makeRecord("traced", true, "2024-01-01T00:00:00.000Z"));
+Deno.test("should_export_traced_review_run_as_valid_zip_bundle", async () => {
+  const repo = new CelerReviewRepository();
+  await repo.saveReviewAgentRun(makeRecord("traced", true, "2024-01-01T00:00:00.000Z"));
   const service = makeService(repo);
 
-  const bytes = service.buildReviewExport("traced");
+  const bytes = await service.buildReviewExport("traced");
   assert(bytes !== null);
 
   // Local file header signature 'PK\x03\x04' at the start.

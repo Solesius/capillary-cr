@@ -9,17 +9,17 @@ import { ReviewRepository } from "../repositories/review_repository.ts";
 export class ArtifactService {
   constructor(private readonly repository: ReviewRepository) {}
 
-  exportMarkdownReview(runId: string): string {
+  async exportMarkdownReview(runId: string): Promise<string> {
     enforceDefensiveInput(runId, "run_id");
-    const run = this.repository.getReviewRun(runId);
+    const run = await this.repository.getReviewRun(runId);
     if (run.status !== "completed") {
       throw new AppError("review_not_complete", 409, "review_not_complete");
     }
 
-    const findings = this.repository.getFindings(runId);
-    const checklist = this.repository.getChecklist(runId);
-    const events = this.repository.listReviewEvents(runId);
-    const graph = this.repository.findGraphByPullRequest(run.pullRequestId);
+    const findings = await this.repository.getFindings(runId);
+    const checklist = await this.repository.getChecklist(runId);
+    const events = await this.repository.listReviewEvents(runId);
+    const graph = await this.repository.findGraphByPullRequest(run.pullRequestId);
 
     const findingsByGate = groupFindingsByGate(findings);
     const findingLines = findings.length === 0
@@ -32,7 +32,9 @@ export class ArtifactService {
         const lines = [`### ${gate} Gate`, `- Findings: ${gateFindings.length}`];
         for (const finding of gateFindings) {
           lines.push(
-            `- [${finding.severity}] ${finding.title} (${finding.filePath}:${finding.line ?? "n/a"}) [gate=${gate}; confidence=${finding.confidence.toFixed(2)}]`,
+            `- [${finding.severity}] ${finding.title} (${finding.filePath}:${
+              finding.line ?? "n/a"
+            }) [gate=${gate}; confidence=${finding.confidence.toFixed(2)}]`,
           );
         }
         lines.push("");
@@ -48,14 +50,12 @@ export class ArtifactService {
         return lines;
       });
 
-    const graphHealthLines = !graph
-      ? ["- Graph unavailable"]
-      : [
-        `- Flow completeness: ${graph.dag.flowCompleteness.toFixed(3)}`,
-        `- Torus variance: ${graph.dag.torusVariance.toFixed(3)}`,
-        `- Saturation: ${graph.dag.saturation.toFixed(3)}`,
-        ...graph.dag.completenessNotes.map((note) => `- ${note}`),
-      ];
+    const graphHealthLines = !graph ? ["- Graph unavailable"] : [
+      `- Flow completeness: ${graph.dag.flowCompleteness.toFixed(3)}`,
+      `- Torus variance: ${graph.dag.torusVariance.toFixed(3)}`,
+      `- Saturation: ${graph.dag.saturation.toFixed(3)}`,
+      ...graph.dag.completenessNotes.map((note) => `- ${note}`),
+    ];
 
     const llmStageLines = buildLlmStageLines(events, findings);
 
@@ -79,10 +79,10 @@ export class ArtifactService {
     ].join("\n");
   }
 
-  exportGraphJson(runId: string): string {
+  async exportGraphJson(runId: string): Promise<string> {
     enforceDefensiveInput(runId, "run_id");
-    const run = this.repository.getReviewRun(runId);
-    const graph = this.repository.findGraphByPullRequest(run.pullRequestId);
+    const run = await this.repository.getReviewRun(runId);
+    const graph = await this.repository.findGraphByPullRequest(run.pullRequestId);
     if (!graph) {
       throw new AppError("diff_dag_not_found", 404, "diff_dag_not_found");
     }
@@ -132,9 +132,9 @@ function buildLlmStageLines(events: string[], findings: ReviewFinding[]): string
     passCount = passMatch?.[1] || "0";
   }
 
-  const providerEvidenceCount = findings.filter((finding) =>
-    finding.evidence.some((line) => line.startsWith("provider.kind="))
-  ).length;
+  const providerEvidenceCount =
+    findings.filter((finding) => finding.evidence.some((line) => line.startsWith("provider.kind=")))
+      .length;
 
   return [
     `- Invoked: ${requestDispatched ? "yes" : "no"}`,

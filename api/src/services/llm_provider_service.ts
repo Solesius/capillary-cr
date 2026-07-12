@@ -89,13 +89,13 @@ export class LlmProviderService {
   }
 
   async reviewPacketWithModel(packetId: string): Promise<ReviewFinding[]> {
-    const packet = this.repository.getReviewPacket(packetId);
+    const packet = await this.repository.getReviewPacket(packetId);
 
     if (packet.summary.toLowerCase().includes("secret")) {
       throw new AppError("secret_redaction_required", 400, "secret_redaction_required");
     }
 
-    const graph = this.repository.getGraphSnapshot(packet.diffDagId);
+    const graph = await this.repository.getGraphSnapshot(packet.diffDagId);
     const prompt = buildRetvTcsrctSystemPrompt({
       runId: `llm_${packet.id}`,
       pullRequestId: packet.pullRequestId,
@@ -112,7 +112,7 @@ export class LlmProviderService {
     });
 
     const loop = runRetvLoop(packet);
-    const provider = this.resolveRuntimeProvider();
+    const provider = await this.resolveRuntimeProvider();
 
     const providerResponse = await chat(provider, {
       systemPrompt: prompt,
@@ -128,7 +128,7 @@ export class LlmProviderService {
             "Review this pull request using graph-first TCSRCT analysis.",
             "Return ONLY valid JSON.",
             "Schema:",
-            "{\"findings\":[{\"severity\":\"blocker|high|medium|low|note\",\"gate\":\"Target|Constrain|Sanitize|Review|Test|Confirm\",\"filePath\":\"path/to/file\",\"line\":123,\"title\":\"short title\",\"finding\":\"detailed finding\",\"evidence\":[\"e1\",\"e2\"],\"confidence\":0.0}]}",
+            '{"findings":[{"severity":"blocker|high|medium|low|note","gate":"Target|Constrain|Sanitize|Review|Test|Confirm","filePath":"path/to/file","line":123,"title":"short title","finding":"detailed finding","evidence":["e1","e2"],"confidence":0.0}]}',
             "If confidence is uncertain, return lower confidence values.",
             "Packet JSON:",
             JSON.stringify(buildModelReviewInput(packet, graph)),
@@ -216,11 +216,18 @@ export class LlmProviderService {
     });
   }
 
-  summarizeGraphRisk(packetId: string): string {
-    const packet = this.repository.getReviewPacket(packetId);
-    const maxRisk = packet.riskSurfaces.reduce((best, current) => Math.max(best, current.riskScore), 0);
-    const graph = this.repository.getGraphSnapshot(packet.diffDagId);
-    return `Top graph risk score: ${maxRisk.toFixed(2)} across ${packet.riskSurfaces.length} surfaces (flow completeness ${graph.dag.flowCompleteness.toFixed(2)}, torus variance ${graph.dag.torusVariance.toFixed(2)})`;
+  async summarizeGraphRisk(packetId: string): Promise<string> {
+    const packet = await this.repository.getReviewPacket(packetId);
+    const maxRisk = packet.riskSurfaces.reduce(
+      (best, current) => Math.max(best, current.riskScore),
+      0,
+    );
+    const graph = await this.repository.getGraphSnapshot(packet.diffDagId);
+    return `Top graph risk score: ${
+      maxRisk.toFixed(2)
+    } across ${packet.riskSurfaces.length} surfaces (flow completeness ${
+      graph.dag.flowCompleteness.toFixed(2)
+    }, torus variance ${graph.dag.torusVariance.toFixed(2)})`;
   }
 
   private resolveProviderKindFromEnv(): ProviderKind {
@@ -228,13 +235,14 @@ export class LlmProviderService {
     return normalizeProviderKind(raw) || "github_copilot";
   }
 
-  private resolveRuntimeProvider() {
-    const runtime = this.repository.getRuntimeLlmConfig();
+  private async resolveRuntimeProvider() {
+    const runtime = await this.repository.getRuntimeLlmConfig();
 
     // Only fall back to the connected GitHub token for providers it actually
     // authenticates (Copilot / Codex-via-Copilot); never leak it elsewhere.
+    const githubToken = (await this.repository.getGithubToken()) || "";
     const githubFallback = (kind: string): string =>
-      providerUsesGithubToken(kind) ? (this.repository.getGithubToken() || "") : "";
+      providerUsesGithubToken(kind) ? githubToken : "";
 
     if (!runtime) {
       return {
@@ -291,7 +299,9 @@ function buildModelReviewInput(packet: {
   summary: string;
   changedFiles: Array<{ path: string; status: string; additions: number; deletions: number }>;
   neighborFiles: Array<{ path: string }>;
-  riskSurfaces: Array<{ id: string; surfaceKind: string; entryNodeId: string; riskScore: number; reason: string }>;
+  riskSurfaces: Array<
+    { id: string; surfaceKind: string; entryNodeId: string; riskScore: number; reason: string }
+  >;
   tcsrctPasses: Array<{ name: string }>;
 }, graph: {
   dag: {
@@ -402,7 +412,9 @@ function tryParseJson(value: string): unknown {
 
 function normalizeSeverity(value: unknown): ReviewFinding["severity"] {
   const text = asString(value).toLowerCase();
-  if (text === "blocker" || text === "high" || text === "medium" || text === "low" || text === "note") {
+  if (
+    text === "blocker" || text === "high" || text === "medium" || text === "low" || text === "note"
+  ) {
     return text;
   }
   return "medium";

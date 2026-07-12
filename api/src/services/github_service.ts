@@ -189,7 +189,9 @@ export class GitHubOakService {
       const intervalSeconds = Math.max(2, Number(deviceStart.interval || 5));
       const expiresAtMs = now + expiresInSeconds * 1000;
 
-      const verificationUri = String(deviceStart.verification_uri || "https://github.com/login/device");
+      const verificationUri = String(
+        deviceStart.verification_uri || "https://github.com/login/device",
+      );
       const userCode = String(deviceStart.user_code || "");
 
       // Only a server-provided verification_uri_complete may carry the code
@@ -199,7 +201,11 @@ export class GitHubOakService {
       const authorizeUrl = String(deviceStart.verification_uri_complete || verificationUri);
 
       if (!String(deviceStart.device_code || "").trim() || !userCode.trim()) {
-        throw new AppError("github_oauth_device_start_failed", 502, "github_oauth_device_start_failed");
+        throw new AppError(
+          "github_oauth_device_start_failed",
+          502,
+          "github_oauth_device_start_failed",
+        );
       }
 
       this.#pendingDeviceSessions.set(sessionId, {
@@ -228,7 +234,8 @@ export class GitHubOakService {
       createdAtMs: now,
     });
 
-    const scopes = Deno.env.get("GITHUB_OAUTH_SCOPES")?.trim() || "repo workflow read:org read:user";
+    const scopes = Deno.env.get("GITHUB_OAUTH_SCOPES")?.trim() ||
+      "repo workflow read:org read:user";
     const authorizeUrl = new URL("https://github.com/login/oauth/authorize");
     authorizeUrl.searchParams.set("client_id", oauthClientId);
     authorizeUrl.searchParams.set("redirect_uri", redirectUri);
@@ -265,7 +272,10 @@ export class GitHubOakService {
     if (exchanged.status === "pending") {
       return {
         status: "pending",
-        retryAfterSeconds: Math.max(pending.intervalSeconds, exchanged.retryAfterSeconds || pending.intervalSeconds),
+        retryAfterSeconds: Math.max(
+          pending.intervalSeconds,
+          exchanged.retryAfterSeconds || pending.intervalSeconds,
+        ),
       };
     }
     if (exchanged.status === "failed") {
@@ -296,7 +306,10 @@ export class GitHubOakService {
     return pending.webOrigin;
   }
 
-  async completeGithubOAuth(code: string, state: string): Promise<{ identity: GitHubIdentity; webOrigin: string }> {
+  async completeGithubOAuth(
+    code: string,
+    state: string,
+  ): Promise<{ identity: GitHubIdentity; webOrigin: string }> {
     enforceDefensiveInput(code, "github_oauth_code");
     enforceDefensiveInput(state, "github_oauth_state");
 
@@ -342,8 +355,8 @@ export class GitHubOakService {
         connected: true,
       };
 
-      this.repository.setGithubToken(resolvedToken);
-      this.repository.setIdentity(identity);
+      await this.repository.setGithubToken(resolvedToken);
+      await this.repository.setIdentity(identity);
       return identity;
     } catch {
       throw new AppError("github_auth_failed", 401, "github_auth_failed");
@@ -351,8 +364,8 @@ export class GitHubOakService {
   }
 
   async listRepositories(): Promise<GitHubRepository[]> {
-    this.requireAuthenticatedIdentity();
-    const token = this.requireGithubToken();
+    await this.requireAuthenticatedIdentity();
+    const token = await this.requireGithubToken();
 
     const repositories = await this.fetchAllUserRepositories(token);
 
@@ -368,16 +381,19 @@ export class GitHubOakService {
       openPullRequestCount: repo.open_issues_count || 0,
     }));
 
-    this.repository.replaceRepositories(mapped);
+    await this.repository.replaceRepositories(mapped);
     return mapped;
   }
 
-  async listPullRequests(repositoryId: string, stateFilter: PullRequestStateFilter = "open"): Promise<PullRequest[]> {
-    this.requireAuthenticatedIdentity();
+  async listPullRequests(
+    repositoryId: string,
+    stateFilter: PullRequestStateFilter = "open",
+  ): Promise<PullRequest[]> {
+    await this.requireAuthenticatedIdentity();
     this.validateRepositoryId(repositoryId);
     this.validateStateFilter(stateFilter);
 
-    const token = this.requireGithubToken();
+    const token = await this.requireGithubToken();
 
     const repo = await this.findRepositoryById(repositoryId, token);
     const pulls = await this.githubGet<GitHubPullRequestListDto[]>(
@@ -403,7 +419,11 @@ export class GitHubOakService {
       sourceBranch: pull.head.ref,
       headSha: pull.head.sha,
       targetBranch: pull.base.ref,
-      state: pull.merged_at ? "merged" : pull.draft ? "draft" : (pull.state as PullRequest["state"]),
+      state: pull.merged_at
+        ? "merged"
+        : pull.draft
+        ? "draft"
+        : (pull.state as PullRequest["state"]),
       htmlUrl: pull.html_url,
       createdAt: pull.created_at,
       updatedAt: pull.updated_at,
@@ -413,16 +433,16 @@ export class GitHubOakService {
       riskHint: this.deriveRiskHint(pull.additions, pull.deletions, pull.changed_files),
     }));
 
-    this.repository.replacePullRequests(repositoryId, mapped);
+    await this.repository.replacePullRequests(repositoryId, mapped);
     return mapped;
   }
 
   async getPullRequest(repositoryId: string, pullRequestId: string): Promise<PullRequest> {
-    this.requireAuthenticatedIdentity();
+    await this.requireAuthenticatedIdentity();
     this.validateRepositoryId(repositoryId);
     this.validatePullRequestId(pullRequestId);
 
-    const token = this.requireGithubToken();
+    const token = await this.requireGithubToken();
 
     const repo = await this.findRepositoryById(repositoryId, token);
     const pullNumber = Number(pullRequestId);
@@ -454,16 +474,16 @@ export class GitHubOakService {
       riskHint: this.deriveRiskHint(pull.additions, pull.deletions, pull.changed_files),
     };
 
-    this.repository.upsertPullRequest(mapped);
+    await this.repository.upsertPullRequest(mapped);
     return mapped;
   }
 
   async getPullRequestDiff(repositoryId: string, pullRequestId: string): Promise<DiffFile[]> {
-    this.requireAuthenticatedIdentity();
+    await this.requireAuthenticatedIdentity();
     this.validateRepositoryId(repositoryId);
     this.validatePullRequestId(pullRequestId);
 
-    const token = this.requireGithubToken();
+    const token = await this.requireGithubToken();
 
     const repo = await this.findRepositoryById(repositoryId, token);
     const pullNumber = Number(pullRequestId);
@@ -484,25 +504,23 @@ export class GitHubOakService {
     }
 
     const mapped = files.map((file) => {
-      const status: DiffFile["status"] = file.status === "removed"
-        ? "deleted"
-        : file.status;
+      const status: DiffFile["status"] = file.status === "removed" ? "deleted" : file.status;
 
       return {
-      path: file.filename,
-      previousPath: file.previous_filename,
-      status,
-      additions: file.additions,
-      deletions: file.deletions,
-      patch: file.patch,
-      language: file.filename.split(".").at(-1),
-      isTest: /(^|\/)(test|tests|__tests__)\//i.test(file.filename),
-      isConfig: /(^|\/)(\.github|config|configs)\//i.test(file.filename),
-      isGenerated: /(^|\/)dist\//i.test(file.filename) || file.filename.endsWith(".min.js"),
+        path: file.filename,
+        previousPath: file.previous_filename,
+        status,
+        additions: file.additions,
+        deletions: file.deletions,
+        patch: file.patch,
+        language: file.filename.split(".").at(-1),
+        isTest: /(^|\/)(test|tests|__tests__)\//i.test(file.filename),
+        isConfig: /(^|\/)(\.github|config|configs)\//i.test(file.filename),
+        isGenerated: /(^|\/)dist\//i.test(file.filename) || file.filename.endsWith(".min.js"),
       };
     });
 
-    this.repository.savePullRequestDiff(repositoryId, pullRequestId, mapped);
+    await this.repository.savePullRequestDiff(repositoryId, pullRequestId, mapped);
     return mapped;
   }
 
@@ -519,7 +537,7 @@ export class GitHubOakService {
     ref: string,
     path: string,
   ): Promise<string | null> {
-    const token = this.repository.getGithubToken();
+    const token = await this.repository.getGithubToken();
     if (!token) {
       return null;
     }
@@ -566,7 +584,7 @@ export class GitHubOakService {
     this.validateRepositoryId(repositoryId);
     this.validatePullRequestId(pullRequestId);
     enforceTextBody(body, "comment_body");
-    const token = this.requireGithubToken();
+    const token = await this.requireGithubToken();
 
     const pull = await this.getPullRequest(repositoryId, pullRequestId);
     const repo = await this.findRepositoryById(repositoryId, token);
@@ -586,7 +604,11 @@ export class GitHubOakService {
     );
 
     if (!response.ok) {
-      throw new AppError("github_comment_failed", response.status, await describeGithubError(response, "github_comment_failed"));
+      throw new AppError(
+        "github_comment_failed",
+        response.status,
+        await describeGithubError(response, "github_comment_failed"),
+      );
     }
 
     const dto = await response.json() as { html_url?: string };
@@ -607,7 +629,7 @@ export class GitHubOakService {
     this.validatePullRequestId(pullRequestId);
     enforceDefensiveInput(input.path, "comment_path");
     enforceTextBody(input.body, "comment_body");
-    const token = this.requireGithubToken();
+    const token = await this.requireGithubToken();
 
     const pull = await this.getPullRequest(repositoryId, pullRequestId);
     const repo = await this.findRepositoryById(repositoryId, token);
@@ -636,7 +658,11 @@ export class GitHubOakService {
     );
 
     if (!response.ok) {
-      throw new AppError("github_inline_comment_failed", response.status, await describeGithubError(response, "github_inline_comment_failed"));
+      throw new AppError(
+        "github_inline_comment_failed",
+        response.status,
+        await describeGithubError(response, "github_inline_comment_failed"),
+      );
     }
 
     const dto = await response.json() as { html_url?: string };
@@ -662,7 +688,7 @@ export class GitHubOakService {
     this.validateRepositoryId(repositoryId);
     this.validatePullRequestId(pullRequestId);
     enforceDefensiveInput(input.path, "suggestion_path");
-    const token = this.requireGithubToken();
+    const token = await this.requireGithubToken();
 
     const pull = await this.getPullRequest(repositoryId, pullRequestId);
     const repo = await this.findRepositoryById(repositoryId, token);
@@ -672,7 +698,8 @@ export class GitHubOakService {
 
     const startLine = Math.max(1, Math.floor(input.startLine));
     const endLine = Math.max(startLine, Math.floor(input.endLine));
-    const body = `${input.note.trim()}\n\n\`\`\`suggestion\n${input.code.replace(/\n$/, "")}\n\`\`\`` +
+    const body =
+      `${input.note.trim()}\n\n\`\`\`suggestion\n${input.code.replace(/\n$/, "")}\n\`\`\`` +
       `\n\n<sub>Suggested by [Capillary](https://github.com/Solesius/capillary-cr)</sub>`;
 
     // Multi-line suggestions carry start_line; single-line ones omit it.
@@ -703,14 +730,21 @@ export class GitHubOakService {
     );
 
     if (!response.ok) {
-      throw new AppError("github_suggestion_failed", response.status, await describeGithubError(response, "github_suggestion_failed"));
+      throw new AppError(
+        "github_suggestion_failed",
+        response.status,
+        await describeGithubError(response, "github_suggestion_failed"),
+      );
     }
 
     const dto = await response.json() as { html_url?: string };
     return { htmlUrl: String(dto.html_url || pull.htmlUrl) };
   }
 
-  private async findRepositoryById(repositoryId: string, token: string): Promise<GitHubRepositoryDto> {
+  private async findRepositoryById(
+    repositoryId: string,
+    token: string,
+  ): Promise<GitHubRepositoryDto> {
     const repositories = await this.fetchAllUserRepositories(token);
 
     const repo = repositories.find((item) => String(item.id) === repositoryId);
@@ -801,7 +835,8 @@ export class GitHubOakService {
 
     const payload = await response.json().catch(() => null) as GitHubDeviceCodeDto | null;
     if (!response.ok || !payload) {
-      const description = payload?.error_description || payload?.error || "github_oauth_device_start_failed";
+      const description = payload?.error_description || payload?.error ||
+        "github_oauth_device_start_failed";
       throw new AppError("github_oauth_device_start_failed", 502, description);
     }
 
@@ -922,7 +957,8 @@ export class GitHubOakService {
   }
 
   private normalizeWebOrigin(webOrigin?: string): string {
-    const candidate = webOrigin?.trim() || Deno.env.get("CORS_ORIGIN")?.trim() || "http://localhost:4200";
+    const candidate = webOrigin?.trim() || Deno.env.get("CORS_ORIGIN")?.trim() ||
+      "http://localhost:4200";
     let parsed: URL;
     try {
       parsed = new URL(candidate);
@@ -970,15 +1006,15 @@ export class GitHubOakService {
     return "unknown";
   }
 
-  private requireAuthenticatedIdentity(): void {
-    const identity = this.repository.getIdentity();
+  private async requireAuthenticatedIdentity(): Promise<void> {
+    const identity = await this.repository.getIdentity();
     if (!identity || !identity.connected) {
       throw unauthorized("unauthorized");
     }
   }
 
-  private requireGithubToken(): string {
-    const token = this.repository.getGithubToken();
+  private async requireGithubToken(): Promise<string> {
+    const token = await this.repository.getGithubToken();
     if (!token) {
       throw unauthorized("github_token_required");
     }

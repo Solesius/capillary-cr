@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   git \
   pkg-config \
   libsqlite3-dev \
+  librocksdb-dev \
   ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /build/api
@@ -34,6 +35,7 @@ FROM denoland/deno:latest AS runtime
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
   libsqlite3-0 \
+  librocksdb-dev \
   ca-certificates \
   fonts-liberation \
   libnss3 \
