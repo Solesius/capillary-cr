@@ -151,6 +151,8 @@ const STATUS_GLYPH: Record<PullRequestDiffFile["status"], string> = {
     .cap-fx-row {
       display: flex;
       align-items: center;
+      flex-wrap: nowrap;
+      white-space: nowrap;
       gap: 8px;
       width: 100%;
       padding: 5px 14px;
@@ -159,7 +161,7 @@ const STATUS_GLYPH: Record<PullRequestDiffFile["status"], string> = {
       border-left: 2px solid transparent;
       color: inherit;
       font: inherit;
-      font-size: 0.8rem;
+      font-size: 0.78rem;
       text-align: left;
       cursor: pointer;
     }
@@ -200,7 +202,15 @@ const STATUS_GLYPH: Record<PullRequestDiffFile["status"], string> = {
       font-size: 0.64rem;
       color: var(--cap-muted, #7f8db0);
     }
-    .cap-fx-view { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .cap-fx-view {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+      background: #0d1526;
+    }
     .cap-fx-state { margin: auto; padding: 24px; color: var(--cap-muted, #7f8db0); font-size: 0.85rem; }
     .cap-fx-state--error { color: #fa4d56; }
     .cap-fx-empty { padding: 14px; color: var(--cap-muted, #7f8db0); font-size: 0.8rem; }
