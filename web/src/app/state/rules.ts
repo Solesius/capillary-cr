@@ -60,3 +60,13 @@ export function computeReviewStages(phase: ReviewPhase): readonly ReviewStageSta
   });
 }
 
+
+/**
+ * Count pull requests that are genuinely open from the loaded list. Drafts
+ * count as open; closed and merged do not. Defensive on the wire contract: a
+ * PR whose `state` is missing (an API/cache that predates the field) counts as
+ * open rather than silently zeroing the dashboard stat.
+ */
+export function countOpenPullRequests(prs: readonly { state?: string }[]): number {
+  return prs.filter((pr) => pr.state !== "closed" && pr.state !== "merged").length;
+}

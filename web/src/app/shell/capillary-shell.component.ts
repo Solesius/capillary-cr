@@ -151,7 +151,7 @@ import { MarkdownPipe } from "./markdown.pipe";
           </article>
           <article class="cap-stat">
             <p class="cap-stat-label">Open PRs</p>
-            <p class="cap-stat-value">{{ store.pullRequests().length }}</p>
+            <p class="cap-stat-value">{{ store.openPullRequestCount() }}</p>
           </article>
           <article class="cap-stat">
             <p class="cap-stat-label">Findings</p>
