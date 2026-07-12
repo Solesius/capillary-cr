@@ -652,7 +652,7 @@ export class GitHubOakService {
           path: input.path,
           side: "RIGHT",
           line: Math.max(1, Math.floor(input.line)),
-          body: `${input.body}\n\n<sub>Flagged by Capillary</sub>`,
+          body: `${input.body}\n\n<sub>Flagged by [Capillary](https://github.com/Solesius/capillary-cr)</sub>`,
         }),
       },
     );
