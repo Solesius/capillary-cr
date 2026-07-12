@@ -1851,9 +1851,21 @@ export class CapillaryStore {
   readonly explorerActivePath = signal<string | null>(null);
   /** Line to reveal when the active file renders; consumed by the viewer. */
   readonly explorerRevealLine = signal<number | null>(null);
-  readonly explorerContent = signal<string | null>(null);
+  /**
+   * The loaded file as an atomic {path, content} pair. Kept whole so the Monaco
+   * viewer never sees a path/content mismatch mid-switch — and never unmounts:
+   * the previous file stays on screen under the loader overlay until the next
+   * one arrives, instead of tearing the editor down per click (the jitter).
+   */
+  readonly explorerFile = signal<{ path: string; content: string } | null>(null);
+  /** Base-side (target branch) body for the diff view's original pane. */
+  readonly explorerBaseContent = signal<string | null>(null);
+  /** Diff view toggle: side-by-side base vs head instead of plain read. */
+  readonly explorerDiffMode = signal(false);
   readonly explorerLoading = signal(false);
   readonly explorerError = signal<string | null>(null);
+  /** The repo:pr the current tree map belongs to — re-keyed on PR switch. */
+  #explorerFilesKey: string | null = null;
   /** Findings anchored to the file currently open in the explorer. */
   readonly explorerFindings = computed(() => {
     const path = this.explorerActivePath();
@@ -1861,30 +1873,57 @@ export class CapillaryStore {
     return this.findings().filter((finding) => finding.filePath === path);
   });
   /**
-   * Session cache of fetched file bodies, keyed repo:pr:path. The explorer
+   * Session cache of fetched file bodies, keyed repo:pr:side:path. The explorer
    * loads the tree map from the cached diff and fetches file bodies one at a
    * time on click — re-opens are served from here, so browsing never fans out
    * into a GitHub rate-limit burst.
    */
   readonly #fileContentCache = new Map<string, string>();
 
-  /** Open the fly-out and lazily load the tree map (diff paths, no bodies). */
+  /** Open the fly-out; (re)load the tree map when the selected PR changed. */
   async openExplorer(): Promise<void> {
     this.explorerOpen.set(true);
-    const repositoryId = this.selectedRepositoryId();
-    const pullRequestId = this.selectedPullRequestId();
-    if (!repositoryId || !pullRequestId || this.explorerFiles().length > 0) {
+    const ids = this.#explorerIds();
+    if (!ids) {
       return;
     }
+    const key = `${ids.repositoryId}:${ids.pullRequestId}`;
+    if (this.#explorerFilesKey === key && this.explorerFiles().length > 0) {
+      return;
+    }
+    // Different PR than the tree on screen: the previous map, open file and
+    // bodies belong to another diff — reset before loading the new map.
+    this.#resetExplorerView();
+    this.#explorerFilesKey = key;
     try {
-      this.explorerFiles.set(await this.api.getPullRequestDiffFiles(repositoryId, pullRequestId));
+      this.explorerFiles.set(
+        await this.api.getPullRequestDiffFiles(ids.repositoryId, ids.pullRequestId),
+      );
     } catch (error) {
       this.explorerError.set(`Failed to load file map: ${toMessage(error)}`);
     }
   }
 
+  #resetExplorerView(): void {
+    this.explorerFiles.set([]);
+    this.explorerActivePath.set(null);
+    this.explorerRevealLine.set(null);
+    this.explorerFile.set(null);
+    this.explorerBaseContent.set(null);
+    this.explorerError.set(null);
+  }
+
   closeExplorer(): void {
     this.explorerOpen.set(false);
+  }
+
+  /** Toggle diff view; lazily fetch the base side for the open file. */
+  async toggleExplorerDiff(on: boolean): Promise<void> {
+    this.explorerDiffMode.set(on);
+    const path = this.explorerActivePath();
+    if (on && path && this.explorerBaseContent() === null) {
+      await this.#loadBaseSide(path);
+    }
   }
 
   /** Deep-link from a finding (or a tree click) to a file at a line. */
@@ -1893,30 +1932,85 @@ export class CapillaryStore {
     this.explorerActivePath.set(path);
     this.explorerRevealLine.set(line);
     this.explorerError.set(null);
+    this.explorerBaseContent.set(null);
 
-    const repositoryId = this.selectedRepositoryId();
-    const pullRequestId = this.selectedPullRequestId();
-    if (!repositoryId || !pullRequestId) {
+    const ids = this.#explorerIds();
+    if (!ids) {
       this.explorerError.set("Select a repository and pull request first.");
       return;
     }
-    const cacheKey = `${repositoryId}:${pullRequestId}:${path}`;
-    const cached = this.#fileContentCache.get(cacheKey);
-    if (cached !== undefined) {
-      this.explorerContent.set(cached);
+    // Deliberately do NOT clear explorerFile here: the previous file stays
+    // rendered under the loader overlay, so the editor never unmounts.
+    this.explorerLoading.set(true);
+    try {
+      const content = await this.#fetchFileSide(ids, path, "head");
+      // Stale-response guard: the user may have clicked another file while
+      // this one was in flight — only the latest selection may render.
+      if (this.explorerActivePath() !== path) {
+        return;
+      }
+      this.explorerFile.set({ path, content });
+      if (this.explorerDiffMode()) {
+        await this.#loadBaseSide(path);
+      }
+    } catch (error) {
+      if (this.explorerActivePath() === path) {
+        this.explorerError.set(`Unable to load ${path}: ${toMessage(error)}`);
+      }
+    } finally {
+      if (this.explorerActivePath() === path) {
+        this.explorerLoading.set(false);
+      }
+    }
+  }
+
+  #explorerIds(): { repositoryId: string; pullRequestId: string } | null {
+    const repositoryId = this.selectedRepositoryId();
+    const pullRequestId = this.selectedPullRequestId();
+    return repositoryId && pullRequestId ? { repositoryId, pullRequestId } : null;
+  }
+
+  async #loadBaseSide(path: string): Promise<void> {
+    const ids = this.#explorerIds();
+    if (!ids) return;
+    // A file added by the PR has no base side — an empty original pane is the
+    // correct diff, not an error.
+    const status = this.explorerFiles().find((file) => file.path === path)?.status;
+    if (status === "added") {
+      this.explorerBaseContent.set("");
       return;
     }
-    this.explorerLoading.set(true);
-    this.explorerContent.set(null);
     try {
-      const file = await this.api.getPullRequestFileContent(repositoryId, pullRequestId, path);
-      this.#fileContentCache.set(cacheKey, file.content);
-      this.explorerContent.set(file.content);
-    } catch (error) {
-      this.explorerError.set(`Unable to load ${path}: ${toMessage(error)}`);
-    } finally {
-      this.explorerLoading.set(false);
+      const base = await this.#fetchFileSide(ids, path, "base");
+      // Stale-response guard: only the still-active file's base side may land.
+      if (this.explorerActivePath() === path) {
+        this.explorerBaseContent.set(base);
+      }
+    } catch {
+      if (this.explorerActivePath() === path) {
+        this.explorerBaseContent.set("");
+      }
     }
+  }
+
+  async #fetchFileSide(
+    ids: { repositoryId: string; pullRequestId: string },
+    path: string,
+    side: "head" | "base",
+  ): Promise<string> {
+    const cacheKey = `${ids.repositoryId}:${ids.pullRequestId}:${side}:${path}`;
+    const cached = this.#fileContentCache.get(cacheKey);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const file = await this.api.getPullRequestFileContent(
+      ids.repositoryId,
+      ids.pullRequestId,
+      path,
+      side,
+    );
+    this.#fileContentCache.set(cacheKey, file.content);
+    return file.content;
   }
 
   downloadSelectedReviewReport(): void {

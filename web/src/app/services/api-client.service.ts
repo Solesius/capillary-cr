@@ -77,16 +77,20 @@ export class ApiClientService {
     return this.get(`/api/github/repositories/${repositoryId}/pull-requests/${pullRequestId}/diff`);
   }
 
-  /** One file body at the PR head, fetched on click — never in bulk (429 armor). */
+  /**
+   * One file body fetched on click — never in bulk (429 armor). side=head is
+   * the PR head; side=base is the target branch (diff view's original pane).
+   */
   async getPullRequestFileContent(
     repositoryId: string,
     pullRequestId: string,
     path: string,
+    side: "head" | "base" = "head",
   ): Promise<PullRequestFileContent> {
     return this.get(
       `/api/github/repositories/${repositoryId}/pull-requests/${pullRequestId}/file?path=${
         encodeURIComponent(path)
-      }`,
+      }&side=${side}`,
     );
   }
 

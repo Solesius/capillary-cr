@@ -3,19 +3,21 @@
 //
 // Read-only Monaco file viewer for the explorer fly-out. Monaco is loaded
 // lazily (dynamic import → its own chunk) the first time a file is opened, so
-// the main bundle stays lean. Findings anchored to the open file render as
-// bespoke Carbon-style cards injected as Monaco view zones directly under
+// the main bundle stays lean. Two modes: plain read, and a side-by-side diff
+// of base (target branch) vs head. Findings anchored to the open file render
+// as bespoke Carbon-style cards injected as Monaco view zones directly under
 // their line — sharp corners, severity accent bar, mono labels; deliberately
-// not a GitHub-comment lookalike.
+// not a GitHub-comment lookalike. Theme tracks the app's html[data-theme]
+// attribute live, with first-class palettes for both light and dark.
 
 import {
   ChangeDetectionStrategy,
   Component,
   effect,
   ElementRef,
-  inject,
   input,
   OnDestroy,
+  signal,
   viewChild,
 } from "@angular/core";
 import { CommonModule } from "@angular/common";
@@ -54,12 +56,38 @@ function loadMonaco(): Promise<MonacoModule> {
           "editorLineNumber.foreground": "#3d4d6e",
           "editorLineNumber.activeForeground": "#8b9cc0",
           "editorGutter.background": "#0d1526",
+          "diffEditor.insertedTextBackground": "#42be6522",
+          "diffEditor.removedTextBackground": "#fa4d5622",
+          "diffEditor.insertedLineBackground": "#42be6514",
+          "diffEditor.removedLineBackground": "#fa4d5614",
+        },
+      });
+      monaco.editor.defineTheme("capillary-light", {
+        base: "vs",
+        inherit: true,
+        rules: [],
+        colors: {
+          "editor.background": "#fcfdff",
+          "editor.lineHighlightBackground": "#eef2f9",
+          "editorLineNumber.foreground": "#9aa7bd",
+          "editorLineNumber.activeForeground": "#334155",
+          "editorGutter.background": "#fcfdff",
+          "diffEditor.insertedTextBackground": "#0f766e1f",
+          "diffEditor.removedTextBackground": "#dc26261a",
+          "diffEditor.insertedLineBackground": "#0f766e10",
+          "diffEditor.removedLineBackground": "#dc26260e",
         },
       });
       return monaco;
     });
   }
   return monacoLoader;
+}
+
+function activeMonacoTheme(): string {
+  return document.documentElement.dataset["theme"] === "dark"
+    ? "capillary-dark"
+    : "capillary-light";
 }
 
 const EXT_LANGUAGE: Record<string, string> = {
@@ -110,6 +138,25 @@ function escapeHtml(value: string): string {
     .replaceAll('"', "&quot;");
 }
 
+const SHARED_EDITOR_OPTIONS: Monaco.editor.IEditorOptions = {
+  readOnly: true,
+  domReadOnly: true,
+  minimap: { enabled: false },
+  fontSize: 12.5,
+  fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+  lineNumbersMinChars: 4,
+  scrollBeyondLastLine: false,
+  renderLineHighlight: "line",
+  occurrencesHighlight: "off",
+  selectionHighlight: false,
+  contextmenu: false,
+  links: false,
+  hover: { enabled: false },
+  quickSuggestions: false,
+  automaticLayout: true,
+  padding: { top: 8, bottom: 8 },
+};
+
 @Component({
   selector: "app-monaco-viewer",
   standalone: true,
@@ -133,22 +180,44 @@ export class MonacoViewerComponent implements OnDestroy {
   readonly content = input.required<string>();
   readonly findings = input<ReviewFinding[]>([]);
   readonly revealLine = input<number | null>(null);
+  /** Side-by-side base vs head; requires baseContent to be loaded. */
+  readonly diffMode = input(false);
+  readonly baseContent = input<string | null>(null);
 
   private readonly host = viewChild.required<ElementRef<HTMLDivElement>>("host");
-  private editor: Monaco.editor.IStandaloneCodeEditor | null = null;
+  private readonly theme = signal(activeMonacoTheme());
+  private readonly themeObserver: MutationObserver;
   private monaco: MonacoModule | null = null;
+  private editor: Monaco.editor.IStandaloneCodeEditor | null = null;
+  private diffEditor: Monaco.editor.IStandaloneDiffEditor | null = null;
   private decorations: Monaco.editor.IEditorDecorationsCollection | null = null;
   private zoneIds: string[] = [];
   private disposed = false;
 
   constructor() {
+    // Track the app theme live: the shell writes html[data-theme] on toggle.
+    this.themeObserver = new MutationObserver(() => this.theme.set(activeMonacoTheme()));
+    this.themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+
+    effect(() => {
+      const theme = this.theme();
+      if (this.monaco) {
+        this.monaco.editor.setTheme(theme);
+      }
+    });
+
     effect(() => {
       // Track all render inputs, then hand off to the async renderer.
       const path = this.path();
       const content = this.content();
       const findings = this.findings();
       const reveal = this.revealLine();
-      void this.render(path, content, findings, reveal);
+      const diff = this.diffMode();
+      const base = this.baseContent();
+      void this.render(path, content, findings, reveal, diff, base);
     });
   }
 
@@ -157,60 +226,109 @@ export class MonacoViewerComponent implements OnDestroy {
     content: string,
     findings: ReviewFinding[],
     reveal: number | null,
+    diffMode: boolean,
+    baseContent: string | null,
   ): Promise<void> {
     const monaco = this.monaco ?? (this.monaco = await loadMonaco());
     if (this.disposed) return;
+    monaco.editor.setTheme(this.theme());
 
-    if (!this.editor) {
-      this.editor = monaco.editor.create(this.host().nativeElement, {
-        readOnly: true,
-        domReadOnly: true,
-        theme: "capillary-dark",
-        minimap: { enabled: false },
-        fontSize: 12.5,
-        fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
-        lineNumbersMinChars: 4,
-        scrollBeyondLastLine: false,
-        renderLineHighlight: "line",
-        occurrencesHighlight: "off",
-        selectionHighlight: false,
-        contextmenu: false,
-        links: false,
-        hover: { enabled: false },
-        quickSuggestions: false,
-        automaticLayout: true,
-        padding: { top: 8, bottom: 8 },
-      });
+    const useDiff = diffMode && baseContent !== null;
+    const modified = this.model(monaco, `capillary://head/${encodeURIComponent(path)}`, path, content);
+
+    if (useDiff) {
+      this.teardownPlainEditor();
+      if (!this.diffEditor) {
+        this.diffEditor = monaco.editor.createDiffEditor(this.host().nativeElement, {
+          ...SHARED_EDITOR_OPTIONS,
+          renderSideBySide: true,
+          renderOverviewRuler: false,
+          diffWordWrap: "off",
+        });
+      }
+      const original = this.model(
+        monaco,
+        `capillary://base/${encodeURIComponent(path)}`,
+        path,
+        baseContent,
+      );
+      const current = this.diffEditor.getModel();
+      if (current?.original !== original || current?.modified !== modified) {
+        this.diffEditor.setModel({ original, modified });
+      }
+      const target = this.diffEditor.getModifiedEditor();
+      this.applyFindings(monaco, target, modified, findings);
+      this.revealIn(target, modified, reveal);
+      return;
     }
 
-    const uri = monaco.Uri.parse(`capillary://review/${encodeURIComponent(path)}`);
+    this.teardownDiffEditor();
+    if (!this.editor) {
+      this.editor = monaco.editor.create(this.host().nativeElement, {
+        ...SHARED_EDITOR_OPTIONS,
+        theme: this.theme(),
+      });
+    }
+    if (this.editor.getModel() !== modified) {
+      this.editor.setModel(modified);
+    }
+    this.applyFindings(monaco, this.editor, modified, findings);
+    this.revealIn(this.editor, modified, reveal);
+  }
+
+  private model(
+    monaco: MonacoModule,
+    uriText: string,
+    path: string,
+    content: string,
+  ): Monaco.editor.ITextModel {
+    const uri = monaco.Uri.parse(uriText);
     let model = monaco.editor.getModel(uri);
     if (!model) {
       model = monaco.editor.createModel(content, languageForPath(path), uri);
     } else if (model.getValue() !== content) {
       model.setValue(content);
     }
-    if (this.editor.getModel() !== model) {
-      this.editor.setModel(model);
-    }
+    return model;
+  }
 
-    this.applyFindings(monaco, model, findings);
-
+  private revealIn(
+    editor: Monaco.editor.IStandaloneCodeEditor,
+    model: Monaco.editor.ITextModel,
+    reveal: number | null,
+  ): void {
     if (reveal !== null && reveal > 0) {
-      this.editor.revealLineInCenter(Math.min(reveal, model.getLineCount()));
-      this.editor.setPosition({ lineNumber: Math.min(reveal, model.getLineCount()), column: 1 });
+      const line = Math.min(reveal, model.getLineCount());
+      editor.revealLineInCenter(line);
+      editor.setPosition({ lineNumber: line, column: 1 });
+    }
+  }
+
+  private teardownPlainEditor(): void {
+    this.decorations?.clear();
+    this.decorations = null;
+    this.zoneIds = [];
+    this.editor?.dispose();
+    this.editor = null;
+  }
+
+  private teardownDiffEditor(): void {
+    if (this.diffEditor) {
+      this.decorations?.clear();
+      this.decorations = null;
+      this.zoneIds = [];
+      this.diffEditor.dispose();
+      this.diffEditor = null;
     }
   }
 
   /** Line decorations + a bespoke Carbon card view-zone under each finding. */
   private applyFindings(
     monaco: MonacoModule,
+    editor: Monaco.editor.IStandaloneCodeEditor,
     model: Monaco.editor.ITextModel,
     findings: ReviewFinding[],
   ): void {
-    const editor = this.editor;
-    if (!editor) return;
-
     const anchored = findings
       .filter((finding) => typeof finding.line === "number" && finding.line > 0)
       .map((finding) => ({
@@ -268,8 +386,8 @@ export class MonacoViewerComponent implements OnDestroy {
 
   ngOnDestroy(): void {
     this.disposed = true;
-    this.decorations?.clear();
-    this.editor?.dispose();
-    this.editor = null;
+    this.themeObserver.disconnect();
+    this.teardownPlainEditor();
+    this.teardownDiffEditor();
   }
 }
