@@ -268,7 +268,11 @@ function buildClaudePrompt(request: ProviderRequest): ClaudePrompt {
   return { systemPrompt, userText: parts.join("\n\n") };
 }
 
-function buildClaudeArgs(model: string, systemPrompt: string, outputFormat: "json" | "stream-json"): string[] {
+function buildClaudeArgs(
+  model: string,
+  systemPrompt: string,
+  outputFormat: "json" | "stream-json",
+): string[] {
   const args = [
     "-p",
     "--model",
@@ -288,7 +292,10 @@ function buildClaudeArgs(model: string, systemPrompt: string, outputFormat: "jso
 
 function mapClaudeResultError(subtype: string, message: string): ProviderError {
   const haystack = `${subtype} ${message}`.toLowerCase();
-  if (haystack.includes("rate") || haystack.includes("limit") || haystack.includes("credit") || haystack.includes("overage")) {
+  if (
+    haystack.includes("rate") || haystack.includes("limit") || haystack.includes("credit") ||
+    haystack.includes("overage")
+  ) {
     return { kind: "rate_limit", message: message || subtype || "claude_code_rate_limited" };
   }
   if (haystack.includes("auth") || haystack.includes("login") || haystack.includes("unauthor")) {
@@ -321,7 +328,15 @@ function applyResultEvent(event: Record<string, unknown>, streamedText: string):
   const isError = event.is_error === true;
   const resultText = asString(event.result) || streamedText;
   const usage = isRecord(event.usage) ? event.usage : {};
-  const inputTokens = asNumber(usage.input_tokens) || estimateTokens(resultText);
+  // Input = uncached + cache reads + cache writes: the claude CLI reports
+  // `input_tokens` as the UNCACHED slice only, and capillary's repeated
+  // system/context prompts live almost entirely in the cache fields — reading
+  // input_tokens alone showed double-digit "in" counts against reality in the
+  // tens of thousands. Never estimate input from resultText — that is the
+  // model's OUTPUT; an honest 0 beats fiction when usage is absent.
+  const inputTokens = asNumber(usage.input_tokens) +
+    asNumber(usage.cache_read_input_tokens) +
+    asNumber(usage.cache_creation_input_tokens);
   const outputTokens = asNumber(usage.output_tokens) || estimateTokens(resultText);
 
   if (isError) {
@@ -370,7 +385,10 @@ async function runClaudeStream(
   try {
     proc = spawner(invocation);
   } catch (error) {
-    return errorResult("network", `claude_code_spawn_failed: ${error instanceof Error ? error.message : String(error)}`);
+    return errorResult(
+      "network",
+      `claude_code_spawn_failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 
   const reader = proc.stdout.getReader();
@@ -380,7 +398,9 @@ async function runClaudeStream(
   let outcome: ClaudeOutcome | null = null;
   let streamFinalized = false;
 
-  const emit = (event: { kind: "chunk" | "completed" | "error"; text?: string; error?: string }) => {
+  const emit = (
+    event: { kind: "chunk" | "completed" | "error"; text?: string; error?: string },
+  ) => {
     if (!onStream || streamFinalized) {
       return;
     }
@@ -433,7 +453,9 @@ async function runClaudeStream(
       }
     }
   } catch (error) {
-    const message = `claude_code_stream_failed: ${error instanceof Error ? error.message : String(error)}`;
+    const message = `claude_code_stream_failed: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
     emit({ kind: "error", error: message });
     return errorResult("network", message);
   } finally {
