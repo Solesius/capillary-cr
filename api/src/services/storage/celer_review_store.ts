@@ -85,6 +85,8 @@ export interface ReviewArtifactStore {
   listRetvRuns(): Promise<RetvCdpRunRecord[]>;
   listReviewAgentRuns(): Promise<ReviewAgentRunRecord[]>;
   listGraphs(): Promise<GraphSnapshot[]>;
+  /** Scan of all persisted review runs — powers the boot-time status sweep. */
+  listRuns(): Promise<ReviewRun[]>;
 
   close(): Promise<void>;
 }
@@ -219,6 +221,9 @@ export class DurableReviewStore implements ReviewArtifactStore {
   }
   listGraphs(): Promise<GraphSnapshot[]> {
     return this.#scan("listGraphs", TABLE.graphs);
+  }
+  listRuns(): Promise<ReviewRun[]> {
+    return this.#scan("listRuns", TABLE.runs);
   }
 
   close(): Promise<void> {

@@ -80,6 +80,11 @@ export function isStopArmed(
   runStatus: string | null,
   attachedSessionActive: boolean,
 ): boolean {
+  // A stop is already in flight: pressing Stop again has nothing to add, and
+  // an armed button during "Stopping…" reads as the first press not working.
+  if (runStatus === "cancelling") {
+    return false;
+  }
   if (
     runStatus && runStatus !== "completed" && runStatus !== "cancelled" && runStatus !== "failed"
   ) {

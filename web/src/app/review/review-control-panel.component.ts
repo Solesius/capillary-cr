@@ -499,6 +499,7 @@ export class ReviewControlPanelComponent implements OnDestroy {
       reviewing: "Reviewing",
       completed: "Complete",
       failed: "Failed",
+      cancelling: "Stopping…",
       cancelled: "Cancelled",
     };
     return map[status.toLowerCase()] ?? status.replace(/_/g, " ");

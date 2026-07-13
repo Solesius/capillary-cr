@@ -78,7 +78,15 @@ export interface PullRequestFileContent {
 export interface ReviewRun {
   id: string;
   pullRequestId: string;
-  status: "queued" | "wetting" | "graphing" | "reviewing" | "completed" | "failed" | "cancelled";
+  status:
+    | "queued"
+    | "wetting"
+    | "graphing"
+    | "reviewing"
+    | "cancelling"
+    | "completed"
+    | "failed"
+    | "cancelled";
   currentPhase: string;
   findingCount: number;
 }

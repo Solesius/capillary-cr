@@ -528,20 +528,15 @@ export class AgenticReviewService {
   async cancelReview(runId: string): Promise<boolean> {
     enforceDefensiveInput(runId, "run_id");
     this.#cancelRequested.add(runId);
-    // Deliberate: persist 'cancelled' at REQUEST time, not at loop exit. This
-    // is a crash-safe intent record — if the process dies before the loop's
-    // next cooperative boundary, the durable run reads 'cancelled' instead of
-    // being a zombie 'reviewing' forever (there is no reaper). The cost is a
-    // bounded window (one loop boundary) where a second reader can see a
-    // 'cancelled' run whose counts are still settling; #finishCancelled()
-    // re-stamps the terminal state at the true end. Flagged by capillary
-    // (LOW, transient-cosmetic) and kept intentionally; the richer fix is a
-    // distinct 'cancelling' status — tracked as a pre-1.0 follow-up issue.
+    // The #38 design: request time records INTENT as 'cancelling' (crash-safe
+    // — the boot sweep finalizes any stranded 'cancelling' run to 'cancelled'),
+    // and #finishCancelled() stamps the terminal 'cancelled' + finishedAt when
+    // the loop actually lands the stop. Readers never see a "cancelled" run
+    // whose counts are still moving.
     await this.repository.updateReviewRun(runId, (current) => ({
       ...current,
-      status: "cancelled",
-      currentPhase: "cancelled",
-      finishedAt: new Date().toISOString(),
+      status: "cancelling",
+      currentPhase: "cancelling",
     }));
     this.clickClack.recordReviewProgress(runId, "cancelled");
     return true;
