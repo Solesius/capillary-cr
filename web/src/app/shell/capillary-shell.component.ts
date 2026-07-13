@@ -633,6 +633,85 @@ import { FileExplorerComponent } from "../explorer/file-explorer.component";
               </section>
             </div>
 
+            <div class="cap-two-up" style="margin-top: 14px;">
+              <section class="cap-panel">
+                <header class="cap-panel-title">
+                  <span>Your Identity</span>
+                  <span class="cap-muted">Posts go out as you</span>
+                </header>
+                <div class="cap-panel-body cap-list cap-setup-form">
+                  @if (store.member().connected) {
+                    <p>
+                      Connected as <strong>{{ store.member().login }}</strong> — inline comments,
+                      suggestions and summaries you post are attributed to your GitHub account.
+                    </p>
+                    <div class="cap-row">
+                      <button class="cap-button cap-button-sm" type="button" (click)="store.disconnectMemberGithub()">
+                        Disconnect
+                      </button>
+                    </div>
+                  } @else {
+                    <p class="cap-muted">
+                      Without a personal identity, posts use the instance's service token.
+                      Connect your own GitHub token (memory-only, forgotten on restart) so
+                      what you post is attributed to you.
+                    </p>
+                    <input class="cap-input" type="password" autocomplete="off"
+                      placeholder="ghp_ / github_pat_ …"
+                      [value]="memberTokenInput()"
+                      (input)="memberTokenInput.set($any($event.target).value)" />
+                    <div class="cap-row">
+                      <button class="cap-button cap-button-primary cap-button-sm" type="button"
+                        [disabled]="store.memberBusy() || !memberTokenInput().trim()"
+                        (click)="connectMemberIdentity()">
+                        {{ store.memberBusy() ? 'Connecting…' : 'Connect my GitHub' }}
+                      </button>
+                    </div>
+                  }
+                  @if (store.memberError()) {
+                    <p class="cap-muted">⚠ {{ store.memberError() }}</p>
+                  }
+                </div>
+              </section>
+              <section class="cap-panel">
+                <header class="cap-panel-title">
+                  <span>GitHub App</span>
+                  <span class="cap-muted">Bot identity · checks · webhooks</span>
+                </header>
+                <div class="cap-panel-body cap-list cap-setup-form">
+                  @if (store.teamIntegrations()?.githubApp?.configured) {
+                    <p>
+                      App configured{{ store.teamIntegrations()?.githubApp?.slug ? ' — ' + store.teamIntegrations()?.githubApp?.slug : '' }}
+                      (id {{ store.teamIntegrations()?.githubApp?.appId }}).
+                      Review verdicts publish as check runs; PR-opened webhooks are accepted.
+                    </p>
+                    <div class="cap-setup-meta">
+                      <div class="cap-event-line">checks: {{ store.teamIntegrations()?.checksEnabled ? 'on' : 'off (CAPILLARY_CHECKS=0)' }}</div>
+                      <div class="cap-event-line">auto-review on PR open: {{ store.teamIntegrations()?.autoReviewOnOpen ? 'on' : 'off (CAPILLARY_AUTO_REVIEW_ON_OPEN=1 to enable)' }}</div>
+                      <div class="cap-event-line">jira: {{ store.teamIntegrations()?.jira ? 'configured' : 'not configured (JIRA_* env)' }}</div>
+                    </div>
+                  } @else {
+                    <p class="cap-muted">
+                      Create this instance's own GitHub App (one click via GitHub's manifest
+                      flow — nothing routes through anyone else). Unlocks verdicts as merge-box
+                      check runs and PR-opened auto-review. Requires CAPILLARY_PUBLIC_URL so
+                      GitHub can call back.
+                    </p>
+                    <div class="cap-row">
+                      <button class="cap-button cap-button-sm" type="button"
+                        [disabled]="!store.teamIntegrations()?.publicUrlConfigured"
+                        (click)="store.startGithubAppSetup()">
+                        Create GitHub App ↗
+                      </button>
+                    </div>
+                    @if (!store.teamIntegrations()?.publicUrlConfigured) {
+                      <p class="cap-muted">⚠ Set CAPILLARY_PUBLIC_URL first.</p>
+                    }
+                  }
+                </div>
+              </section>
+            </div>
+
             <section class="cap-panel" style="margin-top: 14px;">
               <header class="cap-panel-title">
                 <span>Team Channels</span>
@@ -740,6 +819,12 @@ import { FileExplorerComponent } from "../explorer/file-explorer.component";
                         <span class="cap-option-name">Include finding titles</span>
                         <span class="cap-option-hint">off = verdict, counts and link only</span>
                       </label>
+                      <label class="cap-option-row" style="min-width: 220px;">
+                        <span class="cap-option-name">Repo scope</span>
+                        <input class="cap-input" style="max-width: 200px;" placeholder="owner/name or owner/* (all)"
+                          [value]="connection.repoFilter ?? ''"
+                          (change)="store.patchTeamConnection(connection.id, { repoFilter: $any($event.target).value.trim() || null })" />
+                      </label>
                     </div>
                     @if (connection.lastError) {
                       <p class="cap-muted" style="margin-top: 6px;">⚠ last delivery: {{ connection.lastError }}</p>
@@ -841,6 +926,16 @@ export class CapillaryShellComponent {
     openai_compatible: { model: "local-model", baseUrl: "http://localhost:1234/v1" },
   };
 
+  // Member identity input (Setup page).
+  readonly memberTokenInput = signal("");
+
+  async connectMemberIdentity(): Promise<void> {
+    const ok = await this.store.connectMemberGithub(this.memberTokenInput());
+    if (ok) {
+      this.memberTokenInput.set("");
+    }
+  }
+
   // Team channel add-form inputs (Setup page).
   readonly teamAppInput = signal<"slack" | "teams">("slack");
   readonly teamLabelInput = signal("");
@@ -863,6 +958,8 @@ export class CapillaryShellComponent {
     void this.store.loadRetvRunHistory();
     void this.store.loadReviewRunHistory();
     void this.store.loadTeamConnections();
+    void this.store.loadMember();
+    void this.store.loadTeamIntegrations();
     // Channel-card deep links land on a URL param; route to the right page
     // once the store resolves what the link points at.
     effect(() => {

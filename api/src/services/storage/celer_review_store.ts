@@ -24,6 +24,7 @@ import {
   ReviewRun,
 } from "../../domain/entities.ts";
 import { ChannelConnection, ConnectionPersistence } from "../team/connections.ts";
+import { GithubAppCredentials, GithubAppPersistence } from "../team/github_app.ts";
 import { CelerStore, CelerTableDescriptor } from "./celer_mem.ts";
 
 const SCOPE = "review";
@@ -43,6 +44,11 @@ const TABLE = {
   // lifecycle. Webhook URLs are post-only channel secrets — a deliberately
   // narrower class than the API tokens that are never persisted.
   connections: "team_connections",
+  // Per-instance GitHub App credentials from the manifest flow. Instance
+  // infrastructure (the analog of the env PAT), persisted deliberately so the
+  // app survives restarts; env vars override when set. Member tokens remain
+  // memory-only.
+  githubApp: "team_github_app",
 } as const;
 
 const SCHEMA: CelerTableDescriptor[] = Object.values(TABLE).map((table) => ({
@@ -103,7 +109,8 @@ export interface ReviewArtifactStore {
  * through `onError` and surface as `null`/no-op rather than throwing, so a
  * storage hiccup degrades gracefully instead of breaking the request path.
  */
-export class DurableReviewStore implements ReviewArtifactStore, ConnectionPersistence {
+export class DurableReviewStore
+  implements ReviewArtifactStore, ConnectionPersistence, GithubAppPersistence {
   #store: CelerStore;
   #onError: (op: string, error: unknown) => void;
 
@@ -245,6 +252,14 @@ export class DurableReviewStore implements ReviewArtifactStore, ConnectionPersis
   }
   listConnections(): Promise<ChannelConnection[]> {
     return this.#scan("listConnections", TABLE.connections);
+  }
+
+  // --- per-instance GitHub App credentials (GithubAppPersistence) ---
+  saveGithubApp(credentials: GithubAppCredentials): Promise<void> {
+    return this.#write("saveGithubApp", TABLE.githubApp, "app", credentials);
+  }
+  getGithubApp(): Promise<GithubAppCredentials | null> {
+    return this.#read("getGithubApp", TABLE.githubApp, "app");
   }
 
   close(): Promise<void> {

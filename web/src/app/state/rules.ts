@@ -109,6 +109,8 @@ export interface PostedStateSeed {
   commentUrl: Record<string, string>;
   suggestionState: Record<string, "posted">;
   suggestionUrl: Record<string, string>;
+  dispatchUrl: Record<string, string>;
+  jiraUrl: Record<string, string>;
   prCommentUrl: string | null;
 }
 
@@ -125,6 +127,8 @@ export function seedPostedState(artifacts: readonly PostedArtifact[] | undefined
     commentUrl: {},
     suggestionState: {},
     suggestionUrl: {},
+    dispatchUrl: {},
+    jiraUrl: {},
     prCommentUrl: null,
   };
   for (const artifact of artifacts ?? []) {
@@ -136,6 +140,10 @@ export function seedPostedState(artifacts: readonly PostedArtifact[] | undefined
     } else if (artifact.kind === "suggestion" && artifact.findingId) {
       seed.suggestionState[artifact.findingId] = "posted";
       seed.suggestionUrl[artifact.findingId] = artifact.url;
+    } else if (artifact.kind === "dispatch" && artifact.findingId) {
+      seed.dispatchUrl[artifact.findingId] = artifact.url;
+    } else if (artifact.kind === "jira" && artifact.findingId) {
+      seed.jiraUrl[artifact.findingId] = artifact.url;
     }
   }
   return seed;

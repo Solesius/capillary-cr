@@ -37,6 +37,12 @@ export interface ChannelConnection {
   events: ChannelEventToggles;
   /** summary = verdict/counts/link only; findings additionally carries titles. */
   detail: NotifyDetail;
+  /**
+   * Optional repo scope: "owner/name" exact or "owner/*" prefix. Review and
+   * finding events route here only when the repository matches; RetV events
+   * (no repository) route only to unscoped connections.
+   */
+  repoFilter?: string;
   enabled: boolean;
   createdAt: string;
   lastPostedAt?: string;
@@ -51,6 +57,7 @@ export interface ChannelConnectionView {
   webhookUrlMasked: string;
   events: ChannelEventToggles;
   detail: NotifyDetail;
+  repoFilter?: string;
   enabled: boolean;
   createdAt: string;
   lastPostedAt?: string;
@@ -117,6 +124,7 @@ export interface UpdateConnectionInput {
   label?: string;
   events?: Partial<ChannelEventToggles>;
   detail?: NotifyDetail;
+  repoFilter?: string | null;
   enabled?: boolean;
 }
 
@@ -139,9 +147,33 @@ export function maskWebhookUrl(url: string): string {
   }
 }
 
+/** "owner/name" exact or "owner/*" prefix match against a repositoryId. */
+export function repoFilterMatches(
+  filter: string | undefined,
+  repositoryId: string | null,
+): boolean {
+  const trimmed = filter?.trim().toLowerCase();
+  if (!trimmed) {
+    return true;
+  }
+  if (repositoryId === null) {
+    // Repo-scoped channels never receive repo-less events (RetV runs).
+    return false;
+  }
+  const repo = repositoryId.toLowerCase();
+  if (trimmed.endsWith("/*")) {
+    return repo.startsWith(trimmed.slice(0, -1));
+  }
+  return repo === trimmed;
+}
+
 /** Does this connection want this event? Pure — unit-tested routing truth. */
 export function connectionMatches(connection: ChannelConnection, event: TeamEvent): boolean {
   if (!connection.enabled) {
+    return false;
+  }
+  const repositoryId = event.type === "retv.completed" ? null : event.repositoryId;
+  if (!repoFilterMatches(connection.repoFilter, repositoryId)) {
     return false;
   }
   switch (event.type) {
@@ -247,6 +279,11 @@ export class ConnectionStore {
       label: input.label !== undefined
         ? String(input.label).trim() || current.label
         : current.label,
+      repoFilter: input.repoFilter === null
+        ? undefined
+        : input.repoFilter !== undefined
+        ? String(input.repoFilter).trim() || undefined
+        : current.repoFilter,
       events: { ...current.events, ...input.events },
       detail: input.detail === "summary" || input.detail === "findings"
         ? input.detail

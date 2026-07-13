@@ -312,10 +312,28 @@ export interface ReviewAgentRunRecord {
  * "posted ✓ — view on GitHub" truth instead of client-local memory.
  */
 export interface PostedArtifact {
-  kind: "inline" | "suggestion" | "summary";
+  kind: "inline" | "suggestion" | "summary" | "dispatch" | "jira";
   findingId?: string;
   url: string;
   postedAt: string;
+  /** GitHub login of the member who published it (service identity when absent). */
+  postedBy?: string;
+}
+
+/** This browser's member identity (team mode). */
+export interface MemberView {
+  connected: boolean;
+  login?: string;
+  avatarUrl?: string;
+}
+
+/** Server-side integration availability (Setup page). */
+export interface TeamIntegrationsStatus {
+  githubApp: { configured: boolean; appId?: string; slug?: string; htmlUrl?: string };
+  jira: boolean;
+  checksEnabled: boolean;
+  autoReviewOnOpen: boolean;
+  publicUrlConfigured: boolean;
 }
 
 // --- team channel connections ------------------------------------------------
@@ -338,6 +356,8 @@ export interface ChannelConnectionView {
   webhookUrlMasked: string;
   events: ChannelEventToggles;
   detail: NotifyDetail;
+  /** Optional repo scope: "owner/name" exact or "owner/*" prefix. */
+  repoFilter?: string;
   enabled: boolean;
   createdAt: string;
   lastPostedAt?: string;

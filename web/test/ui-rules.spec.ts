@@ -191,6 +191,16 @@ describe("seedPostedState (shared posted-state from run records)", () => {
     expect(seedPostedState([]).prCommentUrl).to.equal(null);
   });
 
+  it("should_seed_dispatch_and_jira_urls_from_artifacts", () => {
+    const seed = seedPostedState([
+      { kind: "dispatch", findingId: "f1", url: "https://gh/i/9", postedAt: "t1" },
+      { kind: "jira", findingId: "f2", url: "https://jira/CAP-7", postedAt: "t2" },
+    ]);
+    expect(seed.dispatchUrl).to.deep.equal({ f1: "https://gh/i/9" });
+    expect(seed.jiraUrl).to.deep.equal({ f2: "https://jira/CAP-7" });
+    expect(seed.commentState).to.deep.equal({});
+  });
+
   it("should_ignore_finding_scoped_artifacts_without_a_finding_id", () => {
     const seed = seedPostedState([
       { kind: "inline", url: "https://gh/c/1", postedAt: "t1" },

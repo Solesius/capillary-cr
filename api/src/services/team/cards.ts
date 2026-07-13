@@ -144,9 +144,15 @@ function findingPostedModel(event: FindingPostedEvent, ctx: CardContext): CardMo
     ? "review summary"
     : event.kind === "suggestion"
     ? "code suggestion"
+    : event.kind === "dispatch"
+    ? "fix dispatched to coding agent"
+    : event.kind === "jira"
+    ? "Jira ticket"
     : "inline comment";
   return {
-    headline: `Capillary ${kind} posted to PR #${event.pullRequestId}`,
+    headline: `Capillary ${kind}${
+      event.actor ? ` by ${event.actor}` : ""
+    } — PR #${event.pullRequestId}`,
     facts: [
       {
         label: "Finding",

@@ -639,11 +639,15 @@ export class GitHubOakService {
     repositoryId: string,
     pullRequestId: string,
     body: string,
+    options: { asToken?: string } = {},
   ): Promise<{ htmlUrl: string }> {
     this.validateRepositoryId(repositoryId);
     this.validatePullRequestId(pullRequestId);
     enforceTextBody(body, "comment_body");
     const token = await this.requireGithubToken();
+    // Team mode: a connected member's own token posts AS THAT MEMBER — GitHub
+    // attribution reflects the human who clicked, never a shared identity.
+    const postToken = options.asToken || token;
 
     const pull = await this.getPullRequest(repositoryId, pullRequestId);
     const repo = await this.findRepositoryById(repositoryId, token);
@@ -653,7 +657,7 @@ export class GitHubOakService {
       {
         method: "POST",
         headers: {
-          authorization: `Bearer ${token}`,
+          authorization: `Bearer ${postToken}`,
           accept: "application/vnd.github+json",
           "content-type": "application/json",
           "x-github-api-version": "2022-11-28",
@@ -683,12 +687,14 @@ export class GitHubOakService {
     repositoryId: string,
     pullRequestId: string,
     input: { path: string; line: number; body: string },
+    options: { asToken?: string } = {},
   ): Promise<{ htmlUrl: string }> {
     this.validateRepositoryId(repositoryId);
     this.validatePullRequestId(pullRequestId);
     enforceDefensiveInput(input.path, "comment_path");
     enforceTextBody(input.body, "comment_body");
     const token = await this.requireGithubToken();
+    const postToken = options.asToken || token;
 
     const pull = await this.getPullRequest(repositoryId, pullRequestId);
     const repo = await this.findRepositoryById(repositoryId, token);
@@ -701,7 +707,7 @@ export class GitHubOakService {
       {
         method: "POST",
         headers: {
-          authorization: `Bearer ${token}`,
+          authorization: `Bearer ${postToken}`,
           accept: "application/vnd.github+json",
           "content-type": "application/json",
           "x-github-api-version": "2022-11-28",
@@ -744,11 +750,13 @@ export class GitHubOakService {
       code: string;
       note: string;
     },
+    options: { asToken?: string } = {},
   ): Promise<{ htmlUrl: string }> {
     this.validateRepositoryId(repositoryId);
     this.validatePullRequestId(pullRequestId);
     enforceDefensiveInput(input.path, "suggestion_path");
     const token = await this.requireGithubToken();
+    const postToken = options.asToken || token;
 
     const pull = await this.getPullRequest(repositoryId, pullRequestId);
     const repo = await this.findRepositoryById(repositoryId, token);
@@ -780,7 +788,7 @@ export class GitHubOakService {
       {
         method: "POST",
         headers: {
-          authorization: `Bearer ${token}`,
+          authorization: `Bearer ${postToken}`,
           accept: "application/vnd.github+json",
           "content-type": "application/json",
           "x-github-api-version": "2022-11-28",
@@ -799,6 +807,73 @@ export class GitHubOakService {
 
     const dto = await response.json() as { html_url?: string };
     return { htmlUrl: String(dto.html_url || pull.htmlUrl) };
+  }
+
+  /**
+   * Validate a member's personal token and return its GitHub identity —
+   * team-mode identity attach. The token is only ever held in memory.
+   */
+  async getUserForToken(token: string): Promise<{ login: string; avatarUrl?: string }> {
+    const response = await this.fetcher("https://api.github.com/user", {
+      headers: {
+        authorization: `Bearer ${token}`,
+        accept: "application/vnd.github+json",
+        "x-github-api-version": "2022-11-28",
+      },
+    });
+    if (!response.ok) {
+      throw new AppError("github_member_token_invalid", 401, "github_member_token_invalid");
+    }
+    const dto = await response.json() as { login?: string; avatar_url?: string };
+    if (!dto.login) {
+      throw new AppError("github_member_token_invalid", 401, "github_member_token_invalid");
+    }
+    return { login: dto.login, avatarUrl: dto.avatar_url };
+  }
+
+  /**
+   * Create a repository issue (dispatch-to-coding-agent, Jira-adjacent flows).
+   * `assignees` is best-effort: GitHub silently drops invalid assignees, so a
+   * repo without the Copilot coding agent still gets the issue + mention.
+   */
+  async createRepositoryIssue(
+    repositoryId: string,
+    input: { title: string; body: string; labels?: string[]; assignees?: string[] },
+    options: { asToken?: string } = {},
+  ): Promise<{ htmlUrl: string; number: number }> {
+    this.validateRepositoryId(repositoryId);
+    enforceTextBody(input.body, "issue_body");
+    const token = await this.requireGithubToken();
+    const postToken = options.asToken || token;
+    const repo = await this.findRepositoryById(repositoryId, token);
+
+    const response = await this.fetcher(
+      `https://api.github.com/repos/${repo.full_name}/issues`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${postToken}`,
+          accept: "application/vnd.github+json",
+          "content-type": "application/json",
+          "x-github-api-version": "2022-11-28",
+        },
+        body: JSON.stringify({
+          title: input.title.slice(0, 250),
+          body: input.body,
+          ...(input.labels?.length ? { labels: input.labels } : {}),
+          ...(input.assignees?.length ? { assignees: input.assignees } : {}),
+        }),
+      },
+    );
+    if (!response.ok) {
+      throw new AppError(
+        "github_issue_failed",
+        response.status,
+        await describeGithubError(response, "github_issue_failed"),
+      );
+    }
+    const dto = await response.json() as { html_url?: string; number?: number };
+    return { htmlUrl: String(dto.html_url || repo.full_name), number: Number(dto.number || 0) };
   }
 
   private async findRepositoryById(

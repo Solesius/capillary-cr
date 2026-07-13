@@ -59,11 +59,13 @@ export interface FindingPostedEvent {
   runId: string;
   pullRequestId: string;
   repositoryId: string;
-  kind: "inline" | "suggestion" | "summary";
+  kind: "inline" | "suggestion" | "summary" | "dispatch" | "jira";
   findingId?: string;
   title: string;
   severity?: string;
   url: string;
+  /** Member who initiated it (service identity when absent). */
+  actor?: string;
 }
 
 export type TeamEvent = ReviewFinishedEvent | RetvFinishedEvent | FindingPostedEvent;

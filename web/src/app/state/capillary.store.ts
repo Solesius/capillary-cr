@@ -11,6 +11,8 @@ import {
   ChannelConnectionView,
   ChannelEventToggles,
   GitHubRepository,
+  MemberView,
+  TeamIntegrationsStatus,
   GraphSnapshotView,
   PullRequest,
   PullRequestDiffFile,
@@ -2031,6 +2033,14 @@ export class CapillaryStore {
       this.commentUrl.set(seed.commentUrl);
       this.suggestionState.set(seed.suggestionState);
       this.suggestionUrl.set(seed.suggestionUrl);
+      this.dispatchUrl.set(seed.dispatchUrl);
+      this.dispatchState.set(
+        Object.fromEntries(Object.keys(seed.dispatchUrl).map((id) => [id, "done" as const])),
+      );
+      this.jiraUrl.set(seed.jiraUrl);
+      this.jiraState.set(
+        Object.fromEntries(Object.keys(seed.jiraUrl).map((id) => [id, "done" as const])),
+      );
       this.prCommentUrl.set(seed.prCommentUrl);
       this.prCommentState.set(seed.prCommentUrl ? "posted" : "idle");
     } catch (error) {
@@ -2127,6 +2137,118 @@ export class CapillaryStore {
     } catch (error) {
       this.teamTestState.update((map) => ({ ...map, [id]: "failed" }));
       this.teamConnectionError.set(toMessage(error));
+    }
+  }
+
+  // --- member identity (team mode) --------------------------------------------
+  // Connect YOUR GitHub so posts go out as you; token stays server-memory-only.
+
+  readonly member = signal<MemberView>({ connected: false });
+  readonly memberBusy = signal(false);
+  readonly memberError = signal<string | null>(null);
+  readonly teamIntegrations = signal<TeamIntegrationsStatus | null>(null);
+
+  async loadMember(): Promise<void> {
+    try {
+      this.member.set(await this.api.getTeamMe());
+    } catch {
+      // Advisory; the identity card simply shows disconnected.
+    }
+  }
+
+  async loadTeamIntegrations(): Promise<void> {
+    try {
+      this.teamIntegrations.set(await this.api.getTeamIntegrations());
+    } catch {
+      // Advisory settings surface.
+    }
+  }
+
+  async connectMemberGithub(token: string): Promise<boolean> {
+    const trimmed = token.trim();
+    if (!trimmed || this.memberBusy()) {
+      return false;
+    }
+    this.memberBusy.set(true);
+    this.memberError.set(null);
+    try {
+      this.member.set(await this.api.connectMemberGithub(trimmed));
+      return true;
+    } catch (error) {
+      this.memberError.set(toMessage(error));
+      return false;
+    } finally {
+      this.memberBusy.set(false);
+    }
+  }
+
+  async disconnectMemberGithub(): Promise<void> {
+    try {
+      this.member.set(await this.api.disconnectMemberGithub());
+    } catch (error) {
+      this.memberError.set(toMessage(error));
+    }
+  }
+
+  /** Launch the GitHub App manifest flow: auto-submit the form GitHub expects. */
+  async startGithubAppSetup(): Promise<void> {
+    try {
+      const { manifest, createUrl } = await this.api.getGithubAppManifest();
+      const form = document.createElement("form");
+      form.method = "post";
+      form.action = createUrl;
+      form.target = "_blank";
+      const field = document.createElement("input");
+      field.type = "hidden";
+      field.name = "manifest";
+      field.value = JSON.stringify(manifest);
+      form.appendChild(field);
+      document.body.appendChild(form);
+      form.submit();
+      form.remove();
+    } catch (error) {
+      this.memberError.set(toMessage(error));
+    }
+  }
+
+  // --- per-finding dispatch (coding agent) + Jira -------------------------------
+
+  readonly dispatchState = signal<Record<string, "idle" | "working" | "done" | "failed">>({});
+  readonly dispatchUrl = signal<Record<string, string>>({});
+  readonly jiraState = signal<Record<string, "idle" | "working" | "done" | "failed">>({});
+  readonly jiraUrl = signal<Record<string, string>>({});
+
+  async dispatchFinding(findingId: string): Promise<void> {
+    const runId = this.selectedReviewRunId() ?? this.reviewRun()?.id;
+    const state = this.dispatchState()[findingId];
+    if (!runId || state === "working" || state === "done") {
+      return;
+    }
+    this.dispatchState.update((map) => ({ ...map, [findingId]: "working" }));
+    try {
+      const result = await this.api.dispatchFinding(runId, findingId);
+      this.dispatchUrl.update((map) => ({ ...map, [findingId]: result.url }));
+      this.dispatchState.update((map) => ({ ...map, [findingId]: "done" }));
+    } catch (error) {
+      this.dispatchState.update((map) => ({ ...map, [findingId]: "failed" }));
+      this.lastError.set(`Dispatch failed: ${toMessage(error)}`);
+    }
+  }
+
+  async createJiraFromFinding(findingId: string): Promise<void> {
+    const runId = this.selectedReviewRunId() ?? this.reviewRun()?.id;
+    const state = this.jiraState()[findingId];
+    if (!runId || state === "working" || state === "done") {
+      return;
+    }
+    this.jiraState.update((map) => ({ ...map, [findingId]: "working" }));
+    try {
+      const result = await this.api.createJiraFromFinding(runId, findingId);
+      this.jiraUrl.update((map) => ({ ...map, [findingId]: result.url }));
+      this.jiraState.update((map) => ({ ...map, [findingId]: "done" }));
+    } catch (error) {
+      this.jiraState.update((map) => ({ ...map, [findingId]: "failed" }));
+      this.lastError.set(`Jira ticket failed: ${toMessage(error)}`);
     }
   }
 
