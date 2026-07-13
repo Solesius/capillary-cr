@@ -19,13 +19,18 @@ posture. It is the map for consuming and operating Capillary.
 - **API** — Deno + Oak (TypeScript), single process, listens on `:8080`.
 - **Web** — Angular 20 (standalone components, signals, `OnPush`). Built to
   static assets and served by the API in a single-instance deploy.
-- **Durable memory** — `celer-mem`, a sqlite-backed embedded store reached over
-  a small C ABI FFI shim. Optional; the in-memory repository is the source of
-  truth and the store is a write-through mirror.
-- **Topology** — deliberately **single instance**. The in-memory repository is
-  the synchronous source of truth; there is no horizontal-scaling story and none
-  is intended. Durability is provided by the local store + a docker-managed
-  named volume.
+- **Durable memory** — `celer-mem`, an embedded store reached over a small
+  C ABI FFI shim, **RocksDB** backend by default (SQLite fallback on bare-metal
+  macOS; the runtime always matches the compiled engine). celer is the
+  **source of truth** for review artifacts; the process keeps a bounded LRU
+  cache in front of it (reads fault through on miss, writes persist before
+  resolving), so resident memory stays flat and boot is instant — no snapshot
+  replay. Optional: without it the repository degrades to pure in-memory.
+- **Topology** — deliberately **single instance**. There is no
+  horizontal-scaling story and none is intended. Durability is the local
+  store + a docker-managed named volume; persistence health (write failures,
+  last error) is surfaced at `/healthz`, and SIGTERM flushes and closes the
+  store before exit.
 
 ```mermaid
 flowchart LR
@@ -34,10 +39,10 @@ flowchart LR
     end
     subgraph Host["Single-instance container"]
       API[Deno + Oak API :8080]
-      REPO[(In-memory repository\nsource of truth)]
-      CELER[(celer-mem\nsqlite via FFI)]
+      REPO[(Bounded LRU cache\nCelerReviewRepository)]
+      CELER[(celer-mem\nRocksDB via FFI\nsource of truth)]
       API --- REPO
-      REPO -. write-through .-> CELER
+      REPO <-. read-through / write-through .-> CELER
     end
     GH[(GitHub REST)]
     LLM[[LLM providers]]
@@ -195,11 +200,20 @@ flowchart TD
   Reports are anchored to **file paths** — internal node ids and raw geometry
   telemetry (curvature/torsion numbers) never appear in prose. Verdict maps
   blocker/high → `request_changes`, else `comment`, else `approve`.
-- **Post summary to PR (opt-in)**: a completed run can be posted back to the
-  pull request as a comment via
-  `POST /api/review/runs/:runId/pr-comment` — verdict, summary,
-  finding/file/cycle counts, and the model used. Gated behind an explicit
-  button in the UI; nothing is written to GitHub automatically.
+- **Postable findings (opt-in, human-initiated)**: every finding resolves to
+  a real, commentable diff line (validated against the actual patch — the
+  model's line is trusted only when genuinely in the diff, else anchored by
+  finding text). From the UI you can post a finding as an inline PR comment —
+  one at a time or **all at once** (sequential, rate-limit-safe, idempotent) —
+  post a committable ```suggestion block when the model proposed a concrete
+  fix, and post a run summary comment
+  (`POST /api/review/runs/:runId/pr-comment`). Inline comments carry a
+  "Flagged by Capillary" byline linking back here. Nothing is written to
+  GitHub automatically.
+- **Token accounting**: provider usage is normalized across every dialect
+  (cache-aware input; input is never estimated from output —
+  [providers/usage.ts](api/src/services/providers/usage.ts)); per-run totals
+  persist on the run record and every report ends with a Model-usage footer.
 - **Tracing (opt-in)**: `trace=true` retains the full per-step trace +
   screenshots and enables a dependency-free **zip export** (report + run JSON +
   findings + trace + capture manifest). Untraced runs persist report + metadata
@@ -219,10 +233,19 @@ running web app, via `CdpDriverService`
   evaluate, readPage`.
 - **Loop**: wall-clock bounded (`RETV_AGENT_MAX_DURATION_MS`, default 10 min);
   `maxCycles` is an optional hard cap. Natural stops: `goal_achieved`,
-  `drift_pause`, `no_progress_pause`, `step_failed`; else
+  `drift_pause`, `no_progress_pause`, `step_failed`, `cancelled` (live stop —
+  checked at every boundary and raced against in-flight model turns); else
   `time_budget_exhausted`.
+- **Completion contract**: `goalAchieved` is a gated verdict — it requires
+  concrete quoted on-page evidence *and* every milestone complete
+  (`evaluateGoalClaim`); rejected claims surface as findings the planner reads
+  next cycle. Ambiguous goals are pinned to a stated interpretation in cycle 1.
 - **Output**: same "always a report, opt-in trace + zip export" contract as the
-  review agent, persisted as RetV run records.
+  review agent, persisted as RetV run records with per-run token totals and a
+  Model-usage footer stamped into every report. Traced runs additionally export
+  **run skeletons**: a deterministic Playwright spec (failed/unexecuted steps
+  quarantined as comments, typed credentials redacted to env placeholders) and
+  a model-agnostic agent runsheet ([driver_export.ts](api/src/services/driver_export.ts)).
 
 ```mermaid
 sequenceDiagram
@@ -314,22 +337,36 @@ flowchart LR
 
 ## 8. Storage & persistence
 
-- **Source of truth**: `InMemoryReviewRepository`
-  ([repositories/review_repository.ts](api/src/repositories/review_repository.ts)).
-- **Durable mirror**: `DurableReviewStore`
+- **Source of truth**: `celer-mem`, fronted by `CelerReviewRepository`
+  ([repositories/review_repository.ts](api/src/repositories/review_repository.ts))
+  — a fully **async** repository holding only bounded per-entity LRU caches
+  (runs, events, findings, packets, graphs, checklists, PR diffs, RetV/review
+  agent records). Reads fault through to the store on a cache miss; writes
+  persist before resolving. Resident memory stays flat no matter how many
+  reviews accumulate, and boot is instant — there is no snapshot replay.
+- **Store**: `DurableReviewStore`
   ([services/storage/celer_review_store.ts](api/src/services/storage/celer_review_store.ts))
-  write-through mirrors runs, events, findings, packets, graphs, checklists, and
-  RetV/review agent run records into `celer-mem`. All writes are best-effort and
-  never throw into the request path; `loadSnapshot()` rehydrates on boot.
+  behind a `ReviewArtifactStore` interface (unit-tested against a faithful
+  in-memory fake — no native library required in CI). Persistence failures are
+  swallowed to keep the request path alive but counted and surfaced at
+  `/healthz` as `storage: {durable, writeFailures, healthy, lastError}`.
+- **Lifecycle**: SIGINT/SIGTERM flush and close the store before exit; a boot
+  sweep finalizes any run stranded mid-stop (`cancelling` → `cancelled`) by a
+  crash or restart. Secrets (GitHub token, identity, LLM keys/config) are
+  **never** persisted — they live in memory only, by invariant.
 - **Enablement**: durability turns on only when `CAPILLARY_STORAGE_DIR` is set
-  **and** the native FFI library loads; otherwise the process runs fully
-  in-memory.
+  **and** the native FFI library loads; otherwise the repository degrades to
+  pure in-memory (caches become authoritative and never evict).
 - **celer-mem FFI**: built by [api/native/build.sh](api/native/build.sh) into
-  `libceler_ffi.so` (sqlite-only; the only system dependency is `sqlite3`).
-  celer-mem sources are not vendored — the script fetches the canonical
-  [Solesius/celer-mem](https://github.com/Solesius/celer-mem) repo at a pinned
-  ref (`CELER_MEM_GIT_REF`, see Dockerfile), or uses a local checkout via
-  `CELER_MEM_DIR`.
+  `libceler_ffi.so` — **RocksDB** backend by default, SQLite on bare-metal
+  macOS (or `CELER_BACKEND` override); the runtime opens whichever engine the
+  library was compiled with ("auto"), so a build can never be asked for an
+  engine it lacks. celer-mem sources are not vendored — the script fetches the
+  canonical [Solesius/celer-mem](https://github.com/Solesius/celer-mem) repo at
+  a pinned ref (`CELER_MEM_GIT_REF`, see Dockerfile), or uses a local checkout
+  via `CELER_MEM_DIR`. Rationale for RocksDB: a 1M-record benchmark measured
+  ~18x the write throughput of the SQLite backend at sub-millisecond p50 —
+  cheap enough to persist every mutation as it happens.
 
 ---
 
