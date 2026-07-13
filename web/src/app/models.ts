@@ -304,6 +304,17 @@ export interface ReviewAgentRunRecord {
   traceEnabled: boolean;
   /** Artifacts humans have published to GitHub from this run (shared state). */
   postedArtifacts?: PostedArtifact[];
+  /** PR head sha this review examined — the base for "Check changes". */
+  reviewedHeadSha?: string;
+  /** Follow-up runs: the run this one verifies. */
+  priorRunId?: string;
+  /** Follow-up runs: per-prior-finding resolution classifications. */
+  resolutions?: {
+    findingId: string;
+    title: string;
+    status: "fixed" | "still_present" | "unverifiable";
+    evidence: string;
+  }[];
 }
 
 /**

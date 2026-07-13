@@ -400,6 +400,15 @@ router.post("/api/review/runs/:runId/findings/:findingId/comment", async (ctx) =
   ctx.response.body = { posted: true, url: result.htmlUrl };
 });
 
+// "Check changes": delta re-review after new commits — verifies prior
+// findings and reviews only the compare delta. Synchronous single planner
+// call; 409s carry the reason (no_new_commits / run_not_checkable / llm).
+router.post("/api/review/runs/:runId/check-changes", async (ctx) => {
+  const record = await deps.reviewService.runCheckChanges(ctx.params.runId || "");
+  ctx.response.status = 201;
+  ctx.response.body = record;
+});
+
 router.post("/api/review/runs/:runId/cancel", async (ctx) => {
   const runId = ctx.params.runId || "";
   ctx.response.body = {

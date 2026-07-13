@@ -2017,6 +2017,34 @@ export class CapillaryStore {
     }
   }
 
+  // --- "Check changes": delta re-review of the loaded run ---------------------
+  readonly checkChangesBusy = signal(false);
+
+  async checkChanges(): Promise<void> {
+    const runId = this.selectedReviewRunId() ?? this.reviewRun()?.id;
+    if (!runId || this.checkChangesBusy()) {
+      return;
+    }
+    this.checkChangesBusy.set(true);
+    this.lastError.set(null);
+    try {
+      const record = await this.api.checkChanges(runId);
+      // Load the follow-up like any run record: report, findings, shared state.
+      await this.openReviewFromHistory(record.runId);
+      void this.loadReviewRunHistory();
+      const fixed = (record.resolutions ?? []).filter((r) => r.status === "fixed").length;
+      this.reviewEvents.update((events) =>
+        events.concat(
+          `check_changes:${fixed}/${(record.resolutions ?? []).length} fixed, ${record.findingCount} open`,
+        )
+      );
+    } catch (error) {
+      this.lastError.set(`Check changes: ${toMessage(error)}`);
+    } finally {
+      this.checkChangesBusy.set(false);
+    }
+  }
+
   async openReviewFromHistory(runId: string): Promise<void> {
     try {
       const record = await this.api.getReviewAgentRun(runId);

@@ -810,6 +810,34 @@ export class GitHubOakService {
   }
 
   /**
+   * Compare two commits — the delta feed for "Check changes" follow-up
+   * reviews. Returns per-file patches only; token cost scales with the delta.
+   */
+  async compareCommits(
+    repositoryId: string,
+    baseSha: string,
+    headSha: string,
+  ): Promise<{ path: string; status: string; patch?: string }[]> {
+    this.validateRepositoryId(repositoryId);
+    if (!/^[0-9a-f]{7,40}$/i.test(baseSha) || !/^[0-9a-f]{7,40}$/i.test(headSha)) {
+      throw new AppError("invalid_commit_sha", 400, "invalid_commit_sha");
+    }
+    const token = await this.requireGithubToken();
+    const repo = await this.findRepositoryById(repositoryId, token);
+    const dto = await this.githubGet<{
+      files?: { filename: string; status: string; patch?: string }[];
+    }>(
+      `/repos/${repo.full_name}/compare/${baseSha}...${headSha}?per_page=100`,
+      token,
+    );
+    return (dto.files ?? []).map((file) => ({
+      path: file.filename,
+      status: file.status,
+      patch: file.patch,
+    }));
+  }
+
+  /**
    * Validate a member's personal token and return its GitHub identity —
    * team-mode identity attach. The token is only ever held in memory.
    */
