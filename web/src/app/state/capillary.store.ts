@@ -174,6 +174,8 @@ export class CapillaryStore {
   readonly agentRunPhase = signal<AgentRunPhase>("idle");
   /** In-flight functional run id (from run_start) — target for a live stop. */
   readonly cdpLiveRunId = signal<string | null>(null);
+  /** Launch a visible (headed) browser instead of the bundled headless shell. */
+  readonly cdpHeadedEnabled = signal(false);
   /** Wall-clock start of the live round, for the whole-second run clock. */
   readonly cdpRunStartedAt = signal<number | null>(null);
   readonly cdpInputTokens = signal(0);
@@ -296,7 +298,10 @@ export class CapillaryStore {
 
   async launchAgentBrowser(startUrl = this.cdpStartUrl()): Promise<void> {
     try {
-      const session = await this.api.createCdpSession(startUrl || "about:blank");
+      const session = await this.api.createCdpSession(
+        startUrl || "about:blank",
+        this.cdpHeadedEnabled(),
+      );
       this.activeCdpSessionId.set(session.sessionId);
       this.cdpSessions.update((current) =>
         [session].concat(current.filter((item) => item.sessionId !== session.sessionId))
@@ -386,7 +391,7 @@ export class CapillaryStore {
     this.enqueueRetvGoalRound(normalizedGoal);
   }
 
-  streamAgentFunctionalRound(goal: string): void {
+  async streamAgentFunctionalRound(goal: string): Promise<void> {
     const normalizedGoal = goal.trim();
     if (!normalizedGoal) {
       this.pushAgentMessage(
@@ -402,6 +407,12 @@ export class CapillaryStore {
         "A streaming round is already running. Stop it before starting another.",
       );
       return;
+    }
+
+    // Headed runs must own their session up front — the run's auto-start
+    // path spawns the bundled headless shell.
+    if (this.cdpHeadedEnabled() && !this.activeCdpSessionId()) {
+      await this.launchAgentBrowser();
     }
 
     this.cdpGoal.set(normalizedGoal);
@@ -559,6 +570,7 @@ export class CapillaryStore {
     switch (event.type) {
       case "run_start":
         this.agentRunPhase.set("observing");
+        this.cdpGoal.set(event.goal);
         this.cdpLiveRunId.set(event.runId);
         this.cdpRunStartedAt.set(Date.now());
         this.cdpInputTokens.set(0);

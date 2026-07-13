@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { ChangeDetectionStrategy, Component, computed, effect, ElementRef, inject, signal, viewChild } from "@angular/core";
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  ElementRef,
+  inject,
+  signal,
+  viewChild,
+} from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { GitHubRepositoryPickerComponent } from "../github/github-repository-picker.component";
 import { GraphTorusViewportComponent } from "../graph/graph-torus-viewport.component";
@@ -298,6 +307,21 @@ import { FileExplorerComponent } from "../explorer/file-explorer.component";
                     [value]="agentGoalInput()"
                     (input)="agentGoalInput.set($any($event.target).value)"></textarea>
 
+                  @if (store.cdpGoal(); as activeGoal) {
+                    <div class="cap-qa-goal-live">
+                      <div class="cap-qa-goal-live-head">
+                        <span class="cap-qa-kicker" style="margin: 0;">Active goal</span>
+                        <button
+                          class="cap-button cap-button-ghost cap-button-sm"
+                          type="button"
+                          (click)="copyActiveGoal()">
+                          {{ goalCopied() ? 'Copied ✓' : 'Copy' }}
+                        </button>
+                      </div>
+                      <span class="cap-qa-goal-live-text">{{ activeGoal }}</span>
+                    </div>
+                  }
+
                   <label class="cap-qa-option">
                     <input
                       type="checkbox"
@@ -305,6 +329,14 @@ import { FileExplorerComponent } from "../explorer/file-explorer.component";
                       (change)="store.cdpTraceEnabled.set($any($event.target).checked)" />
                     <span class="cap-qa-option-name">Trace run</span>
                     <span class="cap-muted">per-step trace + screenshots, bundle export</span>
+                  </label>
+                  <label class="cap-qa-option">
+                    <input
+                      type="checkbox"
+                      [checked]="store.cdpHeadedEnabled()"
+                      (change)="store.cdpHeadedEnabled.set($any($event.target).checked)" />
+                    <span class="cap-qa-option-name">Headed browser</span>
+                    <span class="cap-muted">launch a visible Chrome (bare-metal / host CDP)</span>
                   </label>
 
                   <div class="cap-row cap-qa-actions">
@@ -674,11 +706,17 @@ export class CapillaryShellComponent {
     { value: "ihhi_bedrock", label: "Bedrock (API key)" },
     { value: "openai_compatible", label: "OpenAI-compatible / local (API key)" },
   ];
-  readonly setupProviderDefaults: Record<RetvPlannerProviderKind, { model: string; baseUrl: string }> = {
+  readonly setupProviderDefaults: Record<
+    RetvPlannerProviderKind,
+    { model: string; baseUrl: string }
+  > = {
     github_copilot: { model: "openai/gpt-4.1", baseUrl: "https://models.github.ai" },
     openrouter: { model: "anthropic/claude-sonnet-4", baseUrl: "https://openrouter.ai/api/v1" },
     anthropic: { model: "claude-sonnet-4-20250514", baseUrl: "https://api.anthropic.com/v1" },
-    gemini: { model: "gemini-2.5-pro", baseUrl: "https://generativelanguage.googleapis.com/v1beta" },
+    gemini: {
+      model: "gemini-2.5-pro",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    },
     ihhi_bedrock: {
       model: "us.anthropic.claude-haiku-4-5-20251001-v1:0",
       baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
@@ -835,6 +873,20 @@ export class CapillaryShellComponent {
     }
     this.store.streamAgentFunctionalRound(goal);
     this.agentGoalInput.set("");
+  }
+
+  readonly goalCopied = signal(false);
+  copyActiveGoal(): void {
+    const goal = this.store.cdpGoal();
+    if (!goal) {
+      return;
+    }
+    void navigator.clipboard?.writeText(goal).then(() => {
+      this.goalCopied.set(true);
+      setTimeout(() => this.goalCopied.set(false), 1600);
+    }).catch(() => {
+      // Clipboard may be unavailable (permissions/http); selection still works.
+    });
   }
 
   stopLiveRound(): void {

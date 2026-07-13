@@ -4,13 +4,13 @@ import {
   AfterViewInit,
   ChangeDetectionStrategy,
   Component,
-  ElementRef,
-  OnDestroy,
-  ViewChild,
   computed,
   effect,
+  ElementRef,
   inject,
+  OnDestroy,
   signal,
+  ViewChild,
 } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import Zdog from "zdog";
@@ -307,7 +307,9 @@ export class GraphTorusViewportComponent implements AfterViewInit, OnDestroy {
     });
   }
 
-  readonly trail = computed<TrailRow[]>(() => buildTrail(this.store.reviewGraph()?.nodes ?? [], this.store.reviewGraph()?.edges ?? []));
+  readonly trail = computed<TrailRow[]>(() =>
+    buildTrail(this.store.reviewGraph()?.nodes ?? [], this.store.reviewGraph()?.edges ?? [])
+  );
 
   setMode(mode: "surface" | "trail"): void {
     this.mode.set(mode);
@@ -455,7 +457,11 @@ export class GraphTorusViewportComponent implements AfterViewInit, OnDestroy {
   private onPointerMove = (event: PointerEvent): void => {
     if (this.dragging) {
       this.dragYaw += (event.clientX - this.lastPointerX) * 0.008;
-      this.dragPitch = clamp(this.dragPitch + (event.clientY - this.lastPointerY) * 0.008, -1.2, 1.2);
+      this.dragPitch = clamp(
+        this.dragPitch + (event.clientY - this.lastPointerY) * 0.008,
+        -1.2,
+        1.2,
+      );
       this.lastPointerX = event.clientX;
       this.lastPointerY = event.clientY;
       this.hover.set(null);
@@ -538,18 +544,24 @@ function buildCage(root: Zdog.Anchor): void {
     new Zdog.Ellipse({
       addTo: root,
       diameter: 2 * SCALE * TORUS_MINOR,
-      translate: { x: SCALE * TORUS_MAJOR * Math.cos(phi), z: SCALE * TORUS_MAJOR * Math.sin(phi), y: 0 },
+      translate: {
+        x: SCALE * TORUS_MAJOR * Math.cos(phi),
+        z: SCALE * TORUS_MAJOR * Math.sin(phi),
+        y: 0,
+      },
       rotate: { y: -phi },
       stroke: 1,
       color: CAGE_COLOR,
     });
   }
-  for (const [radius, y] of [
-    [TORUS_MAJOR + TORUS_MINOR, 0],
-    [TORUS_MAJOR - TORUS_MINOR, 0],
-    [TORUS_MAJOR, -TORUS_MINOR],
-    [TORUS_MAJOR, TORUS_MINOR],
-  ] as const) {
+  for (
+    const [radius, y] of [
+      [TORUS_MAJOR + TORUS_MINOR, 0],
+      [TORUS_MAJOR - TORUS_MINOR, 0],
+      [TORUS_MAJOR, -TORUS_MINOR],
+      [TORUS_MAJOR, TORUS_MINOR],
+    ] as const
+  ) {
     new Zdog.Ellipse({
       addTo: root,
       diameter: 2 * SCALE * radius,

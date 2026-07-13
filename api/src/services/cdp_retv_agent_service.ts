@@ -1188,7 +1188,8 @@ export class CdpRetvAgentService {
       const shot = await this.cdpDriver.executeWorkUnit(sessionId, {
         name: "retv_screenshot",
         stopOnFailure: true,
-        steps: [{ action: "screenshot", format: "jpeg", quality: 55 }],
+        // q80: preview crispness (q55 visibly mushed text in the stage).
+        steps: [{ action: "screenshot", format: "jpeg", quality: 80 }],
       });
       const step = shot.steps[0];
       if (step?.ok && step.output && typeof step.output === "object") {

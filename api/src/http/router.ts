@@ -369,7 +369,10 @@ router.get("/api/artifacts/:runId/graph", async (ctx) => {
 
 router.post("/api/cdp/sessions", async (ctx) => {
   const body = await ctx.request.body.json().catch(() => ({}));
-  const session = await deps.cdpDriverService.createSession(body.startUrl || "about:blank");
+  const session = await deps.cdpDriverService.createSession(
+    body.startUrl || "about:blank",
+    body.headed === true,
+  );
   ctx.response.status = 201;
   ctx.response.body = session;
 });

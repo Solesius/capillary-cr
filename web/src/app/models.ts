@@ -298,7 +298,6 @@ export interface ReviewAgentRunRecord {
   traceEnabled: boolean;
 }
 
-
 export interface GraphNode {
   id: string;
   kind: "file" | "symbol" | "test" | "config";
@@ -389,7 +388,15 @@ export interface CdpWorkUnitResult {
 }
 
 export interface RetvCdpToolCall {
-  tool: "navigate" | "waitForSelector" | "click" | "type" | "extractText" | "assertText" | "evaluate" | "readPage";
+  tool:
+    | "navigate"
+    | "waitForSelector"
+    | "click"
+    | "type"
+    | "extractText"
+    | "assertText"
+    | "evaluate"
+    | "readPage";
   args: Record<string, unknown>;
   reason: string;
 }
@@ -525,7 +532,13 @@ export type RetvCdpRunEvent =
   }
   | { type: "observation"; cycle: number; observation: RetvCdpCycleSummary["observation"] }
   | { type: "planner_delta"; cycle: number; text: string }
-  | { type: "planner"; cycle: number; rawContent: string; toolCalls: RetvCdpToolCall[]; findings: string[] }
+  | {
+    type: "planner";
+    cycle: number;
+    rawContent: string;
+    toolCalls: RetvCdpToolCall[];
+    findings: string[];
+  }
   | { type: "screenshot"; cycle: number; dataUrl: string }
   | {
     type: "cycle";
