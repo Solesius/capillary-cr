@@ -1536,8 +1536,18 @@ export class CdpRetvAgentService {
           break;
         }
         case "assertText": {
-          const selector = stringArg(call.args.selector);
           const includes = stringArg(call.args.includes);
+          // Ref-first assertion: a digest ref resolves to the exact element's
+          // cached selector — a generic CSS guess (e.g. bare `a`) matches the
+          // page's first anchor ("Skip to content") and false-negatives on
+          // text that is plainly present. Flagged by the agent's own run.
+          const ref = stringArg(call.args.ref);
+          const refSelector = ref ? this.#pageRefs.get(sessionId)?.get(ref)?.selector : undefined;
+          if (ref && !refSelector) {
+            steps.push(staleRefStep(ref));
+            break;
+          }
+          const selector = refSelector || stringArg(call.args.selector);
           if (selector && includes) {
             steps.push({ action: "assertText", selector, includes, timeoutMs: 6000 });
           }
