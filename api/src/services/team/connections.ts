@@ -67,6 +67,44 @@ export interface ConnectionPersistence {
   listConnections(): Promise<ChannelConnection[]>;
 }
 
+/**
+ * Hosts a webhook may point at, per app. Incoming webhooks only ever live on
+ * the platform's own domains; anything else turns the publisher into a
+ * server-side request relay (SSRF) — an arbitrary https URL would let a
+ * connection probe internal services and leak their reachability through
+ * delivery status. Self-hosted relays extend this explicitly via
+ * CAPILLARY_WEBHOOK_HOST_ALLOWLIST (operator-owned env, never client input).
+ */
+export const DEFAULT_WEBHOOK_HOST_SUFFIXES: Record<ChannelApp, readonly string[]> = {
+  slack: ["hooks.slack.com"],
+  // Teams "Workflows" webhooks live on logic.azure.com; legacy Office 365
+  // connectors on webhook.office.com.
+  teams: ["webhook.office.com", "logic.azure.com"],
+};
+
+/** True when `url` is https on an allowed webhook host for `app`. */
+export function isAllowedWebhookUrl(
+  url: string,
+  app: ChannelApp,
+  extraHostSuffixes: readonly string[] = [],
+): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:") {
+    return false;
+  }
+  const host = parsed.hostname.toLowerCase();
+  const suffixes = [...DEFAULT_WEBHOOK_HOST_SUFFIXES[app], ...extraHostSuffixes];
+  return suffixes.some((suffix) => {
+    const normalized = suffix.trim().toLowerCase().replace(/^\*?\./, "");
+    return normalized.length > 0 && (host === normalized || host.endsWith(`.${normalized}`));
+  });
+}
+
 export interface CreateConnectionInput {
   app: ChannelApp;
   label: string;
@@ -122,13 +160,15 @@ export class ConnectionStore {
   #connections = new Map<string, ChannelConnection>();
   #persistence: ConnectionPersistence | null;
   #defaultDetail: NotifyDetail;
+  #extraWebhookHosts: readonly string[];
 
   constructor(
     persistence: ConnectionPersistence | null,
-    options: { defaultDetail?: NotifyDetail } = {},
+    options: { defaultDetail?: NotifyDetail; extraWebhookHosts?: readonly string[] } = {},
   ) {
     this.#persistence = persistence;
     this.#defaultDetail = options.defaultDetail ?? "summary";
+    this.#extraWebhookHosts = options.extraWebhookHosts ?? [];
   }
 
   /**
@@ -147,7 +187,7 @@ export class ConnectionStore {
       { app: "teams", url: env.teamsWebhookUrl?.trim() },
     ];
     for (const seed of seeds) {
-      if (!seed.url || !isAcceptableWebhookUrl(seed.url)) {
+      if (!seed.url || !isAllowedWebhookUrl(seed.url, seed.app, this.#extraWebhookHosts)) {
         continue;
       }
       const exists = [...this.#connections.values()].some((c) => c.webhookUrl === seed.url);
@@ -179,8 +219,8 @@ export class ConnectionStore {
   async create(input: CreateConnectionInput): Promise<ChannelConnectionView> {
     const app = input.app === "teams" ? "teams" : "slack";
     const webhookUrl = String(input.webhookUrl ?? "").trim();
-    if (!isAcceptableWebhookUrl(webhookUrl)) {
-      throw new Error("webhook_url_must_be_https");
+    if (!isAllowedWebhookUrl(webhookUrl, app, this.#extraWebhookHosts)) {
+      throw new Error("webhook_host_not_allowed");
     }
     const connection: ChannelConnection = {
       id: crypto.randomUUID().slice(0, 8),
@@ -258,12 +298,4 @@ export class ConnectionStore {
 function toView(connection: ChannelConnection): ChannelConnectionView {
   const { webhookUrl: _webhookUrl, ...rest } = connection;
   return { ...rest, webhookUrlMasked: maskWebhookUrl(connection.webhookUrl) };
-}
-
-function isAcceptableWebhookUrl(url: string): boolean {
-  try {
-    return new URL(url).protocol === "https:";
-  } catch {
-    return false;
-  }
 }

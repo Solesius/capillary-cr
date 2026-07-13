@@ -6,6 +6,7 @@ import {
   connectionMatches,
   ConnectionPersistence,
   ConnectionStore,
+  isAllowedWebhookUrl,
   maskWebhookUrl,
 } from "../src/services/team/connections.ts";
 import { retvRecordToEvent, TeamEvent } from "../src/services/team/event_bus.ts";
@@ -43,12 +44,50 @@ Deno.test("ConnectionStore.create persists, defaults toggles, and masks the URL 
   assertEquals(persistence.saved.size, 1);
 });
 
-Deno.test("ConnectionStore.create rejects non-https webhook URLs", async () => {
+Deno.test("ConnectionStore.create rejects non-https and non-allowlisted webhook URLs", async () => {
   const store = new ConnectionStore(null);
   await assertRejects(() =>
     store.create({ app: "slack", label: "x", webhookUrl: "http://plain.example/hook" })
   );
   await assertRejects(() => store.create({ app: "slack", label: "x", webhookUrl: "not a url" }));
+  // SSRF surface flagged by self-review: arbitrary https hosts are refused —
+  // internal endpoints must not be probeable through the publisher.
+  await assertRejects(() =>
+    store.create({ app: "slack", label: "x", webhookUrl: "https://169.254.169.254/latest/meta" })
+  );
+  await assertRejects(() =>
+    store.create({ app: "slack", label: "x", webhookUrl: "https://internal.admin.corp/hook" })
+  );
+});
+
+Deno.test("isAllowedWebhookUrl enforces per-app hosts and env extension", () => {
+  assert(isAllowedWebhookUrl(SLACK_URL, "slack"));
+  assert(!isAllowedWebhookUrl(SLACK_URL, "teams"));
+  assert(
+    isAllowedWebhookUrl("https://x.webhook.office.com/webhookb2/abc", "teams"),
+  );
+  assert(
+    isAllowedWebhookUrl("https://prod-01.westus.logic.azure.com/workflows/a", "teams"),
+  );
+  // Suffix matching never falls for lookalike registrable domains.
+  assert(!isAllowedWebhookUrl("https://hooks.slack.com.evil.example/x", "slack"));
+  assert(!isAllowedWebhookUrl("https://evilhooks.slack.com.attacker.net/x", "slack"));
+  // Operator-owned allow-list extension for self-hosted relays.
+  assert(!isAllowedWebhookUrl("https://relay.corp.example/hook", "slack"));
+  assert(isAllowedWebhookUrl("https://relay.corp.example/hook", "slack", ["relay.corp.example"]));
+  assert(
+    isAllowedWebhookUrl("https://a.relay.corp.example/hook", "slack", ["*.relay.corp.example"]),
+  );
+});
+
+Deno.test("ConnectionStore honors the extra webhook host allow-list", async () => {
+  const store = new ConnectionStore(null, { extraWebhookHosts: ["relay.corp.example"] });
+  const created = await store.create({
+    app: "slack",
+    label: "#relay",
+    webhookUrl: "https://relay.corp.example/hook",
+  });
+  assert(created.webhookUrlMasked.startsWith("https://relay.corp.example"));
 });
 
 Deno.test("ConnectionStore.init loads persisted rows and seeds env webhooks exactly once", async () => {
@@ -67,7 +106,11 @@ Deno.test("ConnectionStore.init loads persisted rows and seeds env webhooks exac
 Deno.test("ConnectionStore.update patches toggles and enabled; delete removes from persistence", async () => {
   const persistence = new FakePersistence();
   const store = new ConnectionStore(persistence);
-  const created = await store.create({ app: "teams", label: "#eng", webhookUrl: SLACK_URL });
+  const created = await store.create({
+    app: "teams",
+    label: "#eng",
+    webhookUrl: "https://prod-01.westus.logic.azure.com/workflows/abc/triggers/manual/paths/invoke",
+  });
 
   const updated = await store.update(created.id, {
     enabled: false,

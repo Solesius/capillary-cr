@@ -102,8 +102,13 @@ const reviewSessionHub = new ReviewSessionHub((request, onEvent) =>
 // Team channel publishing: connections persist in the durable store when one
 // is attached (in-memory otherwise); env webhooks seed a default channel on
 // first boot. The publisher subscribes to the bus the agents emit on.
+const extraWebhookHosts = (Deno.env.get("CAPILLARY_WEBHOOK_HOST_ALLOWLIST") ?? "")
+  .split(",")
+  .map((host) => host.trim())
+  .filter((host) => host.length > 0);
 const teamConnections = new ConnectionStore(durableStore, {
   defaultDetail: Deno.env.get("CAPILLARY_NOTIFY_DETAIL") === "findings" ? "findings" : "summary",
+  extraWebhookHosts,
 });
 await teamConnections.init({
   slackWebhookUrl: Deno.env.get("CAPILLARY_SLACK_WEBHOOK_URL") ?? undefined,
@@ -111,6 +116,7 @@ await teamConnections.init({
 });
 const channelPublisher = new ChannelPublisher(teamConnections, {
   publicUrl: Deno.env.get("CAPILLARY_PUBLIC_URL") ?? undefined,
+  extraWebhookHosts,
 });
 channelPublisher.start(teamBus);
 

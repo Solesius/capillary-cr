@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
 import { assert, assertEquals } from "jsr:@std/assert";
-import { ConnectionStore } from "../src/services/team/connections.ts";
+import { ChannelConnection, ConnectionStore } from "../src/services/team/connections.ts";
 import { ReviewFinishedEvent, TeamEventBus } from "../src/services/team/event_bus.ts";
 import { ChannelPublisher } from "../src/services/team/publisher.ts";
 import { withPostedArtifact } from "../src/services/team/posted_artifacts.ts";
@@ -116,6 +116,51 @@ Deno.test("sendTest hits the connection webhook and reports the outcome", async 
   assertEquals(calls.length, 1);
   assert(calls[0].body.includes("connection test"));
 });
+
+Deno.test("publisher refuses delivery to a stored URL outside the allow-list", async () => {
+  // A connection persisted before the allow-list tightened: loaded from
+  // storage, but never posted to.
+  const store = new ConnectionStore(null);
+  const legit = await store.create({
+    app: "slack",
+    label: "#ok",
+    webhookUrl: "https://hooks.slack.com/services/OK",
+  });
+  const smuggled: ChannelConnection = {
+    ...store.getRaw(legit.id)!,
+    id: "smuggled",
+    label: "#internal",
+    webhookUrl: "https://internal.admin.corp/hook",
+  };
+  const persistence = new StubPersistence([smuggled]);
+  const loaded = new ConnectionStore(persistence);
+  await loaded.init();
+
+  const { calls, fetchFn } = capturingFetch();
+  const publisher = new ChannelPublisher(loaded, { fetchFn });
+  await publisher.deliver(EVENT);
+
+  assertEquals(calls.length, 0);
+  assertEquals(loaded.list()[0].lastError, "webhook_host_not_allowed");
+});
+
+class StubPersistence {
+  #rows: ChannelConnection[];
+  constructor(rows: ChannelConnection[]) {
+    this.#rows = rows;
+  }
+  saveConnection(connection: ChannelConnection): Promise<void> {
+    this.#rows = this.#rows.filter((row) => row.id !== connection.id).concat(connection);
+    return Promise.resolve();
+  }
+  deleteConnection(id: string): Promise<void> {
+    this.#rows = this.#rows.filter((row) => row.id !== id);
+    return Promise.resolve();
+  }
+  listConnections(): Promise<ChannelConnection[]> {
+    return Promise.resolve([...this.#rows]);
+  }
+}
 
 Deno.test("withPostedArtifact replaces the entry for the same target instead of duplicating", () => {
   const first = withPostedArtifact(undefined, {

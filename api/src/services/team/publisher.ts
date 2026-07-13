@@ -7,7 +7,12 @@
 // other channels, and never touches the emitting run.
 
 import { buildSlackPayload, buildTeamsPayload, buildTestPayload, CardContext } from "./cards.ts";
-import { ChannelConnection, connectionMatches, ConnectionStore } from "./connections.ts";
+import {
+  ChannelConnection,
+  connectionMatches,
+  ConnectionStore,
+  isAllowedWebhookUrl,
+} from "./connections.ts";
 import { TeamEvent, TeamEventBus } from "./event_bus.ts";
 
 const DELIVERY_TIMEOUT_MS = 8_000;
@@ -18,14 +23,20 @@ export class ChannelPublisher {
   #store: ConnectionStore;
   #publicUrl?: string;
   #fetch: FetchLike;
+  #extraWebhookHosts: readonly string[];
 
   constructor(
     store: ConnectionStore,
-    options: { publicUrl?: string; fetchFn?: FetchLike } = {},
+    options: {
+      publicUrl?: string;
+      fetchFn?: FetchLike;
+      extraWebhookHosts?: readonly string[];
+    } = {},
   ) {
     this.#store = store;
     this.#publicUrl = options.publicUrl?.trim() || undefined;
     this.#fetch = options.fetchFn ?? ((input, init) => fetch(input, init));
+    this.#extraWebhookHosts = options.extraWebhookHosts ?? [];
   }
 
   /** Subscribe to the bus; returns the detach function. */
@@ -63,6 +74,14 @@ export class ChannelPublisher {
     connection: ChannelConnection,
     payload: Record<string, unknown>,
   ): Promise<{ ok: boolean; error?: string }> {
+    // Re-check at delivery time: a URL persisted before the allow-list
+    // tightened (or after the env allow-list shrank) must not be posted to.
+    if (!isAllowedWebhookUrl(connection.webhookUrl, connection.app, this.#extraWebhookHosts)) {
+      const error = "webhook_host_not_allowed";
+      await this.#store.recordDelivery(connection.id, false, error);
+      console.warn(`channel delivery to "${connection.label}" refused: ${error}`);
+      return { ok: false, error };
+    }
     try {
       const response = await this.#fetch(connection.webhookUrl, {
         method: "POST",

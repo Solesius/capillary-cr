@@ -610,7 +610,12 @@ router.post("/api/team/connections", async (ctx) => {
     ctx.response.body = connection;
   } catch {
     ctx.response.status = 400;
-    ctx.response.body = { error: "invalid_webhook_url", message: "Webhook URL must be https." };
+    ctx.response.body = {
+      error: "webhook_host_not_allowed",
+      message: "Webhook URL must be https on an allowed webhook host " +
+        "(hooks.slack.com; *.webhook.office.com / *.logic.azure.com for Teams). " +
+        "Extend with CAPILLARY_WEBHOOK_HOST_ALLOWLIST for self-hosted relays.",
+    };
   }
 });
 

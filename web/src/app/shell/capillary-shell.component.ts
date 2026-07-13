@@ -644,7 +644,10 @@ import { FileExplorerComponent } from "../explorer/file-explorer.component";
                   (Slack: app directory → Incoming Webhooks; Teams: channel → Workflows →
                   "Post to a channel when a webhook request is received"), paste its URL here.
                   Finished reviews and functional runs post a card with the verdict, counts,
-                  token totals and a link back to this instance.
+                  token totals and a link back to this instance. URLs must live on the
+                  platform's webhook hosts (hooks.slack.com; *.webhook.office.com or
+                  *.logic.azure.com for Teams) — self-hosted relays are allowed via
+                  CAPILLARY_WEBHOOK_HOST_ALLOWLIST on the server.
                 </p>
                 @if (!store.teamPublicUrlConfigured()) {
                   <p class="cap-muted">
