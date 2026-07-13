@@ -133,3 +133,11 @@ describe("isStopArmed (cooperative cancellation, client side)", () => {
     expect(isStopArmed(null, false)).to.equal(false);
   });
 });
+
+describe("isStopArmed during the cancelling transition (#38)", () => {
+  it("should_disarm_stop_while_a_stop_is_already_in_flight", () => {
+    // Even with the server session still active — the loop is landing it.
+    expect(isStopArmed("cancelling", true)).to.equal(false);
+    expect(isStopArmed("cancelling", false)).to.equal(false);
+  });
+});

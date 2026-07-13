@@ -168,6 +168,34 @@ export class CelerReviewRepository implements ReviewRepository {
    * caches begin bounding themselves — nothing is replayed into memory, so boot
    * is instant and resident memory starts (and stays) flat.
    */
+  /**
+   * Boot-time sweep (#38): a run stranded in 'cancelling' means the process
+   * died between the stop request and the loop landing it. The user's intent
+   * is durable — finalize it to 'cancelled' so history never shows a phantom
+   * in-flight stop. Returns the number of runs finalized.
+   */
+  async finalizeInterruptedRuns(): Promise<number> {
+    if (!this.#durable) {
+      return 0;
+    }
+    let finalized = 0;
+    for (const run of await this.#durable.listRuns()) {
+      if (run.status !== "cancelling") {
+        continue;
+      }
+      const settled: ReviewRun = {
+        ...run,
+        status: "cancelled",
+        currentPhase: "cancelled",
+        finishedAt: run.finishedAt ?? new Date().toISOString(),
+      };
+      await this.#durable.saveRun(settled);
+      this.#runs.set(settled.id, settled);
+      finalized += 1;
+    }
+    return finalized;
+  }
+
   attachDurableStore(store: ReviewArtifactStore): void {
     this.#durable = store;
     for (

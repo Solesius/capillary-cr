@@ -33,6 +33,8 @@ export type ReviewRunStatus =
   | "wetting"
   | "graphing"
   | "reviewing"
+  /** Stop requested; the loop is landing it at its next boundary. */
+  | "cancelling"
   | "completed"
   | "failed"
   | "cancelled";

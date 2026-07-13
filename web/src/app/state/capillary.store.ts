@@ -1424,8 +1424,10 @@ export class CapillaryStore {
       return;
     }
 
-    this.status.set("cancelled");
-    this.reviewEvents.update((events) => events.concat("review_cancelled"));
+    // Intent acknowledged; the run is STOPPING, not stopped — the server's
+    // cancelled `done` stamps the terminal state when the loop lands it.
+    this.status.set("cancelling");
+    this.reviewEvents.update((events) => events.concat("review_cancelling"));
     void this.refreshReviewSessions();
   }
 

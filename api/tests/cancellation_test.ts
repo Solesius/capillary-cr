@@ -92,7 +92,7 @@ function buildOrchestrator(repository: CelerReviewRepository): AgenticReviewServ
   );
 }
 
-Deno.test("cancelReview marks the run cancelled with a finish timestamp", async () => {
+Deno.test("cancelReview records intent as 'cancelling' — terminal stamp belongs to the loop", async () => {
   const repository = new CelerReviewRepository();
   const service = buildOrchestrator(repository);
   await repository.createReviewRun(makeRun("run-stop"));
@@ -101,9 +101,10 @@ Deno.test("cancelReview marks the run cancelled with a finish timestamp", async 
   assertEquals(acknowledged, true);
 
   const run = await repository.getReviewRun("run-stop");
-  assertEquals(run.status, "cancelled");
-  assertEquals(run.currentPhase, "cancelled");
-  assert(typeof run.finishedAt === "string" && run.finishedAt.length > 0);
+  assertEquals(run.status, "cancelling");
+  assertEquals(run.currentPhase, "cancelling");
+  // finishedAt is the loop's to stamp (#finishCancelled / boot sweep).
+  assertEquals(run.finishedAt, undefined);
 });
 
 Deno.test("cancelReview on an unknown run rejects instead of inventing state", async () => {

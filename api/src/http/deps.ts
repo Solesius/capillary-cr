@@ -41,6 +41,11 @@ if (storageDir) {
     storageHealth.markDurable();
     registerDurableShutdown(durable);
     console.log(`durable review storage enabled at ${storageDir}`);
+    // #38: finalize any run stranded mid-stop by a crash/restart.
+    const finalized = await repository.finalizeInterruptedRuns();
+    if (finalized > 0) {
+      console.log(`finalized ${finalized} interrupted (cancelling) run(s) to cancelled`);
+    }
   } else {
     console.warn(
       "CAPILLARY_STORAGE_DIR set but celer-mem native storage is unavailable; using in-memory store",

@@ -119,6 +119,9 @@ class FakeStore implements ReviewArtifactStore {
   listGraphs() {
     return this.#scan<GraphSnapshot>(this.graphs);
   }
+  listRuns() {
+    return this.#scan<ReviewRun>(this.runs);
+  }
   close() {
     return Promise.resolve();
   }
@@ -533,4 +536,22 @@ Deno.test("secrets are never handed to the durable store", async () => {
   const serialized = JSON.stringify([...store.runs, ...store.findings, ...store.diffs]);
   assert(!serialized.includes("ghp_secret"));
   assert(!serialized.includes("sk-secret"));
+});
+
+Deno.test("boot sweep finalizes runs stranded in 'cancelling' (#38)", async () => {
+  const store = new FakeStore();
+  // A run whose stop was requested, then the process died mid-landing.
+  await store.saveRun(makeRun("run-stranded", { status: "cancelling", currentPhase: "cancelling" }));
+  await store.saveRun(makeRun("run-live", { status: "reviewing" }));
+
+  const repo = new CelerReviewRepository();
+  repo.attachDurableStore(store);
+  const finalized = await repo.finalizeInterruptedRuns();
+
+  assertEquals(finalized, 1);
+  const settled = await repo.getReviewRun("run-stranded");
+  assertEquals(settled.status, "cancelled");
+  assert(typeof settled.finishedAt === "string" && settled.finishedAt.length > 0);
+  // In-flight work untouched: the sweep only settles declared intent.
+  assertEquals((await repo.getReviewRun("run-live")).status, "reviewing");
 });
