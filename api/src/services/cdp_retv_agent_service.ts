@@ -1326,6 +1326,7 @@ export class CdpRetvAgentService {
       "Prefer 1-3 tool calls per cycle, but always make forward progress — every cycle should act (type/click/assert), not just observe.",
       "Selectors must be valid CSS only; never use xpath=, :contains(), or text= pseudo-selectors.",
       "The observation already contains the page's visibleText, headings, and interactiveLabels — READ it before acting. If it already answers the goal, record findings and mark progress instead of re-reading.",
+      "assertText accepts {ref, includes} — assert on a digest ref instead of guessing a CSS selector (a bare tag selector matches the page FIRST such element, not the one you saw).",
       'PREFER REFS over CSS selectors: readPage returns a ranked spatial digest — lines like e7 [action|main] "Sign in" <button>. role is nav/input/action/content/data; region is header/left/main/right/footer, or above/below meaning OFF-SCREEN (scroll or navigate to reach). Act with clickRef {ref} and typeRef {ref, text}; refs expire on navigation, so readPage again after the page changes.',
       "Spatial reasoning: version/release info usually lives in a right-rail or header region; primary actions in main; site chrome in header/footer. Use region tags to go straight to the right area instead of dumping body text.",
       "recentHistory[].toolOutputs holds the actual results of your previous tool calls (including readPage DOM). Treat those outputs as ground truth; do not claim you could not read the page when toolOutputs contains content.",
