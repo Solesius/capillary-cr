@@ -380,8 +380,58 @@ export class GitHubOakService {
     }
 
     const repositories = await this.fetchAllUserRepositories(token);
+    const mapped = repositories.map((repo) => this.toRepository(repo));
+    await this.repository.replaceRepositories(mapped);
+    return mapped;
+  }
 
-    const mapped = repositories.map((repo) => ({
+  /**
+   * Direct repository lookup for accounts whose catalog is unwieldy (6000+
+   * visible repos): "owner/name" fetches exactly that repo in one call;
+   * a bare name goes through the search API (top matches). Results upsert
+   * into the catalog so id-based resolution works immediately after.
+   */
+  async lookupRepositories(query: string): Promise<GitHubRepository[]> {
+    await this.requireAuthenticatedIdentity();
+    const token = await this.requireGithubToken();
+    const trimmed = query.trim();
+    if (!trimmed) {
+      return [];
+    }
+
+    let dtos: GitHubRepositoryDto[] = [];
+    if (trimmed.includes("/")) {
+      const [owner, name] = trimmed.split("/", 2).map((part) => part.trim());
+      const segment = /^[A-Za-z0-9_.-]+$/;
+      if (!segment.test(owner) || !segment.test(name)) {
+        return [];
+      }
+      try {
+        dtos = [await this.githubGet<GitHubRepositoryDto>(`/repos/${owner}/${name}`, token)];
+      } catch {
+        dtos = [];
+      }
+    } else {
+      try {
+        const result = await this.githubGet<{ items?: GitHubRepositoryDto[] }>(
+          `/search/repositories?q=${encodeURIComponent(`${trimmed} in:name`)}&per_page=10`,
+          token,
+        );
+        dtos = result.items ?? [];
+      } catch {
+        dtos = [];
+      }
+    }
+
+    const mapped = dtos.map((repo) => this.toRepository(repo));
+    if (mapped.length > 0) {
+      await this.repository.upsertRepositories(mapped);
+    }
+    return mapped;
+  }
+
+  private toRepository(repo: GitHubRepositoryDto): GitHubRepository {
+    return {
       id: String(repo.id),
       owner: repo.owner.login,
       name: repo.name,
@@ -391,10 +441,7 @@ export class GitHubOakService {
       htmlUrl: repo.html_url,
       language: repo.language || undefined,
       openPullRequestCount: repo.open_issues_count || 0,
-    }));
-
-    await this.repository.replaceRepositories(mapped);
-    return mapped;
+    };
   }
 
   async listPullRequests(

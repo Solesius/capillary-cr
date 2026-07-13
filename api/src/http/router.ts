@@ -49,6 +49,14 @@ router.get("/api/github/oauth/callback", async (ctx) => {
   }
 });
 
+// Exact-name escape hatch for huge accounts: owner/name (direct) or bare
+// name (search) — one query, no catalog walk. Registered before the
+// parameterized repository routes.
+router.get("/api/github/repositories/lookup", async (ctx) => {
+  const name = ctx.request.url.searchParams.get("name") || "";
+  ctx.response.body = await deps.githubService.lookupRepositories(name);
+});
+
 router.get("/api/github/repositories", async (ctx) => {
   const refresh = ctx.request.url.searchParams.get("refresh") === "1";
   ctx.response.body = await deps.githubService.listRepositories(refresh);

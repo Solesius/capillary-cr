@@ -958,6 +958,52 @@ export class CapillaryStore {
     }
   }
 
+  // --- direct repository lookup ---------------------------------------------
+  // 6000+ repo accounts: when the exact name is known, query it directly
+  // instead of hunting a truncated catalog. Results merge into the loaded
+  // list; an exact match selects itself.
+
+  readonly repoLookupBusy = signal(false);
+  readonly repoLookupMessage = signal<string | null>(null);
+
+  async lookupRepository(query: string): Promise<void> {
+    const trimmed = query.trim();
+    if (!trimmed || this.repoLookupBusy()) {
+      return;
+    }
+    this.repoLookupBusy.set(true);
+    this.repoLookupMessage.set(null);
+    try {
+      const found = await this.api.lookupRepositories(trimmed);
+      if (found.length === 0) {
+        this.repoLookupMessage.set(`No repository found for "${trimmed}".`);
+        return;
+      }
+      this.repositories.update((current) => {
+        const byId = new Map(current.map((repo) => [repo.id, repo]));
+        for (const repo of found) {
+          byId.set(repo.id, repo);
+        }
+        return [...byId.values()];
+      });
+      const lowered = trimmed.toLowerCase();
+      const exact = found.find((repo) =>
+        repo.fullName.toLowerCase() === lowered || repo.name?.toLowerCase() === lowered
+      );
+      const target = exact ?? (found.length === 1 ? found[0] : null);
+      if (target) {
+        await this.selectRepository(target.id);
+        this.repoLookupMessage.set(`Loaded ${target.fullName}.`);
+      } else {
+        this.repoLookupMessage.set(`${found.length} matches loaded — pick from the list.`);
+      }
+    } catch (error) {
+      this.repoLookupMessage.set(`Lookup failed: ${toMessage(error)}`);
+    } finally {
+      this.repoLookupBusy.set(false);
+    }
+  }
+
   async setPullRequestFilter(stateFilter: "open" | "closed"): Promise<void> {
     this.prStateFilter.set(stateFilter);
     const repositoryId = this.selectedRepositoryId();

@@ -65,6 +65,11 @@ export class ApiClientService {
     return this.get(`/api/github/repositories${refresh ? "?refresh=1" : ""}`);
   }
 
+  /** Direct lookup: "owner/name" exact, bare name via search. */
+  async lookupRepositories(name: string): Promise<GitHubRepository[]> {
+    return this.get(`/api/github/repositories/lookup?name=${encodeURIComponent(name)}`);
+  }
+
   async listPullRequests(
     repositoryId: string,
     stateFilter: "open" | "closed" = "open",

@@ -71,7 +71,8 @@ import { windowRepositories } from "../state/rules";
               autocomplete="off"
               placeholder="Search {{ store.repositories().length }} repositories…"
               [value]="repoQuery()"
-              (input)="repoQuery.set($any($event.target).value)" />
+              (input)="repoQuery.set($any($event.target).value)"
+              (keydown.enter)="lookupExact()" />
             <select
               id="repoSelect"
               class="cap-select"
@@ -97,6 +98,21 @@ import { windowRepositories } from "../state/rules";
                 </option>
               }
             </select>
+            <div class="cap-row" style="gap: 8px; align-items: center;">
+              <button
+                class="cap-button cap-button-sm"
+                type="button"
+                [disabled]="!repoQuery().trim() || store.repoLookupBusy()"
+                (click)="lookupExact()">
+                {{ store.repoLookupBusy() ? 'Searching…' : 'Find on GitHub ↵' }}
+              </button>
+              <span class="cap-muted" style="font-size: 0.72rem;">
+                exact owner/name loads one repo directly — no list needed
+              </span>
+            </div>
+            @if (store.repoLookupMessage()) {
+              <p class="cap-muted" style="margin: 4px 0 0; font-size: 0.78rem;">{{ store.repoLookupMessage() }}</p>
+            }
           </div>
 
           @if (store.selectedRepository()) {
@@ -278,5 +294,10 @@ export class GitHubRepositoryPickerComponent {
 
   selectRepository(repositoryId: string): void {
     void this.store.selectRepository(repositoryId);
+  }
+
+  /** Enter in the search box / the Find button: direct GitHub lookup. */
+  lookupExact(): void {
+    void this.store.lookupRepository(this.repoQuery());
   }
 }

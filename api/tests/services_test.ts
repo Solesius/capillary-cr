@@ -2052,3 +2052,108 @@ Deno.test("should_resolve_repository_by_id_from_catalog_without_github", async (
   assertEquals(pulls.length, 0);
   assertEquals(repoPageCalls(), walkCost);
 });
+
+Deno.test("should_lookup_exact_repository_by_owner_name_and_upsert_catalog", async () => {
+  let directHits = 0;
+  const fetcher = ((input: string | URL | Request): Promise<Response> => {
+    const url = typeof input === "string"
+      ? input
+      : input instanceof URL
+      ? input.toString()
+      : input.url;
+    if (url.endsWith("/user")) {
+      return Promise.resolve(
+        new Response(JSON.stringify({ id: 1, login: "acme", name: "Acme" }), { status: 200 }),
+      );
+    }
+    if (url.includes("/repos/big-org/exact-repo") && !url.includes("/pulls")) {
+      directHits += 1;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: 6001,
+            owner: { login: "big-org" },
+            name: "exact-repo",
+            full_name: "big-org/exact-repo",
+            default_branch: "main",
+            private: true,
+            html_url: "https://github.com/big-org/exact-repo",
+            language: "TypeScript",
+            open_issues_count: 3,
+          }),
+          { status: 200 },
+        ),
+      );
+    }
+    if (url.includes("/repos/big-org/exact-repo/pulls")) {
+      return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }));
+    }
+    if (url.includes("/user/repos")) {
+      return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }));
+    }
+    return Promise.resolve(new Response("{}", { status: 404 }));
+  }) as typeof fetch;
+
+  const repository = new CelerReviewRepository();
+  const githubService = new GitHubOakService(repository, fetcher);
+  await githubService.connectGithub("valid", "ghp_test_token");
+
+  const found = await githubService.lookupRepositories("big-org/exact-repo");
+  assertEquals(found.length, 1);
+  assertEquals(found[0].fullName, "big-org/exact-repo");
+  assertEquals(directHits, 1);
+
+  // The lookup upserted the catalog: id-based resolution works with no
+  // further direct fetches and zero page walks.
+  const pulls = await githubService.listPullRequests("6001");
+  assertEquals(pulls.length, 0);
+  assertEquals(directHits, 1);
+
+  // Malformed segments never reach the URL path.
+  assertEquals(await githubService.lookupRepositories("weird owner/na me"), []);
+  assertEquals(await githubService.lookupRepositories("   "), []);
+});
+
+Deno.test("should_lookup_bare_name_via_search_api", async () => {
+  const fetcher = ((input: string | URL | Request): Promise<Response> => {
+    const url = typeof input === "string"
+      ? input
+      : input instanceof URL
+      ? input.toString()
+      : input.url;
+    if (url.endsWith("/user")) {
+      return Promise.resolve(
+        new Response(JSON.stringify({ id: 1, login: "acme", name: "Acme" }), { status: 200 }),
+      );
+    }
+    if (url.includes("/search/repositories")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            items: [{
+              id: 6002,
+              owner: { login: "big-org" },
+              name: "needle",
+              full_name: "big-org/needle",
+              default_branch: "main",
+              private: false,
+              html_url: "https://github.com/big-org/needle",
+              language: "Go",
+              open_issues_count: 0,
+            }],
+          }),
+          { status: 200 },
+        ),
+      );
+    }
+    return Promise.resolve(new Response("{}", { status: 404 }));
+  }) as typeof fetch;
+
+  const repository = new CelerReviewRepository();
+  const githubService = new GitHubOakService(repository, fetcher);
+  await githubService.connectGithub("valid", "ghp_test_token");
+
+  const found = await githubService.lookupRepositories("needle");
+  assertEquals(found.length, 1);
+  assertEquals(found[0].fullName, "big-org/needle");
+});

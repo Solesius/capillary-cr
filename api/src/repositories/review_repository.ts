@@ -55,6 +55,8 @@ export interface ReviewRepository {
   setGithubToken(token: string | null): Promise<void>;
 
   replaceRepositories(repositories: GitHubRepository[]): Promise<void>;
+  /** Merge repositories into the catalog by id (direct-lookup results). */
+  upsertRepositories(repositories: GitHubRepository[]): Promise<void>;
   replacePullRequests(repositoryId: string, pullRequests: PullRequest[]): Promise<void>;
   upsertPullRequest(pullRequest: PullRequest): Promise<void>;
   savePullRequestDiff(repositoryId: string, pullRequestId: string, diff: DiffFile[]): Promise<void>;
@@ -234,6 +236,15 @@ export class CelerReviewRepository implements ReviewRepository {
   // --- GitHub catalog (memory only) ---
   replaceRepositories(repositories: GitHubRepository[]): Promise<void> {
     this.#repositories = repositories.slice();
+    return Promise.resolve();
+  }
+
+  upsertRepositories(repositories: GitHubRepository[]): Promise<void> {
+    const byId = new Map(this.#repositories.map((repo) => [repo.id, repo]));
+    for (const repo of repositories) {
+      byId.set(repo.id, repo);
+    }
+    this.#repositories = [...byId.values()];
     return Promise.resolve();
   }
 
