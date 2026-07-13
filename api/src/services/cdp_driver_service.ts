@@ -41,6 +41,17 @@ export type CdpWorkStep =
     timeoutMs?: number;
   }
   | {
+    /** Click at viewport coordinates — the ref-digest's bbox-center target. */
+    action: "clickAt";
+    x: number;
+    y: number;
+  }
+  | {
+    /** Type into the currently focused element (pair with clickAt). */
+    action: "insertText";
+    text: string;
+  }
+  | {
     action: "evaluate";
     expression: string;
     returnByValue?: boolean;
@@ -467,6 +478,11 @@ export class CdpDriverService {
           step.expression,
           step.returnByValue ?? true,
         );
+      case "clickAt":
+        return await this.clickAtPoint(session.connection, step.x, step.y);
+      case "insertText":
+        await session.connection.send("Input.insertText", { text: step.text });
+        return { inserted: step.text.length };
       case "screenshot":
         return await this.captureScreenshot(session.connection, step.format || "png", step.quality);
       default:
@@ -895,6 +911,18 @@ export class CdpDriverService {
     }
 
     return payload.result.value;
+  }
+
+  /** Real mouse click at viewport coordinates (pressed + released). */
+  private async clickAtPoint(
+    connection: CdpConnection,
+    x: number,
+    y: number,
+  ): Promise<{ clicked: { x: number; y: number } }> {
+    const base = { x, y, button: "left", clickCount: 1 } as const;
+    await connection.send("Input.dispatchMouseEvent", { type: "mousePressed", ...base });
+    await connection.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...base });
+    return { clicked: { x, y } };
   }
 
   private async captureScreenshot(
