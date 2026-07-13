@@ -14,6 +14,7 @@ import {
   toResponse,
 } from "./common.ts";
 import { estimateTokens } from "../provider_helpers.ts";
+import { logRawUsageOnce, normalizeAnthropicUsage } from "../usage.ts";
 
 function anthropicHeaders(apiKey: string): Record<string, string> {
   if (apiKey.startsWith("sk-ant-")) {
@@ -56,21 +57,15 @@ function parseAnthropicResponse(payload: unknown): {
     return null;
   }
 
-  const usage = (data?.usage as Record<string, unknown>) || {};
-  // Input = uncached + cache reads + cache writes: the API reports
-  // `input_tokens` as the UNCACHED slice only, and capillary's repeated
-  // system/context prompts live almost entirely in the cache fields — reading
-  // input_tokens alone under-counts by orders of magnitude. Never estimate
-  // input from the response text (that is the OUTPUT); an honest 0 beats
-  // fiction when usage is absent.
-  const inputTokens = (Number(usage.input_tokens) || 0) +
-    (Number(usage.cache_read_input_tokens) || 0) +
-    (Number(usage.cache_creation_input_tokens) || 0);
+  // Canonical accounting (see providers/usage.ts): cache-aware input incl.
+  // nested cache_creation breakdowns; input never estimated from output.
+  const usage = normalizeAnthropicUsage(data?.usage);
+  logRawUsageOnce("anthropic", data?.usage);
   return {
     content,
     stopReason: String(data?.stop_reason || "completed"),
-    inputTokens,
-    outputTokens: Number(usage.output_tokens || estimateTokens(content)) || 0,
+    inputTokens: usage.inputTotal,
+    outputTokens: usage.output || estimateTokens(content),
   };
 }
 

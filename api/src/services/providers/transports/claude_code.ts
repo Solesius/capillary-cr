@@ -13,6 +13,7 @@ import {
 } from "../provider_core.ts";
 import { invalidRequest } from "./common.ts";
 import { estimateTokens } from "../provider_helpers.ts";
+import { logRawUsageOnce, normalizeClaudeCliUsage } from "../usage.ts";
 
 // Claude Code transport.
 //
@@ -342,17 +343,15 @@ interface ClaudeOutcome {
 function applyResultEvent(event: Record<string, unknown>, streamedText: string): ClaudeOutcome {
   const isError = event.is_error === true;
   const resultText = asString(event.result) || streamedText;
-  const usage = isRecord(event.usage) ? event.usage : {};
-  // Input = uncached + cache reads + cache writes: the claude CLI reports
-  // `input_tokens` as the UNCACHED slice only, and capillary's repeated
-  // system/context prompts live almost entirely in the cache fields — reading
-  // input_tokens alone showed double-digit "in" counts against reality in the
-  // tens of thousands. Never estimate input from resultText — that is the
-  // model's OUTPUT; an honest 0 beats fiction when usage is absent.
-  const inputTokens = asNumber(usage.input_tokens) +
-    asNumber(usage.cache_read_input_tokens) +
-    asNumber(usage.cache_creation_input_tokens);
-  const outputTokens = asNumber(usage.output_tokens) || estimateTokens(resultText);
+  // Canonical accounting (see providers/usage.ts): the CLI's dialect varies
+  // by version — flat Anthropic-shaped usage, nested cache_creation, or cache
+  // fields living only in the camelCase per-model modelUsage map. A flat-only
+  // parse produced the live "IN 2" miscount; the mapper takes the richer
+  // reading. Input is never estimated from resultText (that is the OUTPUT).
+  const usage = normalizeClaudeCliUsage(event);
+  logRawUsageOnce("claude_code", { usage: event.usage, modelUsage: event.modelUsage });
+  const inputTokens = usage.inputTotal;
+  const outputTokens = usage.output || estimateTokens(resultText);
 
   if (isError) {
     return {

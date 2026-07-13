@@ -2,6 +2,7 @@
 // Copyright 2026 Khalil Warren — capillary
 import { errorResult, ProviderOps, ProviderRequest } from "../provider_core.ts";
 import { estimateTokens } from "../provider_helpers.ts";
+import { logRawUsageOnce, normalizeGeminiUsage } from "../usage.ts";
 import {
   authMissing,
   CONTENT_TYPE_JSON_HEADER,
@@ -52,12 +53,14 @@ function parseGeminiResponse(payload: unknown): {
     return null;
   }
 
-  const usage = (data?.usageMetadata as Record<string, unknown>) || {};
+  const usage = normalizeGeminiUsage(data?.usageMetadata);
+  logRawUsageOnce("gemini", data?.usageMetadata);
   return {
     content,
     finishReason: String(first?.finishReason || "STOP"),
-    inputTokens: Number(usage.promptTokenCount || estimateTokens(content)) || 0,
-    outputTokens: Number(usage.candidatesTokenCount || estimateTokens(content)) || 0,
+    // Canonical accounting: cache-aware input; never estimated from output.
+    inputTokens: usage.inputTotal,
+    outputTokens: usage.output || estimateTokens(content),
   };
 }
 

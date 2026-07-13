@@ -13,6 +13,7 @@ import {
   ProviderStreamCallback,
 } from "../provider_core.ts";
 import { emitTextStream, estimateTokens, JSON_CONTENT_TYPE } from "../provider_helpers.ts";
+import { logRawUsageOnce, normalizeOpenAiUsage } from "../usage.ts";
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 export const OPENAI_CHAT_COMPLETIONS_PATH = "/chat/completions";
@@ -139,12 +140,15 @@ export function parseOpenAiCompatibleResponse(payload: unknown): OpenAiParsedRes
     return null;
   }
 
-  const usage = (data?.usage as Record<string, unknown>) || {};
+  const usage = normalizeOpenAiUsage(data?.usage);
+  logRawUsageOnce("openai_dialect", data?.usage);
   return {
     content,
     finishReason: typeof choice?.finish_reason === "string" ? choice.finish_reason : "completed",
-    promptTokens: Number(usage.prompt_tokens || estimateTokens(content)) || 0,
-    completionTokens: Number(usage.completion_tokens || estimateTokens(content)) || 0,
+    // Canonical accounting: prompt_tokens already includes the cached slice;
+    // input is never estimated from the response text.
+    promptTokens: usage.inputTotal,
+    completionTokens: usage.output || estimateTokens(content),
   };
 }
 
