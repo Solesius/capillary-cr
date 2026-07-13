@@ -367,6 +367,16 @@ router.get("/api/artifacts/:runId/graph", async (ctx) => {
   ctx.response.body = await deps.artifactService.exportGraphJson(runId);
 });
 
+// Idempotent co-engineer browser: focuses the existing headed session,
+// relaunches if the user closed the window, opens one otherwise.
+router.post("/api/cdp/browser/open", async (ctx) => {
+  const body = await ctx.request.body.json().catch(() => ({}));
+  ctx.response.status = 201;
+  ctx.response.body = await deps.cdpDriverService.openHeadedBrowser(
+    body.startUrl || "about:blank",
+  );
+});
+
 router.post("/api/cdp/sessions", async (ctx) => {
   const body = await ctx.request.body.json().catch(() => ({}));
   const session = await deps.cdpDriverService.createSession(

@@ -312,6 +312,8 @@ export class CdpDriverService {
   #launchedBrowser: Deno.ChildProcess | null = null;
   /** Mode of the browser we spawned; null when none/external. */
   #launchedHeaded = false;
+  /** The one headed co-engineer session — reused/focused, never duplicated. */
+  #headedSessionId: string | null = null;
 
   constructor(options: CdpDriverServiceOptions = {}) {
     this.#baseUrl = options.baseUrl || this.#baseUrl;
@@ -361,6 +363,36 @@ export class CdpDriverService {
       connection,
     });
 
+    return summary;
+  }
+
+  /**
+   * Idempotent "Open Browser": the visible Chrome is the co-engineer surface,
+   * so there is exactly one. If it is open with a live session, focus and
+   * return it; if the user closed the window, relaunch; otherwise open it.
+   */
+  async openHeadedBrowser(startUrl = "about:blank"): Promise<CdpSessionSummary> {
+    if (this.#headedSessionId && this.#launchedHeaded && this.#launchedBrowser) {
+      const existing = this.#sessions.get(this.#headedSessionId);
+      if (existing) {
+        try {
+          await existing.connection.send("Target.activateTarget", {
+            targetId: existing.targetId,
+          });
+        } catch {
+          // Focus is best-effort; the session is still the one to reuse.
+        }
+        return {
+          sessionId: existing.sessionId,
+          targetId: existing.targetId,
+          targetUrl: existing.targetUrl,
+          createdAt: existing.createdAt,
+          lastActiveAt: existing.lastActiveAt,
+        };
+      }
+    }
+    const summary = await this.createSession(startUrl, true);
+    this.#headedSessionId = summary.sessionId;
     return summary;
   }
 
@@ -502,6 +534,15 @@ export class CdpDriverService {
     }
 
     const launchAttempt = await this.tryLaunchLocalBrowserForCdp(headed);
+    if (headed && launchAttempt.reason === "headed_browser_not_found") {
+      throw new AppError(
+        "headed_unavailable",
+        409,
+        "headed_unavailable: no visible-browser executable here (containers have " +
+          "only headless-shell). Run capillary bare-metal, or start Chrome on the " +
+          "host with --remote-debugging-port and point CDP_BASE_URL at it.",
+      );
+    }
     if (launchAttempt.launched && await this.waitForCdpReachable(9000)) {
       return;
     }
@@ -578,11 +619,28 @@ export class CdpDriverService {
     if (!this.isLocalBaseUrl()) {
       return { launched: false };
     }
+    // Resolve the executable BEFORE touching any running browser: killing the
+    // healthy headless instance and then discovering no headed Chrome exists
+    // left CDP dead and every subsequent launch 5xx-ing. Never destroy a
+    // working browser for a replacement that cannot start.
+    const executablePath = await resolveChromeExecutablePath(
+      this.#probeExecutable,
+      undefined,
+      { excludeHeadlessShell: headed },
+    );
+    if (!executablePath) {
+      return {
+        launched: false,
+        reason: headed ? "headed_browser_not_found" : "browser_not_found",
+      };
+    }
+
     if (this.#launchedBrowser) {
       if (this.#launchedHeaded === headed) {
         return { launched: false };
       }
-      // Mode switch requested: retire the spawned browser and relaunch.
+      // Mode switch requested and the replacement is confirmed launchable:
+      // retire the spawned browser and relaunch.
       try {
         this.#launchedBrowser.kill("SIGTERM");
       } catch {
@@ -590,15 +648,6 @@ export class CdpDriverService {
       }
       this.#launchedBrowser = null;
       await this.sleep(400);
-    }
-
-    const executablePath = await resolveChromeExecutablePath(
-      this.#probeExecutable,
-      undefined,
-      { excludeHeadlessShell: headed },
-    );
-    if (!executablePath) {
-      return { launched: false, reason: "browser_not_found" };
     }
 
     const debugPort = this.resolveDebugPort();
@@ -625,8 +674,18 @@ export class CdpDriverService {
     ];
 
     try {
-      this.#launchedBrowser = this.#launchBrowser(executablePath, args);
+      const child = this.#launchBrowser(executablePath, args);
+      this.#launchedBrowser = child;
       this.#launchedHeaded = headed;
+      // Track the browser's real lifetime: when the user closes the headed
+      // window (process exits), forget it so the next Open click relaunches
+      // instead of talking to a corpse.
+      child.status.then(() => {
+        if (this.#launchedBrowser === child) {
+          this.#launchedBrowser = null;
+          this.#headedSessionId = null;
+        }
+      }).catch(() => {});
       return { launched: true };
     } catch {
       this.#launchedBrowser = null;
@@ -930,10 +989,27 @@ export class CdpDriverService {
     format: "png" | "jpeg",
     quality?: number,
   ): Promise<{ format: string; dataBase64: string }> {
+    // Force HiDPI at capture time: a clip with an explicit scale renders the
+    // viewport at 2x regardless of whether the emulation override stuck —
+    // the override-only approach still produced mushy frames on some targets.
+    const scale = Number(Deno.env.get("CDP_DEVICE_SCALE")) || 2;
+    let clip: { x: number; y: number; width: number; height: number; scale: number } | undefined;
+    try {
+      const metrics = await connection.send<{
+        cssLayoutViewport?: { clientWidth?: number; clientHeight?: number };
+        layoutViewport?: { clientWidth?: number; clientHeight?: number };
+      }>("Page.getLayoutMetrics", {});
+      const viewport = metrics.cssLayoutViewport ?? metrics.layoutViewport;
+      if (viewport?.clientWidth && viewport?.clientHeight) {
+        clip = { x: 0, y: 0, width: viewport.clientWidth, height: viewport.clientHeight, scale };
+      }
+    } catch {
+      // Fall back to the plain capture below.
+    }
     const payload = await connection.send<{ data: string }>("Page.captureScreenshot", {
       format,
       quality: format === "jpeg" ? quality || 80 : undefined,
-      captureBeyondViewport: true,
+      ...(clip ? { clip, captureBeyondViewport: false } : { captureBeyondViewport: true }),
     });
 
     return {

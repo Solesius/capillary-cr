@@ -330,14 +330,7 @@ import { FileExplorerComponent } from "../explorer/file-explorer.component";
                     <span class="cap-qa-option-name">Trace run</span>
                     <span class="cap-muted">per-step trace + screenshots, bundle export</span>
                   </label>
-                  <label class="cap-qa-option">
-                    <input
-                      type="checkbox"
-                      [checked]="store.cdpHeadedEnabled()"
-                      (change)="store.cdpHeadedEnabled.set($any($event.target).checked)" />
-                    <span class="cap-qa-option-name">Headed browser</span>
-                    <span class="cap-muted">launch a visible Chrome (bare-metal / host CDP)</span>
-                  </label>
+
 
                   <div class="cap-row cap-qa-actions">
                     <button class="cap-button cap-button-primary" (click)="runLiveFunctionalRound()" [disabled]="store.agentStreaming()">Run Live ▶</button>
@@ -366,7 +359,11 @@ import { FileExplorerComponent } from "../explorer/file-explorer.component";
                     <div class="cap-qa-sessions-head">
                       <span class="cap-qa-kicker">Sessions · {{ store.cdpSessions().length }}</span>
                       <span class="cap-qa-session-tools">
-                        <button class="cap-button cap-button-ghost cap-button-sm" (click)="launchAgentBrowser()">Launch</button>
+                        <button
+                          class="cap-button cap-button-sm"
+                          title="The co-engineer surface: focuses the open window, reopens if you closed it. Sign in by hand, then steer the run."
+                          (click)="openHeadedBrowser()">Open Browser ▸</button>
+                        <button class="cap-button cap-button-ghost cap-button-sm" (click)="launchAgentBrowser()">Headless</button>
                         <button class="cap-button cap-button-ghost cap-button-sm" (click)="refreshAgentSessions()">Refresh</button>
                         <button class="cap-button cap-button-ghost cap-button-sm" (click)="closeAgentBrowser()" [disabled]="!store.activeCdpSession()">Close</button>
                       </span>
@@ -845,6 +842,10 @@ export class CapillaryShellComponent {
 
   async refreshAgentSessions(): Promise<void> {
     await this.store.refreshCdpSessions();
+  }
+
+  async openHeadedBrowser(): Promise<void> {
+    await this.store.openHeadedBrowser(this.store.cdpStartUrl() || undefined);
   }
 
   async launchAgentBrowser(): Promise<void> {

@@ -220,6 +220,11 @@ export class ApiClientService {
     return this.post("/api/cdp/sessions", { startUrl, headed });
   }
 
+  /** Idempotent visible-browser open: focus if open, relaunch if closed. */
+  async openHeadedBrowser(startUrl = "about:blank"): Promise<CdpSessionSummary> {
+    return this.post("/api/cdp/browser/open", { startUrl });
+  }
+
   async listCdpSessions(): Promise<CdpSessionSummary[]> {
     return this.get("/api/cdp/sessions");
   }

@@ -296,12 +296,30 @@ export class CapillaryStore {
     }
   }
 
+  /**
+   * Open (or focus, or relaunch) THE visible co-engineer browser. Idempotent
+   * by design: killed window -> reopens; open window -> focuses the one.
+   */
+  async openHeadedBrowser(startUrl = this.cdpStartUrl()): Promise<void> {
+    try {
+      const session = await this.api.openHeadedBrowser(startUrl || "about:blank");
+      this.activeCdpSessionId.set(session.sessionId);
+      this.cdpSessions.update((current) =>
+        [session].concat(current.filter((item) => item.sessionId !== session.sessionId))
+      );
+      this.pushAgentMessage(
+        "system",
+        `Visible browser ready at ${session.targetUrl} — sign in, steer, co-drive.`,
+        "info",
+      );
+    } catch (error) {
+      this.pushAgentMessage("system", `Browser open failed: ${toMessage(error)}`, "error");
+    }
+  }
+
   async launchAgentBrowser(startUrl = this.cdpStartUrl()): Promise<void> {
     try {
-      const session = await this.api.createCdpSession(
-        startUrl || "about:blank",
-        this.cdpHeadedEnabled(),
-      );
+      const session = await this.api.createCdpSession(startUrl || "about:blank");
       this.activeCdpSessionId.set(session.sessionId);
       this.cdpSessions.update((current) =>
         [session].concat(current.filter((item) => item.sessionId !== session.sessionId))
@@ -407,12 +425,6 @@ export class CapillaryStore {
         "A streaming round is already running. Stop it before starting another.",
       );
       return;
-    }
-
-    // Headed runs must own their session up front — the run's auto-start
-    // path spawns the bundled headless shell.
-    if (this.cdpHeadedEnabled() && !this.activeCdpSessionId()) {
-      await this.launchAgentBrowser();
     }
 
     this.cdpGoal.set(normalizedGoal);
