@@ -2,6 +2,7 @@
 // Copyright 2026 Khalil Warren — capillary
 import { errorResult, ProviderOps, ProviderRequest } from "../provider_core.ts";
 import { estimateTokens } from "../provider_helpers.ts";
+import { logRawUsageOnce, normalizeBedrockUsage } from "../usage.ts";
 import {
   authMissing,
   CONTENT_TYPE_JSON_HEADER,
@@ -48,12 +49,14 @@ function parseBedrockResponse(payload: unknown): {
     return null;
   }
 
-  const usage = (data?.usage as Record<string, unknown>) || {};
+  const usage = normalizeBedrockUsage(data?.usage);
+  logRawUsageOnce("bedrock", data?.usage);
   return {
     content,
     stopReason: String(data?.stopReason || "completed"),
-    inputTokens: Number(usage.inputTokens || estimateTokens(content)) || 0,
-    outputTokens: Number(usage.outputTokens || estimateTokens(content)) || 0,
+    // Canonical accounting: cache-aware input; never estimated from output.
+    inputTokens: usage.inputTotal,
+    outputTokens: usage.output || estimateTokens(content),
   };
 }
 

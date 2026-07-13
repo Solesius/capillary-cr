@@ -14,6 +14,7 @@
 import { buildProviderFromKind, type ProviderKind } from "./provider_registry.ts";
 import { chat, chatStream } from "./provider_client.ts";
 import type { ProviderStreamEvent } from "./provider_core.ts";
+import { usageLooksSuspect } from "./usage.ts";
 
 export type PlannerProviderKind = ProviderKind | "openai_compatible";
 
@@ -40,6 +41,37 @@ const DEFAULT_TEMPERATURE = 0.1;
 const DEFAULT_MAX_OUTPUT_TOKENS = 1600;
 
 /** Single-shot planner chat, transparently routing provider vs OpenAI-compatible. */
+
+const suspectWarnedFor = new Set<string>();
+
+/**
+ * Plausibility sentinel: when a provider's reported input undershoots the
+ * prompt we just sent by 4x+, the reading is almost certainly a dialect miss.
+ * Warn once per provider — never "correct" the number (no fabrication).
+ */
+function warnIfUsageSuspect(
+  providerKind: string,
+  inputTokens: number | undefined,
+  promptChars: number,
+): void {
+  const usage = {
+    inputFresh: inputTokens ?? 0,
+    inputCacheRead: 0,
+    inputCacheWrite: 0,
+    inputTotal: inputTokens ?? 0,
+    output: 0,
+    source: "provider" as const,
+  };
+  if (usageLooksSuspect(usage, promptChars) && !suspectWarnedFor.has(providerKind)) {
+    suspectWarnedFor.add(providerKind);
+    console.warn(
+      `[usage:${providerKind}] reported input ${usage.inputTotal} tokens for a ` +
+        `~${Math.round(promptChars / 4)}-token prompt — probable dialect miss. ` +
+        `Set CAPILLARY_LOG_RAW_USAGE=1 to capture the raw payload.`,
+    );
+  }
+}
+
 export async function plannerChat(
   config: PlannerChatConfig,
   systemPrompt: string,
@@ -76,6 +108,11 @@ export async function plannerChat(
     };
   }
 
+  warnIfUsageSuspect(
+    config.providerKind,
+    response.value.inputTokens,
+    systemPrompt.length + userMessage.length,
+  );
   return {
     ok: true,
     value: {
@@ -128,6 +165,11 @@ export async function plannerChatStream(
     };
   }
 
+  warnIfUsageSuspect(
+    config.providerKind,
+    response.value.inputTokens,
+    systemPrompt.length + userMessage.length,
+  );
   return {
     ok: true,
     value: {
