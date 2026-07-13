@@ -5,6 +5,10 @@ import {
   CdpSessionSummary,
   CdpWorkUnitRequest,
   CdpWorkUnitResult,
+  ChannelApp,
+  ChannelConnectionView,
+  ChannelEventToggles,
+  NotifyDetail,
   GitHubOAuthPollResponse,
   GitHubOAuthStartResponse,
   GitHubRepository,
@@ -315,6 +319,66 @@ export class ApiClientService {
     if (!response.ok) {
       throw await this.toApiError(response);
     }
+    return response.json();
+  }
+
+  // --- team channel connections (webhook URLs only travel to the server) ---
+
+  async listTeamConnections(): Promise<{
+    connections: ChannelConnectionView[];
+    publicUrlConfigured: boolean;
+  }> {
+    return this.get("/api/team/connections");
+  }
+
+  async createTeamConnection(request: {
+    app: ChannelApp;
+    label: string;
+    webhookUrl: string;
+    detail?: NotifyDetail;
+  }): Promise<ChannelConnectionView> {
+    return this.post("/api/team/connections", request);
+  }
+
+  async updateTeamConnection(
+    id: string,
+    request: {
+      label?: string;
+      events?: Partial<ChannelEventToggles>;
+      detail?: NotifyDetail;
+      enabled?: boolean;
+    },
+  ): Promise<ChannelConnectionView> {
+    return this.tracked(async () => {
+      const response = await fetch(`${this.baseUrl}/api/team/connections/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(request),
+      });
+      if (!response.ok) {
+        throw await this.toApiError(response);
+      }
+      return response.json();
+    });
+  }
+
+  async deleteTeamConnection(id: string): Promise<{ deleted: boolean }> {
+    return this.tracked(async () => {
+      const response = await fetch(`${this.baseUrl}/api/team/connections/${id}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        throw await this.toApiError(response);
+      }
+      return response.json();
+    });
+  }
+
+  async testTeamConnection(id: string): Promise<{ ok: boolean; error?: string }> {
+    const response = await fetch(`${this.baseUrl}/api/team/connections/${id}/test`, {
+      method: "POST",
+    });
+    // 502 carries the delivery failure detail; surface it instead of throwing.
     return response.json();
   }
 

@@ -7,6 +7,9 @@ import {
   CdpSessionSummary,
   CdpWorkStep,
   CdpWorkUnitResult,
+  ChannelApp,
+  ChannelConnectionView,
+  ChannelEventToggles,
   GitHubRepository,
   GraphSnapshotView,
   PullRequest,
@@ -24,12 +27,13 @@ import {
   ReviewNarrativeEntry,
   ReviewProgress,
   ReviewRun,
+  NotifyDetail,
   ReviewRunEvent,
   ReviewSessionSummary,
   TcsrtcGate,
 } from "../models";
 import { ApiClientService } from "../services/api-client.service";
-import { countOpenPullRequests, isStopArmed } from "./rules";
+import { countOpenPullRequests, isStopArmed, seedPostedState } from "./rules";
 
 interface FunctionalGoalMilestone {
   id: string;
@@ -265,8 +269,9 @@ export class CapillaryStore {
 
   constructor(private readonly api: ApiClientService) {
     // Reconnect to any server-side review sessions that outlived the last
-    // page: reviews are durable, the browser is just a viewport.
-    void this.restoreReviewSessions();
+    // page: reviews are durable, the browser is just a viewport. A channel
+    // card's deep link (?run= / ?retvRun=) then overrides the default attach.
+    void this.restoreReviewSessions().then(() => this.applyDeepLink());
     // The server may already hold a GitHub identity (CAPILLARY_GITHUB_TOKEN
     // auto-connects at boot) — probe once so the UI reflects it instead of
     // stranding the user on the Connect screen while the API is fully live.
@@ -2018,8 +2023,16 @@ export class CapillaryStore {
       this.findings.set(record.findings);
       this.selectedReviewRunId.set(record.runId);
       this.selectedReviewTraceEnabled.set(record.traceEnabled);
-      this.prCommentState.set("idle");
-      this.prCommentUrl.set(null);
+      // Shared posted-state: seed from the record's persisted artifacts so
+      // anything already published (by anyone, from any browser) renders as
+      // "posted ✓ — view on GitHub" instead of a re-postable button.
+      const seed = seedPostedState(record.postedArtifacts);
+      this.commentState.set(seed.commentState);
+      this.commentUrl.set(seed.commentUrl);
+      this.suggestionState.set(seed.suggestionState);
+      this.suggestionUrl.set(seed.suggestionUrl);
+      this.prCommentUrl.set(seed.prCommentUrl);
+      this.prCommentState.set(seed.prCommentUrl ? "posted" : "idle");
     } catch (error) {
       this.reviewEvents.update((events) => events.concat(`history_open_error:${toMessage(error)}`));
     }
@@ -2031,6 +2044,119 @@ export class CapillaryStore {
       return;
     }
     window.open(this.api.buildReviewExportUrl(runId), "_blank");
+  }
+
+  // --- team channel connections ---------------------------------------------
+  // Pick an app, point at a channel: completed reviews and functional runs
+  // publish there as cards that deep-link back into this instance. Webhook
+  // URLs travel to the server once and only come back masked.
+
+  readonly teamConnections = signal<ChannelConnectionView[]>([]);
+  readonly teamPublicUrlConfigured = signal(false);
+  readonly teamConnectionBusy = signal(false);
+  readonly teamConnectionError = signal<string | null>(null);
+  readonly teamTestState = signal<Record<string, "idle" | "testing" | "ok" | "failed">>({});
+
+  async loadTeamConnections(): Promise<void> {
+    try {
+      const result = await this.api.listTeamConnections();
+      this.teamConnections.set(result.connections);
+      this.teamPublicUrlConfigured.set(result.publicUrlConfigured);
+    } catch {
+      // Advisory settings surface; the panel simply renders empty.
+    }
+  }
+
+  async addTeamConnection(
+    input: { app: ChannelApp; label: string; webhookUrl: string },
+  ): Promise<boolean> {
+    this.teamConnectionBusy.set(true);
+    this.teamConnectionError.set(null);
+    try {
+      await this.api.createTeamConnection(input);
+      await this.loadTeamConnections();
+      return true;
+    } catch (error) {
+      this.teamConnectionError.set(toMessage(error));
+      return false;
+    } finally {
+      this.teamConnectionBusy.set(false);
+    }
+  }
+
+  async patchTeamConnection(
+    id: string,
+    patch: {
+      label?: string;
+      events?: Partial<ChannelEventToggles>;
+      detail?: NotifyDetail;
+      enabled?: boolean;
+    },
+  ): Promise<void> {
+    try {
+      const updated = await this.api.updateTeamConnection(id, patch);
+      this.teamConnections.update((current) =>
+        current.map((connection) => connection.id === id ? updated : connection)
+      );
+    } catch (error) {
+      this.teamConnectionError.set(toMessage(error));
+    }
+  }
+
+  async removeTeamConnection(id: string): Promise<void> {
+    try {
+      await this.api.deleteTeamConnection(id);
+      this.teamConnections.update((current) =>
+        current.filter((connection) => connection.id !== id)
+      );
+    } catch (error) {
+      this.teamConnectionError.set(toMessage(error));
+    }
+  }
+
+  async testTeamConnection(id: string): Promise<void> {
+    this.teamTestState.update((map) => ({ ...map, [id]: "testing" }));
+    try {
+      const result = await this.api.testTeamConnection(id);
+      this.teamTestState.update((map) => ({ ...map, [id]: result.ok ? "ok" : "failed" }));
+      if (!result.ok && result.error) {
+        this.teamConnectionError.set(`Test delivery failed: ${result.error}`);
+      }
+      // Refresh so lastPostedAt / lastError from the delivery show up.
+      await this.loadTeamConnections();
+    } catch (error) {
+      this.teamTestState.update((map) => ({ ...map, [id]: "failed" }));
+      this.teamConnectionError.set(toMessage(error));
+    }
+  }
+
+  // --- channel-card deep links ----------------------------------------------
+  // Published cards link to `?run=<id>` / `?retvRun=<id>` against the
+  // instance's public URL; landing here routes straight into that run.
+
+  /** Page the shell should open to satisfy a deep link, consumed once. */
+  readonly deepLinkPage = signal<"run" | "agent" | null>(null);
+
+  applyDeepLink(): void {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const reviewRunId = params.get("run");
+    const retvRunId = params.get("retvRun");
+    if (reviewRunId) {
+      // Live (or replayable) session preferred; an evicted finished session
+      // still opens from durable history.
+      if (this.reviewSessions().some((session) => session.runId === reviewRunId)) {
+        this.attachToSession(reviewRunId);
+      } else {
+        void this.openReviewFromHistory(reviewRunId);
+      }
+      this.deepLinkPage.set("run");
+    } else if (retvRunId) {
+      void this.openRunFromHistory(retvRunId);
+      this.deepLinkPage.set("agent");
+    }
   }
 
   // --- file explorer (left fly-out, lazy content) ---------------------------

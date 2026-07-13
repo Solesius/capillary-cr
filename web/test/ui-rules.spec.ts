@@ -3,8 +3,10 @@ import {
   areCardsDisabled,
   computeReviewStages,
   isBeginEnabled,
+  seedPostedState,
   shouldShowCleanState,
   shouldShowGraphSummary,
+  watchersLabel,
   windowRepositories,
 } from "../src/app/state/rules";
 import { REVIEW_PHASES, toReviewPhase } from "../src/app/models";
@@ -165,5 +167,48 @@ describe("windowRepositories (1000+ repo picker window)", () => {
     expect(windowRepositories(repos, true, null, 100).hiddenCount).to.equal(0);
     const small = repos.slice(0, 40);
     expect(windowRepositories(small, false, null, 100).visible.length).to.equal(40);
+  });
+});
+
+describe("seedPostedState (shared posted-state from run records)", () => {
+  it("should_seed_posted_maps_from_persisted_artifacts", () => {
+    const seed = seedPostedState([
+      { kind: "inline", findingId: "f1", url: "https://gh/c/1", postedAt: "t1" },
+      { kind: "suggestion", findingId: "f2", url: "https://gh/s/2", postedAt: "t2" },
+      { kind: "summary", url: "https://gh/pr/3", postedAt: "t3" },
+    ]);
+    expect(seed.commentState).to.deep.equal({ f1: "posted" });
+    expect(seed.commentUrl).to.deep.equal({ f1: "https://gh/c/1" });
+    expect(seed.suggestionState).to.deep.equal({ f2: "posted" });
+    expect(seed.suggestionUrl).to.deep.equal({ f2: "https://gh/s/2" });
+    expect(seed.prCommentUrl).to.equal("https://gh/pr/3");
+  });
+
+  it("should_return_empty_seeds_for_missing_or_empty_artifacts", () => {
+    const empty = seedPostedState(undefined);
+    expect(empty.commentState).to.deep.equal({});
+    expect(empty.prCommentUrl).to.equal(null);
+    expect(seedPostedState([]).prCommentUrl).to.equal(null);
+  });
+
+  it("should_ignore_finding_scoped_artifacts_without_a_finding_id", () => {
+    const seed = seedPostedState([
+      { kind: "inline", url: "https://gh/c/1", postedAt: "t1" },
+    ]);
+    expect(seed.commentState).to.deep.equal({});
+  });
+});
+
+describe("watchersLabel (session presence chip)", () => {
+  it("should_label_multi_viewer_live_sessions", () => {
+    expect(watchersLabel(true, 3)).to.equal("3 watching");
+    expect(watchersLabel(true, 2)).to.equal("2 watching");
+  });
+
+  it("should_hide_presence_for_lone_viewers_finished_sessions_and_old_apis", () => {
+    expect(watchersLabel(true, 1)).to.equal(null);
+    expect(watchersLabel(true, 0)).to.equal(null);
+    expect(watchersLabel(true, undefined)).to.equal(null);
+    expect(watchersLabel(false, 5)).to.equal(null);
   });
 });

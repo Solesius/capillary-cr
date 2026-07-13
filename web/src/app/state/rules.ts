@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { REVIEW_PHASE_ORDER, ReviewPhase, ReviewStageKey } from "../models";
+import { PostedArtifact, REVIEW_PHASE_ORDER, ReviewPhase, ReviewStageKey } from "../models";
 
 export function isBeginEnabled(pullRequestSelected: boolean): boolean {
   return pullRequestSelected;
@@ -102,6 +102,55 @@ export function windowRepositories<T extends { id: string }>(
     visible.push(selected);
   }
   return { visible, hiddenCount: repos.length - visible.length };
+}
+
+export interface PostedStateSeed {
+  commentState: Record<string, "posted">;
+  commentUrl: Record<string, string>;
+  suggestionState: Record<string, "posted">;
+  suggestionUrl: Record<string, string>;
+  prCommentUrl: string | null;
+}
+
+/**
+ * Project a run record's persisted posted-artifacts onto the client posting
+ * maps. This is the shared-state seed: a teammate (or this browser after a
+ * refresh) opens the run and sees "posted ✓ — view on GitHub" for everything
+ * already published, instead of re-postable buttons that would duplicate
+ * comments on the PR.
+ */
+export function seedPostedState(artifacts: readonly PostedArtifact[] | undefined): PostedStateSeed {
+  const seed: PostedStateSeed = {
+    commentState: {},
+    commentUrl: {},
+    suggestionState: {},
+    suggestionUrl: {},
+    prCommentUrl: null,
+  };
+  for (const artifact of artifacts ?? []) {
+    if (artifact.kind === "summary") {
+      seed.prCommentUrl = artifact.url;
+    } else if (artifact.kind === "inline" && artifact.findingId) {
+      seed.commentState[artifact.findingId] = "posted";
+      seed.commentUrl[artifact.findingId] = artifact.url;
+    } else if (artifact.kind === "suggestion" && artifact.findingId) {
+      seed.suggestionState[artifact.findingId] = "posted";
+      seed.suggestionUrl[artifact.findingId] = artifact.url;
+    }
+  }
+  return seed;
+}
+
+/**
+ * Presence label for a session chip: how many clients are watching the live
+ * tail. Hidden (null) for finished sessions and unknown/zero counts — a lone
+ * viewer's own presence is not news.
+ */
+export function watchersLabel(active: boolean, watchers: number | undefined): string | null {
+  if (!active || !watchers || watchers < 2) {
+    return null;
+  }
+  return `${watchers} watching`;
 }
 
 export function isStopArmed(
