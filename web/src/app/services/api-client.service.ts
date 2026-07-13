@@ -3,25 +3,25 @@
 import { Injectable, signal } from "@angular/core";
 import {
   CdpSessionSummary,
-  GitHubOAuthPollResponse,
-  GitHubOAuthStartResponse,
-  RetvPlannerConfigUpdate,
-  RetvPlannerConfigView,
   CdpWorkUnitRequest,
   CdpWorkUnitResult,
-  GraphSnapshotView,
+  GitHubOAuthPollResponse,
+  GitHubOAuthStartResponse,
   GitHubRepository,
+  GraphSnapshotView,
   PullRequest,
   PullRequestDiffFile,
   PullRequestFileContent,
   RetvCdpRunListItem,
   RetvCdpRunRecord,
   RetvCdpRunResult,
+  RetvPlannerConfigUpdate,
+  RetvPlannerConfigView,
   ReviewAgentRunListItem,
   ReviewAgentRunRecord,
-  ReviewRun,
   ReviewChecklistItem,
   ReviewFinding,
+  ReviewRun,
   ReviewSessionSummary,
 } from "../models";
 
@@ -65,7 +65,10 @@ export class ApiClientService {
     return this.get("/api/github/repositories");
   }
 
-  async listPullRequests(repositoryId: string, stateFilter: "open" | "closed" = "open"): Promise<PullRequest[]> {
+  async listPullRequests(
+    repositoryId: string,
+    stateFilter: "open" | "closed" = "open",
+  ): Promise<PullRequest[]> {
     return this.get(`/api/github/repositories/${repositoryId}/pull-requests?state=${stateFilter}`);
   }
 
@@ -145,11 +148,17 @@ export class ApiClientService {
     return this.post(`/api/review/runs/${runId}/pr-comment`, {});
   }
 
-  async postFindingSuggestion(runId: string, findingId: string): Promise<{ posted: boolean; url: string }> {
+  async postFindingSuggestion(
+    runId: string,
+    findingId: string,
+  ): Promise<{ posted: boolean; url: string }> {
     return this.post(`/api/review/runs/${runId}/findings/${findingId}/suggestion`, {});
   }
 
-  async postFindingComment(runId: string, findingId: string): Promise<{ posted: boolean; url: string }> {
+  async postFindingComment(
+    runId: string,
+    findingId: string,
+  ): Promise<{ posted: boolean; url: string }> {
     return this.post(`/api/review/runs/${runId}/findings/${findingId}/comment`, {});
   }
 
@@ -207,15 +216,23 @@ export class ApiClientService {
     return JSON.parse(text) as GraphSnapshotView;
   }
 
-  async createCdpSession(startUrl = "about:blank"): Promise<CdpSessionSummary> {
-    return this.post("/api/cdp/sessions", { startUrl });
+  async createCdpSession(startUrl = "about:blank", headed = false): Promise<CdpSessionSummary> {
+    return this.post("/api/cdp/sessions", { startUrl, headed });
+  }
+
+  /** Idempotent visible-browser open: focus if open, relaunch if closed. */
+  async openHeadedBrowser(startUrl = "about:blank"): Promise<CdpSessionSummary> {
+    return this.post("/api/cdp/browser/open", { startUrl });
   }
 
   async listCdpSessions(): Promise<CdpSessionSummary[]> {
     return this.get("/api/cdp/sessions");
   }
 
-  async executeCdpWorkUnit(sessionId: string, request: CdpWorkUnitRequest): Promise<CdpWorkUnitResult> {
+  async executeCdpWorkUnit(
+    sessionId: string,
+    request: CdpWorkUnitRequest,
+  ): Promise<CdpWorkUnitResult> {
     return this.post(`/api/cdp/sessions/${sessionId}/work-units`, request);
   }
 
@@ -287,7 +304,9 @@ export class ApiClientService {
   }
 
   async closeCdpSession(sessionId: string): Promise<{ closed: boolean }> {
-    const response = await fetch(`${this.baseUrl}/api/cdp/sessions/${sessionId}`, { method: "DELETE" });
+    const response = await fetch(`${this.baseUrl}/api/cdp/sessions/${sessionId}`, {
+      method: "DELETE",
+    });
     if (!response.ok) {
       throw await this.toApiError(response);
     }

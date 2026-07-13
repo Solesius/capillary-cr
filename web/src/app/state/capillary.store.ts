@@ -174,6 +174,8 @@ export class CapillaryStore {
   readonly agentRunPhase = signal<AgentRunPhase>("idle");
   /** In-flight functional run id (from run_start) — target for a live stop. */
   readonly cdpLiveRunId = signal<string | null>(null);
+  /** Launch a visible (headed) browser instead of the bundled headless shell. */
+  readonly cdpHeadedEnabled = signal(false);
   /** Wall-clock start of the live round, for the whole-second run clock. */
   readonly cdpRunStartedAt = signal<number | null>(null);
   readonly cdpInputTokens = signal(0);
@@ -294,6 +296,27 @@ export class CapillaryStore {
     }
   }
 
+  /**
+   * Open (or focus, or relaunch) THE visible co-engineer browser. Idempotent
+   * by design: killed window -> reopens; open window -> focuses the one.
+   */
+  async openHeadedBrowser(startUrl = this.cdpStartUrl()): Promise<void> {
+    try {
+      const session = await this.api.openHeadedBrowser(startUrl || "about:blank");
+      this.activeCdpSessionId.set(session.sessionId);
+      this.cdpSessions.update((current) =>
+        [session].concat(current.filter((item) => item.sessionId !== session.sessionId))
+      );
+      this.pushAgentMessage(
+        "system",
+        `Visible browser ready at ${session.targetUrl} — sign in, steer, co-drive.`,
+        "info",
+      );
+    } catch (error) {
+      this.pushAgentMessage("system", `Browser open failed: ${toMessage(error)}`, "error");
+    }
+  }
+
   async launchAgentBrowser(startUrl = this.cdpStartUrl()): Promise<void> {
     try {
       const session = await this.api.createCdpSession(startUrl || "about:blank");
@@ -386,7 +409,7 @@ export class CapillaryStore {
     this.enqueueRetvGoalRound(normalizedGoal);
   }
 
-  streamAgentFunctionalRound(goal: string): void {
+  async streamAgentFunctionalRound(goal: string): Promise<void> {
     const normalizedGoal = goal.trim();
     if (!normalizedGoal) {
       this.pushAgentMessage(
@@ -559,6 +582,7 @@ export class CapillaryStore {
     switch (event.type) {
       case "run_start":
         this.agentRunPhase.set("observing");
+        this.cdpGoal.set(event.goal);
         this.cdpLiveRunId.set(event.runId);
         this.cdpRunStartedAt.set(Date.now());
         this.cdpInputTokens.set(0);

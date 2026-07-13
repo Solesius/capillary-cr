@@ -234,7 +234,12 @@ export class MonacoViewerComponent implements OnDestroy {
     monaco.editor.setTheme(this.theme());
 
     const useDiff = diffMode && baseContent !== null;
-    const modified = this.model(monaco, `capillary://head/${encodeURIComponent(path)}`, path, content);
+    const modified = this.model(
+      monaco,
+      `capillary://head/${encodeURIComponent(path)}`,
+      path,
+      content,
+    );
 
     if (useDiff) {
       this.teardownPlainEditor();

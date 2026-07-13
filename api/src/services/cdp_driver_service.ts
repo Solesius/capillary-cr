@@ -41,6 +41,17 @@ export type CdpWorkStep =
     timeoutMs?: number;
   }
   | {
+    /** Click at viewport coordinates — the ref-digest's bbox-center target. */
+    action: "clickAt";
+    x: number;
+    y: number;
+  }
+  | {
+    /** Type into the currently focused element (pair with clickAt). */
+    action: "insertText";
+    text: string;
+  }
+  | {
     action: "evaluate";
     expression: string;
     returnByValue?: boolean;
@@ -156,11 +167,15 @@ interface CdpDriverServiceOptions {
 export async function resolveChromeExecutablePath(
   probeExecutable: ProbeExecutable,
   chromePathEnv = Deno.env.get("CHROME_PATH") || "",
+  options: { excludeHeadlessShell?: boolean } = {},
 ): Promise<string | null> {
   const seen = new Set<string>();
+  // headless-shell has no UI at all — useless for a headed launch.
+  const excluded = (candidate: string) =>
+    options.excludeHeadlessShell === true && candidate.includes("headless-shell");
 
   for (const candidate of DEFAULT_CHROME_CANDIDATES) {
-    if (seen.has(candidate)) {
+    if (seen.has(candidate) || excluded(candidate)) {
       continue;
     }
     seen.add(candidate);
@@ -171,7 +186,7 @@ export async function resolveChromeExecutablePath(
   }
 
   const envPath = chromePathEnv.trim();
-  if (envPath.length > 0 && await probeExecutable(envPath)) {
+  if (envPath.length > 0 && !excluded(envPath) && await probeExecutable(envPath)) {
     return envPath;
   }
 
@@ -295,6 +310,10 @@ export class CdpDriverService {
   #probeExecutable: ProbeExecutable;
   #launchBrowser: LaunchBrowser;
   #launchedBrowser: Deno.ChildProcess | null = null;
+  /** Mode of the browser we spawned; null when none/external. */
+  #launchedHeaded = false;
+  /** The one headed co-engineer session — reused/focused, never duplicated. */
+  #headedSessionId: string | null = null;
 
   constructor(options: CdpDriverServiceOptions = {}) {
     this.#baseUrl = options.baseUrl || this.#baseUrl;
@@ -302,8 +321,8 @@ export class CdpDriverService {
     this.#launchBrowser = options.launchBrowser || launchBrowser;
   }
 
-  async createSession(startUrl = "about:blank"): Promise<CdpSessionSummary> {
-    await this.assertCdpAvailable();
+  async createSession(startUrl = "about:blank", headed = false): Promise<CdpSessionSummary> {
+    await this.assertCdpAvailable(headed);
 
     const target = await this.createTarget(startUrl);
     const connection = new CdpConnection();
@@ -313,6 +332,21 @@ export class CdpDriverService {
     await connection.send("Runtime.enable");
     await connection.send("DOM.enable");
     await connection.send("Network.enable");
+
+    // Crisp preview frames: pin a stable logical viewport with a 2x device
+    // scale factor so streamed screenshots are HiDPI instead of the headless
+    // default stretched blurry across the stage. Env-tunable; best-effort
+    // (non-page targets may reject the override).
+    try {
+      await connection.send("Emulation.setDeviceMetricsOverride", {
+        width: Number(Deno.env.get("CDP_VIEWPORT_WIDTH")) || 1280,
+        height: Number(Deno.env.get("CDP_VIEWPORT_HEIGHT")) || 800,
+        deviceScaleFactor: Number(Deno.env.get("CDP_DEVICE_SCALE")) || 2,
+        mobile: false,
+      });
+    } catch {
+      // Keep the session usable at default metrics.
+    }
 
     const sessionId = `cdp_${crypto.randomUUID().slice(0, 8)}`;
     const now = new Date().toISOString();
@@ -329,6 +363,36 @@ export class CdpDriverService {
       connection,
     });
 
+    return summary;
+  }
+
+  /**
+   * Idempotent "Open Browser": the visible Chrome is the co-engineer surface,
+   * so there is exactly one. If it is open with a live session, focus and
+   * return it; if the user closed the window, relaunch; otherwise open it.
+   */
+  async openHeadedBrowser(startUrl = "about:blank"): Promise<CdpSessionSummary> {
+    if (this.#headedSessionId && this.#launchedHeaded && this.#launchedBrowser) {
+      const existing = this.#sessions.get(this.#headedSessionId);
+      if (existing) {
+        try {
+          await existing.connection.send("Target.activateTarget", {
+            targetId: existing.targetId,
+          });
+        } catch {
+          // Focus is best-effort; the session is still the one to reuse.
+        }
+        return {
+          sessionId: existing.sessionId,
+          targetId: existing.targetId,
+          targetUrl: existing.targetUrl,
+          createdAt: existing.createdAt,
+          lastActiveAt: existing.lastActiveAt,
+        };
+      }
+    }
+    const summary = await this.createSession(startUrl, true);
+    this.#headedSessionId = summary.sessionId;
     return summary;
   }
 
@@ -446,6 +510,11 @@ export class CdpDriverService {
           step.expression,
           step.returnByValue ?? true,
         );
+      case "clickAt":
+        return await this.clickAtPoint(session.connection, step.x, step.y);
+      case "insertText":
+        await session.connection.send("Input.insertText", { text: step.text });
+        return { inserted: step.text.length };
       case "screenshot":
         return await this.captureScreenshot(session.connection, step.format || "png", step.quality);
       default:
@@ -453,14 +522,27 @@ export class CdpDriverService {
     }
   }
 
-  private async assertCdpAvailable(): Promise<void> {
+  private async assertCdpAvailable(headed = false): Promise<void> {
     const debugPort = this.resolveDebugPort();
 
-    if (await this.isCdpReachable()) {
+    // A headed request must not silently reuse an already-running headless
+    // browser we spawned — relaunch in the requested mode instead.
+    if (
+      await this.isCdpReachable() && !(headed && this.#launchedBrowser && !this.#launchedHeaded)
+    ) {
       return;
     }
 
-    const launchAttempt = await this.tryLaunchLocalBrowserForCdp();
+    const launchAttempt = await this.tryLaunchLocalBrowserForCdp(headed);
+    if (headed && launchAttempt.reason === "headed_browser_not_found") {
+      throw new AppError(
+        "headed_unavailable",
+        409,
+        "headed_unavailable: no visible-browser executable here (containers have " +
+          "only headless-shell). Run capillary bare-metal, or start Chrome on the " +
+          "host with --remote-debugging-port and point CDP_BASE_URL at it.",
+      );
+    }
     if (launchAttempt.launched && await this.waitForCdpReachable(9000)) {
       return;
     }
@@ -531,14 +613,41 @@ export class CdpDriverService {
     return 9222;
   }
 
-  private async tryLaunchLocalBrowserForCdp(): Promise<{ launched: boolean; reason?: string }> {
-    if (this.#launchedBrowser || !this.isLocalBaseUrl()) {
+  private async tryLaunchLocalBrowserForCdp(
+    headed = false,
+  ): Promise<{ launched: boolean; reason?: string }> {
+    if (!this.isLocalBaseUrl()) {
       return { launched: false };
     }
-
-    const executablePath = await resolveChromeExecutablePath(this.#probeExecutable);
+    // Resolve the executable BEFORE touching any running browser: killing the
+    // healthy headless instance and then discovering no headed Chrome exists
+    // left CDP dead and every subsequent launch 5xx-ing. Never destroy a
+    // working browser for a replacement that cannot start.
+    const executablePath = await resolveChromeExecutablePath(
+      this.#probeExecutable,
+      undefined,
+      { excludeHeadlessShell: headed },
+    );
     if (!executablePath) {
-      return { launched: false, reason: "browser_not_found" };
+      return {
+        launched: false,
+        reason: headed ? "headed_browser_not_found" : "browser_not_found",
+      };
+    }
+
+    if (this.#launchedBrowser) {
+      if (this.#launchedHeaded === headed) {
+        return { launched: false };
+      }
+      // Mode switch requested and the replacement is confirmed launchable:
+      // retire the spawned browser and relaunch.
+      try {
+        this.#launchedBrowser.kill("SIGTERM");
+      } catch {
+        // Already gone.
+      }
+      this.#launchedBrowser = null;
+      await this.sleep(400);
     }
 
     const debugPort = this.resolveDebugPort();
@@ -549,7 +658,11 @@ export class CdpDriverService {
     // non-root container without them. Unset for local headed driving.
     const extraFlags = (Deno.env.get("CDP_LAUNCH_FLAGS") || "")
       .split(/\s+/)
-      .filter((flag) => flag.length > 0);
+      .filter((flag) => flag.length > 0)
+      // Headed launch: strip operator-set headless flags so the actual
+      // browser window opens (bare-metal / host-CDP setups; a display-less
+      // container will simply fail to launch and report cdp_unavailable).
+      .filter((flag) => !headed || !flag.startsWith("--headless"));
     const args = [
       `--remote-debugging-port=${debugPort}`,
       `--user-data-dir=${userDataDir}`,
@@ -561,7 +674,18 @@ export class CdpDriverService {
     ];
 
     try {
-      this.#launchedBrowser = this.#launchBrowser(executablePath, args);
+      const child = this.#launchBrowser(executablePath, args);
+      this.#launchedBrowser = child;
+      this.#launchedHeaded = headed;
+      // Track the browser's real lifetime: when the user closes the headed
+      // window (process exits), forget it so the next Open click relaunches
+      // instead of talking to a corpse.
+      child.status.then(() => {
+        if (this.#launchedBrowser === child) {
+          this.#launchedBrowser = null;
+          this.#headedSessionId = null;
+        }
+      }).catch(() => {});
       return { launched: true };
     } catch {
       this.#launchedBrowser = null;
@@ -848,15 +972,44 @@ export class CdpDriverService {
     return payload.result.value;
   }
 
+  /** Real mouse click at viewport coordinates (pressed + released). */
+  private async clickAtPoint(
+    connection: CdpConnection,
+    x: number,
+    y: number,
+  ): Promise<{ clicked: { x: number; y: number } }> {
+    const base = { x, y, button: "left", clickCount: 1 } as const;
+    await connection.send("Input.dispatchMouseEvent", { type: "mousePressed", ...base });
+    await connection.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...base });
+    return { clicked: { x, y } };
+  }
+
   private async captureScreenshot(
     connection: CdpConnection,
     format: "png" | "jpeg",
     quality?: number,
   ): Promise<{ format: string; dataBase64: string }> {
+    // Force HiDPI at capture time: a clip with an explicit scale renders the
+    // viewport at 2x regardless of whether the emulation override stuck —
+    // the override-only approach still produced mushy frames on some targets.
+    const scale = Number(Deno.env.get("CDP_DEVICE_SCALE")) || 2;
+    let clip: { x: number; y: number; width: number; height: number; scale: number } | undefined;
+    try {
+      const metrics = await connection.send<{
+        cssLayoutViewport?: { clientWidth?: number; clientHeight?: number };
+        layoutViewport?: { clientWidth?: number; clientHeight?: number };
+      }>("Page.getLayoutMetrics", {});
+      const viewport = metrics.cssLayoutViewport ?? metrics.layoutViewport;
+      if (viewport?.clientWidth && viewport?.clientHeight) {
+        clip = { x: 0, y: 0, width: viewport.clientWidth, height: viewport.clientHeight, scale };
+      }
+    } catch {
+      // Fall back to the plain capture below.
+    }
     const payload = await connection.send<{ data: string }>("Page.captureScreenshot", {
       format,
       quality: format === "jpeg" ? quality || 80 : undefined,
-      captureBeyondViewport: true,
+      ...(clip ? { clip, captureBeyondViewport: false } : { captureBeyondViewport: true }),
     });
 
     return {

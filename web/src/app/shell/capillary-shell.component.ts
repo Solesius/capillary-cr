@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { ChangeDetectionStrategy, Component, computed, effect, ElementRef, inject, signal, viewChild } from "@angular/core";
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  ElementRef,
+  inject,
+  signal,
+  viewChild,
+} from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { GitHubRepositoryPickerComponent } from "../github/github-repository-picker.component";
 import { GraphTorusViewportComponent } from "../graph/graph-torus-viewport.component";
@@ -298,6 +307,21 @@ import { FileExplorerComponent } from "../explorer/file-explorer.component";
                     [value]="agentGoalInput()"
                     (input)="agentGoalInput.set($any($event.target).value)"></textarea>
 
+                  @if (store.cdpGoal(); as activeGoal) {
+                    <div class="cap-qa-goal-live">
+                      <div class="cap-qa-goal-live-head">
+                        <span class="cap-qa-kicker" style="margin: 0;">Active goal</span>
+                        <button
+                          class="cap-button cap-button-ghost cap-button-sm"
+                          type="button"
+                          (click)="copyActiveGoal()">
+                          {{ goalCopied() ? 'Copied ✓' : 'Copy' }}
+                        </button>
+                      </div>
+                      <span class="cap-qa-goal-live-text">{{ activeGoal }}</span>
+                    </div>
+                  }
+
                   <label class="cap-qa-option">
                     <input
                       type="checkbox"
@@ -306,6 +330,7 @@ import { FileExplorerComponent } from "../explorer/file-explorer.component";
                     <span class="cap-qa-option-name">Trace run</span>
                     <span class="cap-muted">per-step trace + screenshots, bundle export</span>
                   </label>
+
 
                   <div class="cap-row cap-qa-actions">
                     <button class="cap-button cap-button-primary" (click)="runLiveFunctionalRound()" [disabled]="store.agentStreaming()">Run Live ▶</button>
@@ -334,7 +359,11 @@ import { FileExplorerComponent } from "../explorer/file-explorer.component";
                     <div class="cap-qa-sessions-head">
                       <span class="cap-qa-kicker">Sessions · {{ store.cdpSessions().length }}</span>
                       <span class="cap-qa-session-tools">
-                        <button class="cap-button cap-button-ghost cap-button-sm" (click)="launchAgentBrowser()">Launch</button>
+                        <button
+                          class="cap-button cap-button-sm"
+                          title="The co-engineer surface: focuses the open window, reopens if you closed it. Sign in by hand, then steer the run."
+                          (click)="openHeadedBrowser()">Open Browser ▸</button>
+                        <button class="cap-button cap-button-ghost cap-button-sm" (click)="launchAgentBrowser()">Headless</button>
                         <button class="cap-button cap-button-ghost cap-button-sm" (click)="refreshAgentSessions()">Refresh</button>
                         <button class="cap-button cap-button-ghost cap-button-sm" (click)="closeAgentBrowser()" [disabled]="!store.activeCdpSession()">Close</button>
                       </span>
@@ -674,11 +703,17 @@ export class CapillaryShellComponent {
     { value: "ihhi_bedrock", label: "Bedrock (API key)" },
     { value: "openai_compatible", label: "OpenAI-compatible / local (API key)" },
   ];
-  readonly setupProviderDefaults: Record<RetvPlannerProviderKind, { model: string; baseUrl: string }> = {
+  readonly setupProviderDefaults: Record<
+    RetvPlannerProviderKind,
+    { model: string; baseUrl: string }
+  > = {
     github_copilot: { model: "openai/gpt-4.1", baseUrl: "https://models.github.ai" },
     openrouter: { model: "anthropic/claude-sonnet-4", baseUrl: "https://openrouter.ai/api/v1" },
     anthropic: { model: "claude-sonnet-4-20250514", baseUrl: "https://api.anthropic.com/v1" },
-    gemini: { model: "gemini-2.5-pro", baseUrl: "https://generativelanguage.googleapis.com/v1beta" },
+    gemini: {
+      model: "gemini-2.5-pro",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    },
     ihhi_bedrock: {
       model: "us.anthropic.claude-haiku-4-5-20251001-v1:0",
       baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
@@ -809,6 +844,10 @@ export class CapillaryShellComponent {
     await this.store.refreshCdpSessions();
   }
 
+  async openHeadedBrowser(): Promise<void> {
+    await this.store.openHeadedBrowser(this.store.cdpStartUrl() || undefined);
+  }
+
   async launchAgentBrowser(): Promise<void> {
     const startUrl = this.store.cdpStartUrl().trim() || "about:blank";
     this.store.cdpStartUrl.set(startUrl);
@@ -835,6 +874,20 @@ export class CapillaryShellComponent {
     }
     this.store.streamAgentFunctionalRound(goal);
     this.agentGoalInput.set("");
+  }
+
+  readonly goalCopied = signal(false);
+  copyActiveGoal(): void {
+    const goal = this.store.cdpGoal();
+    if (!goal) {
+      return;
+    }
+    void navigator.clipboard?.writeText(goal).then(() => {
+      this.goalCopied.set(true);
+      setTimeout(() => this.goalCopied.set(false), 1600);
+    }).catch(() => {
+      // Clipboard may be unavailable (permissions/http); selection still works.
+    });
   }
 
   stopLiveRound(): void {

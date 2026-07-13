@@ -2421,3 +2421,29 @@ html:not([data-theme="dark"]) .cap-qa-frame { background: #10182b; }
   color: var(--cap-muted, #64748b);
   white-space: nowrap;
 }
+
+/* Active goal — readonly, copyable, pinned while a run exists */
+.cap-qa-goal-live {
+  margin-top: 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--cap-border, #dce4ea);
+  border-left: 3px solid var(--cap-primary, #0f5d8c);
+  background: rgba(76, 154, 255, 0.05);
+}
+html[data-theme="dark"] .cap-qa-goal-live { border-left-color: #4c9aff; }
+.cap-qa-goal-live-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+.cap-qa-goal-live-text {
+  display: block;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--cap-text, inherit);
+  user-select: all;
+  word-break: break-word;
+}

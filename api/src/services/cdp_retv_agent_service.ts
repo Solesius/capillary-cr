@@ -92,7 +92,9 @@ export interface RetvCdpToolDefinition {
     | "extractText"
     | "assertText"
     | "evaluate"
-    | "readPage";
+    | "readPage"
+    | "clickRef"
+    | "typeRef";
   description: string;
   requiredArgs: string[];
 }
@@ -344,8 +346,18 @@ const TOOL_CATALOG: RetvCdpToolDefinition[] = [
   {
     name: "readPage",
     description:
-      "Read the raw page DOM via CDP: returns title, trimmed HTML, and a list of interactive elements with valid CSS selectors. Use this to discover real selectors when a click/assert fails or when unsure how to locate an element.",
+      'Spatial page digest: visible interactive elements ranked by salience, each as `eN [role|region] "label" <tag>` — role in nav/input/action/content/data, region in header/left/main/right/footer (above/below = off-screen, scroll to reach). Act on refs with clickRef/typeRef. Refs go stale after navigation: readPage again.',
     requiredArgs: [],
+  },
+  {
+    name: "clickRef",
+    description: "Click a digest ref (eN) at its true on-screen center — no selector guessing.",
+    requiredArgs: ["ref"],
+  },
+  {
+    name: "typeRef",
+    description: "Focus a digest ref (eN) with a real click, then type text into it.",
+    requiredArgs: ["ref", "text"],
   },
 ];
 
@@ -396,6 +408,16 @@ export class CdpRetvAgentService {
   readonly #cancelRequested = new Set<string>();
   /** Runs currently executing — the honest denominator for cancelRetvRun. */
   readonly #activeRuns = new Set<string>();
+
+  /**
+   * Latest page-digest refs per session (ref -> click target + selector).
+   * Written on every readPage; consumed by clickRef/typeRef. Refs go stale on
+   * navigation by design — the planner is told to readPage again.
+   */
+  readonly #pageRefs = new Map<
+    string,
+    Map<string, { cx: number; cy: number; selector: string }>
+  >();
 
   /**
    * Request a live stop for an in-flight functional run. Returns false when no
@@ -675,7 +697,7 @@ export class CdpRetvAgentService {
         findings: planner.findings,
       });
 
-      const steps = this.toCdpSteps(plannedCalls, startUrl);
+      const steps = this.toCdpSteps(plannedCalls, startUrl, sessionId);
       const workUnit = await this.cdpDriver.executeWorkUnit(sessionId, {
         name: `retv_goal_cycle_${cycle}`,
         stopOnFailure: true,
@@ -688,6 +710,7 @@ export class CdpRetvAgentService {
       }
 
       const failedSteps = workUnit.steps.filter((step) => !step.ok).length;
+      this.#capturePageRefs(sessionId, workUnit.steps);
       const toolOutputs = summarizeToolOutputs(plannedCalls, steps, workUnit.steps);
       const cycleFindings = this.collectCycleFindings(workUnit, planner.findings, driftWarnings);
 
@@ -1188,7 +1211,8 @@ export class CdpRetvAgentService {
       const shot = await this.cdpDriver.executeWorkUnit(sessionId, {
         name: "retv_screenshot",
         stopOnFailure: true,
-        steps: [{ action: "screenshot", format: "jpeg", quality: 55 }],
+        // q80: preview crispness (q55 visibly mushed text in the stage).
+        steps: [{ action: "screenshot", format: "jpeg", quality: 80 }],
       });
       const step = shot.steps[0];
       if (step?.ok && step.output && typeof step.output === "object") {
@@ -1302,6 +1326,9 @@ export class CdpRetvAgentService {
       "Prefer 1-3 tool calls per cycle, but always make forward progress — every cycle should act (type/click/assert), not just observe.",
       "Selectors must be valid CSS only; never use xpath=, :contains(), or text= pseudo-selectors.",
       "The observation already contains the page's visibleText, headings, and interactiveLabels — READ it before acting. If it already answers the goal, record findings and mark progress instead of re-reading.",
+      "assertText accepts {ref, includes} — assert on a digest ref instead of guessing a CSS selector (a bare tag selector matches the page FIRST such element, not the one you saw).",
+      'PREFER REFS over CSS selectors: readPage returns a ranked spatial digest — lines like e7 [action|main] "Sign in" <button>. role is nav/input/action/content/data; region is header/left/main/right/footer, or above/below meaning OFF-SCREEN (scroll or navigate to reach). Act with clickRef {ref} and typeRef {ref, text}; refs expire on navigation, so readPage again after the page changes.',
+      "Spatial reasoning: version/release info usually lives in a right-rail or header region; primary actions in main; site chrome in header/footer. Use region tags to go straight to the right area instead of dumping body text.",
       "recentHistory[].toolOutputs holds the actual results of your previous tool calls (including readPage DOM). Treat those outputs as ground truth; do not claim you could not read the page when toolOutputs contains content.",
       "Call readPage AT MOST ONCE for a given page state. After one readPage, you MUST act on the selectors it returned — never call readPage two cycles in a row.",
       "To fill a login form: type the email into the email/text input, type the password into the password input, then click the submit button. Extract concrete values (emails, passwords) directly from the goal text.",
@@ -1437,7 +1464,40 @@ export class CdpRetvAgentService {
     ];
   }
 
-  private toCdpSteps(toolCalls: RetvCdpToolCall[], startUrl: string): CdpWorkStep[] {
+  /** Harvest ref -> click-target maps from any readPage digest in results. */
+  #capturePageRefs(sessionId: string, results: CdpWorkStepResult[]): void {
+    for (const result of results) {
+      const output = result.output;
+      if (!result.ok || output === null || typeof output !== "object") {
+        continue;
+      }
+      const nodes = (output as Record<string, unknown>).nodes;
+      if (!Array.isArray(nodes)) {
+        continue;
+      }
+      const refs = new Map<string, { cx: number; cy: number; selector: string }>();
+      for (const node of nodes) {
+        const n = node as Record<string, unknown>;
+        const ref = String(n.ref || "");
+        if (ref) {
+          refs.set(ref, {
+            cx: Number(n.cx) || 0,
+            cy: Number(n.cy) || 0,
+            selector: String(n.selector || ""),
+          });
+        }
+      }
+      if (refs.size > 0) {
+        this.#pageRefs.set(sessionId, refs);
+      }
+    }
+  }
+
+  private toCdpSteps(
+    toolCalls: RetvCdpToolCall[],
+    startUrl: string,
+    sessionId: string,
+  ): CdpWorkStep[] {
     const steps: CdpWorkStep[] = [];
 
     for (const call of toolCalls.slice(0, 5)) {
@@ -1477,8 +1537,18 @@ export class CdpRetvAgentService {
           break;
         }
         case "assertText": {
-          const selector = stringArg(call.args.selector);
           const includes = stringArg(call.args.includes);
+          // Ref-first assertion: a digest ref resolves to the exact element's
+          // cached selector — a generic CSS guess (e.g. bare `a`) matches the
+          // page's first anchor ("Skip to content") and false-negatives on
+          // text that is plainly present. Flagged by the agent's own run.
+          const ref = stringArg(call.args.ref);
+          const refSelector = ref ? this.#pageRefs.get(sessionId)?.get(ref)?.selector : undefined;
+          if (ref && !refSelector) {
+            steps.push(staleRefStep(ref));
+            break;
+          }
+          const selector = refSelector || stringArg(call.args.selector);
           if (selector && includes) {
             steps.push({ action: "assertText", selector, includes, timeoutMs: 6000 });
           }
@@ -1500,6 +1570,31 @@ export class CdpRetvAgentService {
             action: "evaluate",
             expression: pageSnapshotExpression(limit),
             returnByValue: true,
+          });
+          break;
+        }
+        case "clickRef": {
+          const ref = String(call.args.ref || "").trim();
+          const target = this.#pageRefs.get(sessionId)?.get(ref);
+          if (!target) {
+            steps.push(staleRefStep(ref));
+            break;
+          }
+          steps.push({ action: "clickAt", x: target.cx, y: target.cy });
+          break;
+        }
+        case "typeRef": {
+          const ref = String(call.args.ref || "").trim();
+          const target = this.#pageRefs.get(sessionId)?.get(ref);
+          if (!target) {
+            steps.push(staleRefStep(ref));
+            break;
+          }
+          // Focus with a real click at the bbox center, then insert text.
+          steps.push({ action: "clickAt", x: target.cx, y: target.cy });
+          steps.push({
+            action: "insertText",
+            text: String(call.args.text ?? call.args.value ?? ""),
           });
           break;
         }
@@ -2025,6 +2120,8 @@ function normalizeToolName(value: string): RetvCdpToolDefinition["name"] | "" {
     extracttext: "extractText",
     gettext: "extractText",
     asserttext: "assertText",
+    clickref: "clickRef",
+    typeref: "typeRef",
     evaluate: "evaluate",
     eval: "evaluate",
     readpage: "readPage",
@@ -2448,6 +2545,34 @@ function buildDeterministicReport(input: {
  * back as ground truth (e.g. the readPage DOM snapshot or extracted text). Keeps
  * payloads bounded so the planner context stays small.
  */
+/**
+ * Render a readPage digest object as the compact, ranked ref list the planner
+ * reasons over — ~10 tokens/line instead of a raw JSON dump. Exported for
+ * direct unit testing.
+ */
+export function formatPageDigest(output: Record<string, unknown>): string {
+  const nodes = Array.isArray(output.nodes) ? output.nodes : [];
+  const headings = Array.isArray(output.headings) ? output.headings : [];
+  const lines: string[] = [];
+  lines.push(
+    `PAGE "${String(output.title || "")}" ${String(output.url || "")} · ` +
+      `${Number(output.interactiveCount) || nodes.length} interactive (top ${nodes.length}) · ` +
+      `scrollY ${Number(output.scrollY) || 0}/${Number(output.pageHeight) || 0}`,
+  );
+  if (headings.length > 0) {
+    lines.push(`HEADINGS: ${headings.map((h) => `"${String(h)}"`).join(" · ")}`);
+  }
+  for (const raw of nodes) {
+    const n = raw as Record<string, unknown>;
+    lines.push(
+      `${String(n.ref)} [${String(n.role)}|${String(n.region)}] "${String(n.label)}" <${
+        String(n.tag)
+      }>`,
+    );
+  }
+  return lines.join("\n");
+}
+
 function summarizeToolOutputs(
   toolCalls: RetvCdpToolCall[],
   steps: CdpWorkStep[],
@@ -2461,7 +2586,7 @@ function summarizeToolOutputs(
     // it regardless of toolCall<->step index alignment (readPage maps to evaluate).
     const isReadPage = call?.tool === "readPage" ||
       (result.output !== null && typeof result.output === "object" &&
-        Array.isArray((result.output as Record<string, unknown>).interactive));
+        Array.isArray((result.output as Record<string, unknown>).nodes));
     const label = isReadPage ? "readPage" : (call?.tool || action);
     if (!result.ok) {
       outputs.push(`${label}: FAILED ${result.error || "unknown_error"}`);
@@ -2471,7 +2596,9 @@ function summarizeToolOutputs(
       return;
     }
     let rendered: string;
-    if (typeof result.output === "string") {
+    if (isReadPage && result.output !== null && typeof result.output === "object") {
+      rendered = formatPageDigest(result.output as Record<string, unknown>);
+    } else if (typeof result.output === "string") {
       rendered = result.output;
     } else {
       try {
@@ -2494,7 +2621,30 @@ function summarizeToolOutputs(
  * trimmed HTML, and interactive elements with valid CSS selectors the planner
  * can act on. Backs the readPage tool.
  */
+/** A step that fails loudly with the re-readPage lesson for a dead ref. */
+function staleRefStep(ref: string): CdpWorkStep {
+  return {
+    action: "evaluate",
+    expression: `(() => { throw new Error(${
+      JSON.stringify(
+        `stale_ref: ${
+          ref || "(empty)"
+        } — refs expire on navigation; call readPage for a fresh digest`,
+      )
+    }); })()`,
+    returnByValue: true,
+  };
+}
+
 function pageSnapshotExpression(maxElements: number): string {
+  // Spatial-semantic page digest (adapted from emet's torus mapper, minus the
+  // manifold): visible interactive elements + headings, each with a semantic
+  // ROLE band (nav/input/action/content/data), a spatial REGION bucket
+  // (header/left/main/right/footer, or above/below when off-screen — scroll
+  // guidance), an accessible label, a bbox-center click target, and a stable
+  // ranked ref (e1..eN). Ranked by visual weight (area x role bonus, on-screen
+  // first) so a page's 40 header links cannot starve the one Releases link
+  // the goal actually needs.
   return `(() => {
     const cssEscape = (value) => (window.CSS && CSS.escape) ? CSS.escape(String(value)) : String(value);
     const selectorFor = (el) => {
@@ -2510,27 +2660,75 @@ function pageSnapshotExpression(maxElements: number): string {
           const index = Array.prototype.indexOf.call(el.parentElement.children, el) + 1;
           selector += ':nth-child(' + index + ')';
         }
-      } catch (_error) { /* keep best-effort selector */ }
+      } catch (_error) { /* best-effort */ }
       return selector;
     };
-    const nodes = Array.from(document.querySelectorAll('a,button,input,select,textarea,[role=button],[role=tab],[role=link],[onclick],[contenteditable=true]'));
-    const interactive = nodes.slice(0, ${maxElements}).map((el) => ({
-      tag: el.tagName.toLowerCase(),
-      role: el.getAttribute('role') || '',
-      type: el.getAttribute('type') || '',
-      name: el.getAttribute('name') || '',
-      id: el.id || '',
-      text: (el.textContent || el.value || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '').trim().slice(0, 80),
-      selector: selectorFor(el),
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const roleFor = (el) => {
+      const tag = el.tagName.toLowerCase();
+      const aria = (el.getAttribute('role') || '').toLowerCase();
+      if (tag === 'a' || aria === 'link' || tag === 'nav') return 'nav';
+      if (tag === 'input' || tag === 'select' || tag === 'textarea' || aria === 'textbox' || aria === 'combobox') return 'input';
+      if (tag === 'button' || aria === 'button' || aria === 'tab' || el.hasAttribute('onclick') || el.getAttribute('contenteditable') === 'true') return 'action';
+      if (tag === 'table' || tag === 'ul' || tag === 'ol' || aria === 'list') return 'data';
+      return 'content';
+    };
+    const regionFor = (r) => {
+      const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+      if (cy < 0) return 'above';
+      if (cy > vh) return 'below';
+      if (cy < vh * 0.18) return 'header';
+      if (cy > vh * 0.85) return 'footer';
+      if (cx < vw * 0.25) return 'left';
+      if (cx > vw * 0.75) return 'right';
+      return 'main';
+    };
+    const labelFor = (el) => (
+      el.getAttribute('aria-label') || (el.textContent || '').trim() || el.value ||
+      el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('alt') || ''
+    ).replace(/\\s+/g, ' ').trim().slice(0, 60);
+    const roleBonus = { input: 1.6, action: 1.5, nav: 1.0, data: 0.9, content: 0.7 };
+    const candidates = Array.from(document.querySelectorAll(
+      'a,button,input,select,textarea,[role=button],[role=tab],[role=link],[role=textbox],[role=combobox],[onclick],[contenteditable=true]'
+    ));
+    const scored = [];
+    for (const el of candidates) {
+      const r = el.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) continue;
+      const style = window.getComputedStyle(el);
+      if (style.visibility === 'hidden' || style.display === 'none') continue;
+      const label = labelFor(el);
+      if (!label && el.tagName.toLowerCase() !== 'input') continue;
+      const role = roleFor(el);
+      const region = regionFor(r);
+      const onScreen = region !== 'above' && region !== 'below';
+      const area = Math.min(r.width * r.height, 40000);
+      scored.push({
+        weight: area * (roleBonus[role] || 1) * (onScreen ? 1 : 0.3),
+        role, region, label,
+        tag: el.tagName.toLowerCase(),
+        selector: selectorFor(el),
+        cx: Math.round(r.x + r.width / 2),
+        cy: Math.round(r.y + r.height / 2),
+      });
+    }
+    scored.sort((a, b) => b.weight - a.weight);
+    const nodes = scored.slice(0, ${maxElements}).map((n, i) => ({
+      ref: 'e' + (i + 1),
+      role: n.role, region: n.region, label: n.label, tag: n.tag,
+      selector: n.selector, cx: n.cx, cy: n.cy,
     }));
-    // interactive[] (with selectors) is listed FIRST so it survives downstream
-    // truncation; html is a trimmed fallback for additional context.
+    const headings = Array.from(document.querySelectorAll('h1,h2,h3'))
+      .map((h) => (h.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 70))
+      .filter(Boolean).slice(0, 10);
     return {
       url: location.href,
       title: document.title,
-      interactiveCount: nodes.length,
-      interactive,
-      html: (document.body ? document.body.innerHTML : document.documentElement.outerHTML).replace(/\\s+/g, ' ').slice(0, 2000),
+      interactiveCount: candidates.length,
+      nodes,
+      headings,
+      scrollY: Math.round(window.scrollY),
+      pageHeight: Math.round(document.documentElement.scrollHeight),
     };
   })()`;
 }

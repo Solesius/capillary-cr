@@ -250,7 +250,10 @@ export class GitHubRepositoryPickerComponent {
   });
 
   connectOAuth(): void {
-    void this.store.connectWithGithubOAuth(window.location.origin, this.githubToken().trim() || undefined);
+    void this.store.connectWithGithubOAuth(
+      window.location.origin,
+      this.githubToken().trim() || undefined,
+    );
   }
 
   connectPat(): void {

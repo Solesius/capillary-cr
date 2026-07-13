@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { ChangeDetectionStrategy, Component, computed, inject, OnDestroy, signal } from "@angular/core";
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  OnDestroy,
+  signal,
+} from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { ApiClientService } from "../services/api-client.service";
 import { CapillaryStore } from "../state/capillary.store";
@@ -449,7 +456,9 @@ import { ReviewFindingsPanelComponent } from "./review-findings-panel.component"
 export class ReviewControlPanelComponent implements OnDestroy {
   readonly store = inject(CapillaryStore);
   private readonly api = inject(ApiClientService);
-  readonly starting = computed(() => this.api.inFlight() > 0 && this.store.status() !== "reviewing");
+  readonly starting = computed(() =>
+    this.api.inFlight() > 0 && this.store.status() !== "reviewing"
+  );
   readonly gates = TCSRTC_GATES;
 
   // Whole-second run clock — a useful "how long has this been going" readout,
@@ -505,7 +514,9 @@ export class ReviewControlPanelComponent implements OnDestroy {
     return map[status.toLowerCase()] ?? status.replace(/_/g, " ");
   }
   readonly reviewStatus = computed(() => this.store.reviewRun()?.status ?? this.store.status());
-  readonly showFinalOutput = computed(() => this.store.status() === "completed" && Boolean(this.store.reviewReport()));
+  readonly showFinalOutput = computed(() =>
+    this.store.status() === "completed" && Boolean(this.store.reviewReport())
+  );
   readonly narrative = computed(() => this.store.reviewNarrative().slice(-48));
   readonly phase = computed<ReviewPhase>(() => {
     const status = this.store.status();
