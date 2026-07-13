@@ -3,6 +3,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { CapillaryStore } from "../state/capillary.store";
+import { windowRepositories } from "../state/rules";
 
 @Component({
   selector: "app-github-repository-picker",
@@ -70,7 +71,8 @@ import { CapillaryStore } from "../state/capillary.store";
               autocomplete="off"
               placeholder="Search {{ store.repositories().length }} repositories…"
               [value]="repoQuery()"
-              (input)="repoQuery.set($any($event.target).value)" />
+              (input)="repoQuery.set($any($event.target).value)"
+              (keydown.enter)="lookupExact()" />
             <select
               id="repoSelect"
               class="cap-select"
@@ -80,7 +82,7 @@ import { CapillaryStore } from "../state/capillary.store";
               <option value="" disabled>
                 {{ store.repositories().length === 0 ? 'Loading repositories…' : filteredRepositories().length === 0 ? 'No repositories match' : 'Select a repository' }}
               </option>
-              @for (repo of filteredRepositories(); track repo.id) {
+              @for (repo of visibleRepositories().visible; track repo.id) {
                 <!-- [selected] per option, not just [value] on the select: when
                      the tab remounts, the select's value is written in the same
                      pass the options render and the browser silently falls back
@@ -90,7 +92,27 @@ import { CapillaryStore } from "../state/capillary.store";
                   repo.fullName
                 }}</option>
               }
+              @if (visibleRepositories().hiddenCount > 0) {
+                <option value="" disabled>
+                  … {{ visibleRepositories().hiddenCount }} more — type above to search
+                </option>
+              }
             </select>
+            <div class="cap-row" style="gap: 8px; align-items: center;">
+              <button
+                class="cap-button cap-button-sm"
+                type="button"
+                [disabled]="!repoQuery().trim() || store.repoLookupBusy()"
+                (click)="lookupExact()">
+                {{ store.repoLookupBusy() ? 'Searching…' : 'Find on GitHub ↵' }}
+              </button>
+              <span class="cap-muted" style="font-size: 0.72rem;">
+                exact owner/name loads one repo directly — no list needed
+              </span>
+            </div>
+            @if (store.repoLookupMessage()) {
+              <p class="cap-muted" style="margin: 4px 0 0; font-size: 0.78rem;">{{ store.repoLookupMessage() }}</p>
+            }
           </div>
 
           @if (store.selectedRepository()) {
@@ -241,6 +263,16 @@ export class GitHubRepositoryPickerComponent {
       repo.fullName.toLowerCase().includes(query) || repo.id === selectedId
     );
   });
+  // DOM window over the filtered list: large accounts render the top slice
+  // (list arrives sorted by last update) + a "type to search" hint row.
+  readonly visibleRepositories = computed(() =>
+    windowRepositories(
+      this.filteredRepositories(),
+      this.repoQuery().trim().length > 0,
+      this.store.selectedRepositoryId(),
+    )
+  );
+
   // Expand into a scrollable listbox while filtering; stay a dropdown otherwise.
   readonly listSize = computed(() => {
     if (!this.repoQuery().trim()) {
@@ -262,5 +294,10 @@ export class GitHubRepositoryPickerComponent {
 
   selectRepository(repositoryId: string): void {
     void this.store.selectRepository(repositoryId);
+  }
+
+  /** Enter in the search box / the Find button: direct GitHub lookup. */
+  lookupExact(): void {
+    void this.store.lookupRepository(this.repoQuery());
   }
 }

@@ -61,8 +61,13 @@ export class ApiClientService {
     return this.get(`/api/github/oauth/poll/${sessionId}`);
   }
 
-  async listRepositories(): Promise<GitHubRepository[]> {
-    return this.get("/api/github/repositories");
+  async listRepositories(refresh = false): Promise<GitHubRepository[]> {
+    return this.get(`/api/github/repositories${refresh ? "?refresh=1" : ""}`);
+  }
+
+  /** Direct lookup: "owner/name" exact, bare name via search. */
+  async lookupRepositories(name: string): Promise<GitHubRepository[]> {
+    return this.get(`/api/github/repositories/lookup?name=${encodeURIComponent(name)}`);
   }
 
   async listPullRequests(

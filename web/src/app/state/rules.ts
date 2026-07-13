@@ -76,6 +76,34 @@ export function countOpenPullRequests(prs: readonly { state?: string }[]): numbe
  * the attached server session reports a live run. A failed cancel keeps this
  * true (status stays truthful), so Stop remains armed for the retry.
  */
+/** Unfiltered repo options rendered before "type to search" takes over. */
+export const REPO_RENDER_CAP = 100;
+
+/**
+ * Window the repository options for the picker. A 1000+ repo org account must
+ * not stamp thousands of DOM options into a dropdown nobody scrolls — while
+ * unfiltered, render only the first `cap` (the list arrives sorted by last
+ * update, so these are the relevant ones) plus the current selection so the
+ * <select> value stays valid. Any query lifts the window: filtering already
+ * shrinks the list to what the user asked for.
+ */
+export function windowRepositories<T extends { id: string }>(
+  repos: readonly T[],
+  hasQuery: boolean,
+  selectedId: string | null,
+  cap: number = REPO_RENDER_CAP,
+): { visible: T[]; hiddenCount: number } {
+  if (hasQuery || repos.length <= cap) {
+    return { visible: [...repos], hiddenCount: 0 };
+  }
+  const visible = repos.slice(0, cap);
+  const selected = selectedId ? repos.find((repo) => repo.id === selectedId) : undefined;
+  if (selected && !visible.some((repo) => repo.id === selected.id)) {
+    visible.push(selected);
+  }
+  return { visible, hiddenCount: repos.length - visible.length };
+}
+
 export function isStopArmed(
   runStatus: string | null,
   attachedSessionActive: boolean,

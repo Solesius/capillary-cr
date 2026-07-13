@@ -5,6 +5,10 @@ export type RiskHint = "unknown" | "low" | "medium" | "high" | "critical";
 export interface GitHubRepository {
   id: string;
   fullName: string;
+  /** Bare repository name (no owner) — matches the API's full shape. */
+  name?: string;
+  owner?: string;
+  language?: string;
 }
 
 export interface GitHubOAuthStartWebResponse {
