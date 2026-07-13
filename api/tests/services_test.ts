@@ -75,6 +75,26 @@ function createMockGitHubFetch(): typeof fetch {
       );
     }
 
+    // Direct lookup by numeric id — the catalog-miss fallback path.
+    if (url.includes("/repositories/1207713294")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: 1207713294,
+            owner: { login: "Solesius" },
+            name: "celer-mem",
+            full_name: "Solesius/celer-mem",
+            default_branch: "main",
+            private: false,
+            html_url: "https://github.com/Solesius/celer-mem",
+            language: "C++",
+            open_issues_count: 0,
+          }),
+          { status: 200 },
+        ),
+      );
+    }
+
     if (url.includes("/repos/Solesius/celer-mem/pulls?")) {
       return Promise.resolve(
         new Response(
@@ -1948,4 +1968,87 @@ Deno.test("should_report_zero_input_not_output_estimate_when_claude_usage_is_abs
   assertEquals(result.value?.inputTokens, 0);
   // Output MAY be estimated from the response — that is the right direction.
   assertEquals((result.value?.outputTokens ?? 0) > 0, true);
+});
+
+// --- repository catalog performance contract --------------------------------
+// 1000+ repo org accounts: the catalog is walked once (parallel waves), then
+// answers list and by-id lookups without touching GitHub again; refresh=true
+// is the only path that re-walks.
+
+function createCountingGitHubFetch(): { fetcher: typeof fetch; repoPageCalls: () => number } {
+  let repoPages = 0;
+  const buildRepoDto = (id: number) => ({
+    id,
+    owner: { login: "acme" },
+    name: `repo-${id}`,
+    full_name: `acme/repo-${id}`,
+    default_branch: "main",
+    private: true,
+    html_url: `https://github.com/acme/repo-${id}`,
+    language: "TypeScript",
+    open_issues_count: 0,
+  });
+  const fetcher = ((input: string | URL | Request): Promise<Response> => {
+    const url = typeof input === "string"
+      ? input
+      : input instanceof URL
+      ? input.toString()
+      : input.url;
+    if (url.endsWith("/user")) {
+      return Promise.resolve(
+        new Response(JSON.stringify({ id: 1, login: "acme", name: "Acme" }), { status: 200 }),
+      );
+    }
+    if (url.includes("/user/repos")) {
+      repoPages += 1;
+      const page = Number(new URL(url).searchParams.get("page") || "1");
+      const batch = page === 1
+        ? Array.from({ length: 100 }, (_, i) => buildRepoDto(i + 1))
+        : page === 2
+        ? [buildRepoDto(101)]
+        : [];
+      return Promise.resolve(new Response(JSON.stringify(batch), { status: 200 }));
+    }
+    if (url.includes("/repos/acme/repo-5/pulls")) {
+      return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }));
+    }
+    return Promise.resolve(new Response("{}", { status: 404 }));
+  }) as typeof fetch;
+  return { fetcher, repoPageCalls: () => repoPages };
+}
+
+Deno.test("should_serve_cached_catalog_without_rewalking_github", async () => {
+  const { fetcher, repoPageCalls } = createCountingGitHubFetch();
+  const repository = new CelerReviewRepository();
+  const githubService = new GitHubOakService(repository, fetcher);
+  await githubService.connectGithub("valid", "ghp_test_token");
+
+  const first = await githubService.listRepositories();
+  assertEquals(first.length, 101);
+  const walkCost = repoPageCalls();
+  assertEquals(walkCost >= 2, true);
+
+  // Second list: catalog hit, zero GitHub page calls.
+  const second = await githubService.listRepositories();
+  assertEquals(second.length, 101);
+  assertEquals(repoPageCalls(), walkCost);
+
+  // refresh=true is the only re-walk path.
+  await githubService.listRepositories(true);
+  assertEquals(repoPageCalls() > walkCost, true);
+});
+
+Deno.test("should_resolve_repository_by_id_from_catalog_without_github", async () => {
+  const { fetcher, repoPageCalls } = createCountingGitHubFetch();
+  const repository = new CelerReviewRepository();
+  const githubService = new GitHubOakService(repository, fetcher);
+  await githubService.connectGithub("valid", "ghp_test_token");
+  await githubService.listRepositories();
+  const walkCost = repoPageCalls();
+
+  // Selecting a repo (PR list) must not re-walk the repo pages — that made
+  // every click cost as much as loading the entire catalog.
+  const pulls = await githubService.listPullRequests(String(5));
+  assertEquals(pulls.length, 0);
+  assertEquals(repoPageCalls(), walkCost);
 });

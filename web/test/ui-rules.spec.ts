@@ -5,6 +5,7 @@ import {
   isBeginEnabled,
   shouldShowCleanState,
   shouldShowGraphSummary,
+  windowRepositories,
 } from "../src/app/state/rules";
 import { REVIEW_PHASES, toReviewPhase } from "../src/app/models";
 
@@ -139,5 +140,30 @@ describe("isStopArmed during the cancelling transition (#38)", () => {
     // Even with the server session still active — the loop is landing it.
     expect(isStopArmed("cancelling", true)).to.equal(false);
     expect(isStopArmed("cancelling", false)).to.equal(false);
+  });
+});
+
+describe("windowRepositories (1000+ repo picker window)", () => {
+  const repos = Array.from({ length: 1200 }, (_, i) => ({ id: String(i + 1) }));
+
+  it("should_window_large_unfiltered_lists_to_the_cap", () => {
+    const { visible, hiddenCount } = windowRepositories(repos, false, null, 100);
+    expect(visible.length).to.equal(100);
+    expect(hiddenCount).to.equal(1100);
+    expect(visible[0].id).to.equal("1");
+  });
+
+  it("should_keep_the_current_selection_visible_beyond_the_cap", () => {
+    const { visible, hiddenCount } = windowRepositories(repos, false, "777", 100);
+    expect(visible.length).to.equal(101);
+    expect(visible.some((repo) => repo.id === "777")).to.equal(true);
+    expect(hiddenCount).to.equal(1099);
+  });
+
+  it("should_lift_the_window_while_filtering_or_under_the_cap", () => {
+    expect(windowRepositories(repos, true, null, 100).visible.length).to.equal(1200);
+    expect(windowRepositories(repos, true, null, 100).hiddenCount).to.equal(0);
+    const small = repos.slice(0, 40);
+    expect(windowRepositories(small, false, null, 100).visible.length).to.equal(40);
   });
 });

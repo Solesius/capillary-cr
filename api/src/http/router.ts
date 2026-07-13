@@ -50,7 +50,8 @@ router.get("/api/github/oauth/callback", async (ctx) => {
 });
 
 router.get("/api/github/repositories", async (ctx) => {
-  ctx.response.body = await deps.githubService.listRepositories();
+  const refresh = ctx.request.url.searchParams.get("refresh") === "1";
+  ctx.response.body = await deps.githubService.listRepositories(refresh);
 });
 
 router.get("/api/github/repositories/:repositoryId/pull-requests", async (ctx) => {

@@ -3,6 +3,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { CapillaryStore } from "../state/capillary.store";
+import { windowRepositories } from "../state/rules";
 
 @Component({
   selector: "app-github-repository-picker",
@@ -80,7 +81,7 @@ import { CapillaryStore } from "../state/capillary.store";
               <option value="" disabled>
                 {{ store.repositories().length === 0 ? 'Loading repositories…' : filteredRepositories().length === 0 ? 'No repositories match' : 'Select a repository' }}
               </option>
-              @for (repo of filteredRepositories(); track repo.id) {
+              @for (repo of visibleRepositories().visible; track repo.id) {
                 <!-- [selected] per option, not just [value] on the select: when
                      the tab remounts, the select's value is written in the same
                      pass the options render and the browser silently falls back
@@ -89,6 +90,11 @@ import { CapillaryStore } from "../state/capillary.store";
                 <option [value]="repo.id" [selected]="repo.id === store.selectedRepositoryId()">{{
                   repo.fullName
                 }}</option>
+              }
+              @if (visibleRepositories().hiddenCount > 0) {
+                <option value="" disabled>
+                  … {{ visibleRepositories().hiddenCount }} more — type above to search
+                </option>
               }
             </select>
           </div>
@@ -241,6 +247,16 @@ export class GitHubRepositoryPickerComponent {
       repo.fullName.toLowerCase().includes(query) || repo.id === selectedId
     );
   });
+  // DOM window over the filtered list: large accounts render the top slice
+  // (list arrives sorted by last update) + a "type to search" hint row.
+  readonly visibleRepositories = computed(() =>
+    windowRepositories(
+      this.filteredRepositories(),
+      this.repoQuery().trim().length > 0,
+      this.store.selectedRepositoryId(),
+    )
+  );
+
   // Expand into a scrollable listbox while filtering; stay a dropdown otherwise.
   readonly listSize = computed(() => {
     if (!this.repoQuery().trim()) {

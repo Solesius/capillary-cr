@@ -363,9 +363,21 @@ export class GitHubOakService {
     }
   }
 
-  async listRepositories(): Promise<GitHubRepository[]> {
+  /**
+   * List repositories. Default serves the in-memory catalog instantly when
+   * one exists (the client revalidates with refresh=true behind the paint);
+   * `refresh` forces the full GitHub page walk and catalog replacement.
+   */
+  async listRepositories(refresh = false): Promise<GitHubRepository[]> {
     await this.requireAuthenticatedIdentity();
     const token = await this.requireGithubToken();
+
+    if (!refresh) {
+      const cached = await this.repository.listRepositories();
+      if (cached.length > 0) {
+        return cached;
+      }
+    }
 
     const repositories = await this.fetchAllUserRepositories(token);
 
@@ -745,32 +757,72 @@ export class GitHubOakService {
   private async findRepositoryById(
     repositoryId: string,
     token: string,
-  ): Promise<GitHubRepositoryDto> {
-    const repositories = await this.fetchAllUserRepositories(token);
-
-    const repo = repositories.find((item) => String(item.id) === repositoryId);
-    if (!repo) {
+  ): Promise<{ owner: { login: string }; name: string; full_name: string }> {
+    // The catalog persisted by listRepositories answers this without touching
+    // GitHub. Re-walking every repo page here made *selecting* a repository
+    // (and every PR/diff/file fetch behind it) as expensive as loading the
+    // whole list — brutal on 1000+ repo org accounts.
+    const cached = (await this.repository.listRepositories())
+      .find((item) => item.id === repositoryId);
+    if (cached) {
+      return { owner: { login: cached.owner }, name: cached.name, full_name: cached.fullName };
+    }
+    // Cache miss (fresh boot, deep link before a list load): GitHub supports
+    // direct lookup by numeric id — one call, never a page walk. The numeric
+    // guard also keeps arbitrary strings out of the URL path.
+    if (!/^\d+$/.test(repositoryId)) {
       throw new AppError("repository_not_found", 404, "repository_not_found");
     }
-
-    return repo;
+    try {
+      const repo = await this.githubGet<GitHubRepositoryDto>(
+        `/repositories/${repositoryId}`,
+        token,
+      );
+      return { owner: { login: repo.owner.login }, name: repo.name, full_name: repo.full_name };
+    } catch {
+      throw new AppError("repository_not_found", 404, "repository_not_found");
+    }
   }
 
   // GitHub caps per_page at 100, so accounts that can see more repos than
   // that (org members especially) silently lost everything past the first
-  // page. Walk pages until a short page; the page cap bounds worst-case
-  // latency for accounts with thousands of visible repos.
+  // page. Page 1 establishes whether more exist; the rest fetch in parallel
+  // waves — a 1000-repo account costs ~3 round-trip times instead of 10+
+  // serial ones. Merging stops at the first short page; the page cap bounds
+  // worst-case latency for accounts with thousands of visible repos.
   private async fetchAllUserRepositories(token: string): Promise<GitHubRepositoryDto[]> {
-    const all: GitHubRepositoryDto[] = [];
-    for (let page = 1; page <= 10; page++) {
-      const batch = await this.githubGet<GitHubRepositoryDto[]>(
-        `/user/repos?per_page=100&sort=updated&direction=desc&page=${page}`,
+    const perPage = 100;
+    const maxPages = 30;
+    const waveSize = 5;
+    const fetchPage = (page: number) =>
+      this.githubGet<GitHubRepositoryDto[]>(
+        `/user/repos?per_page=${perPage}&sort=updated&direction=desc&page=${page}`,
         token,
       );
-      all.push(...batch);
-      if (batch.length < 100) {
+
+    const all = await fetchPage(1);
+    if (all.length < perPage) {
+      return all;
+    }
+    let page = 2;
+    while (page <= maxPages) {
+      const wave = Array.from(
+        { length: Math.min(waveSize, maxPages - page + 1) },
+        (_, index) => page + index,
+      );
+      const batches = await Promise.all(wave.map((p) => fetchPage(p)));
+      let sawShortPage = false;
+      for (const batch of batches) {
+        all.push(...batch);
+        if (batch.length < perPage) {
+          sawShortPage = true;
+          break;
+        }
+      }
+      if (sawShortPage) {
         break;
       }
+      page += wave.length;
     }
     return all;
   }

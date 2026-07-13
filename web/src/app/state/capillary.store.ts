@@ -1589,6 +1589,9 @@ export class CapillaryStore {
   }
 
   private async refreshGithubConnectedState(): Promise<void> {
+    // Stale-while-revalidate: the server answers from its catalog instantly
+    // (no GitHub page walk), so the tab paints at once even on 1000+ repo
+    // accounts; the forced refresh then repaints with the fresh list.
     const repos = await this.api.listRepositories();
     this.githubConnected.set(true);
     this.repositories.set(repos);
@@ -1597,6 +1600,11 @@ export class CapillaryStore {
     this.pullRequests.set([]);
     this.status.set("connected");
     this.reviewEvents.set(["github_connected"]);
+    void this.api.listRepositories(true)
+      .then((fresh) => this.repositories.set(fresh))
+      .catch(() => {
+        // Revalidation is best-effort; the painted catalog stays.
+      });
   }
 
   private waitForGithubOAuthResult(
