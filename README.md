@@ -72,7 +72,9 @@ Static diff review asks one question: does this code look right? Capillary's age
 
 The gates have teeth. The agent's context tracks hot-path coverage every cycle, the cycle budget scales with the size of the change, and an approval that skipped hot paths is automatically downgraded with the unexamined files listed in the report. On a 100-file PR you don't get "LGTM" — you get a coverage-accounted verdict and an artifact you can action: what was checked, what was found, and exactly what still deserves a human read.
 
-The review runs as an agentic loop, narrating its reasoning at each gate over SSE as it reads files, diffs, neighbors, and the graph. A completed run can be posted back to the PR as a summary comment — gated behind an explicit button, never automatic.
+The review runs as an agentic loop, narrating its reasoning at each gate over SSE as it reads files, diffs, neighbors, and the graph — with a live token meter (input/output, cache-aware) and a run clock, and a Stop that actually stops the loop mid-model-turn.
+
+Findings are first-class output, not just prose: every finding resolves to a real, commentable diff line, and you can post them to the PR as inline comments — **one by one or all at once** — plus committable ```suggestion blocks when the model proposes a concrete fix, and a summary comment for the run. All gated behind explicit buttons, never automatic. A file explorer (read-only Monaco, side-by-side diff view) lets you read the PR the way the agent read it, with findings rendered in place on their lines. Every report ends with a **Model usage** footer — the run's token cost travels with the artifact.
 
 ---
 
@@ -88,24 +90,26 @@ The RetV agent (`api/src/services/cdp_retv_agent_service.ts`) connects to a Chro
 
 It drives Chrome and tells you whether it worked, where it got stuck, and why. This runs against the actual app, not a mock. If your PR broke the review results page, the CDP agent finds it without you having to write a Playwright spec first.
 
+Completion has teeth: `goalAchieved` is a verdict that requires quoted on-page evidence and every milestone complete — unproven claims are rejected and the rejection is fed back to the planner. And a traced run exports **run skeletons**: a deterministic Playwright spec (runs in any CI, no LLM, failed steps quarantined, credentials redacted to env placeholders) plus a model-agnostic runsheet any engineer or coding agent can use to reproduce or port the run. Explore agentically once, regress deterministically forever.
+
 ---
 
 ## Stack
 
 - **API** — Deno + Oak (TypeScript). Single process on `:8080`.
 - **Frontend** — Angular 20. Standalone components, signals and `computed`, `OnPush` throughout. No NGXS.
-- **Graph** — Three.js. WebGL torus rendered on canvas. Orbit controls, raycasting for hover.
+- **Graph** — Zdog. Canvas-2D torus, deliberately lightweight — no WebGL dependency.
 - **Review engine** — TCSRTC-gated agentic loop with typed SSE events, hot-path coverage enforcement, and CPU semantic embeddings (MiniLM over wasm) relating files by meaning before any LLM call.
 - **Sessions** — reviews run as durable server-side sessions: bounce between screens or reload, re-attach with a full narrative replay; run several concurrently (with a token-cost warning before each additional session).
 - **LLM providers** — Anthropic, Gemini, OpenRouter, AWS Bedrock, GitHub Copilot, Codex. Server-side only; keys never touch the client.
-- **Durable storage** — `celer-mem` SQLite FFI (optional write-through mirror; in-memory repository is source of truth).
+- **Durable storage** — [`celer-mem`](https://github.com/Solesius/celer-mem) over FFI, **RocksDB** backend (SQLite fallback on bare-metal macOS). celer is the **source of truth** for review artifacts; the process keeps only a bounded LRU cache in front of it, so resident memory stays flat under concurrent reviews and runs survive restarts. Persistence health is surfaced at `/healthz`. Optional: without `CAPILLARY_STORAGE_DIR` (or the native lib), the process runs fully in-memory.
 - **Browser agent** — Chrome DevTools Protocol. Auto-detects a local Chrome binary or connects to an existing CDP endpoint.
 
 ---
 
 ## Local development
 
-Requirements: Deno, Node.js 20+
+Requirements: Deno 2.x, Node.js 22+
 
 ```bash
 make dev          # starts API (port 8080) and Angular dev server (port 4200) concurrently
