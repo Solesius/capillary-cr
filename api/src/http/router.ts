@@ -5,7 +5,7 @@ import { AppError } from "../domain/errors.ts";
 import { ReviewAgentRunRecord } from "../domain/entities.ts";
 import { buildPrSummaryComment } from "../services/review_agent_service.ts";
 import { teamBus } from "../services/team/event_bus.ts";
-import { buildAppManifest } from "../services/team/github_app.ts";
+import { buildAppManifest, isPubliclyReachableUrl } from "../services/team/github_app.ts";
 import { parseInboundCommand, verifySlackSignature } from "../services/team/inbound.ts";
 import { MEMBER_COOKIE } from "../services/team/members.ts";
 import { PostedArtifact } from "../domain/entities.ts";
@@ -670,6 +670,9 @@ router.get("/api/team/integrations", (ctx) => {
     checksEnabled: Deno.env.get("CAPILLARY_CHECKS") !== "0",
     autoReviewOnOpen: Deno.env.get("CAPILLARY_AUTO_REVIEW_ON_OPEN") === "1",
     publicUrlConfigured: Boolean(Deno.env.get("CAPILLARY_PUBLIC_URL")?.trim()),
+    // localhost/private URLs mint the app without webhooks (GitHub rejects
+    // unreachable hook URLs at manifest time); checks still work.
+    webhookCapable: isPubliclyReachableUrl(Deno.env.get("CAPILLARY_PUBLIC_URL") ?? ""),
   };
 });
 

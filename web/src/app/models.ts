@@ -345,6 +345,8 @@ export interface TeamIntegrationsStatus {
   checksEnabled: boolean;
   autoReviewOnOpen: boolean;
   publicUrlConfigured: boolean;
+  /** False on localhost/private URLs: app mints without webhooks. */
+  webhookCapable?: boolean;
 }
 
 // --- team channel connections ------------------------------------------------
