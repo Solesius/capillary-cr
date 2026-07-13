@@ -14,8 +14,12 @@ import { ReviewSessionHub } from "../services/review_session_hub.ts";
 import { TcsrctReviewService } from "../services/tcsrct_review_service.ts";
 import { DurableReviewStore } from "../services/storage/celer_review_store.ts";
 import { storageHealth } from "../services/storage/storage_health.ts";
+import { ConnectionStore } from "../services/team/connections.ts";
+import { teamBus } from "../services/team/event_bus.ts";
+import { ChannelPublisher } from "../services/team/publisher.ts";
 
 const repository = new CelerReviewRepository();
+let durableStore: DurableReviewStore | null = null;
 
 // Durable storage: when CAPILLARY_STORAGE_DIR is set and the celer-mem native
 // library is available, celer becomes the source of truth for review artifacts
@@ -37,6 +41,7 @@ if (storageDir) {
     durable = await DurableReviewStore.tryOpen({ path: storageDir, onError });
   }
   if (durable) {
+    durableStore = durable;
     repository.attachDurableStore(durable);
     storageHealth.markDurable();
     registerDurableShutdown(durable);
@@ -94,6 +99,21 @@ const reviewSessionHub = new ReviewSessionHub((request, onEvent) =>
   reviewService.runReviewStream(request, onEvent)
 );
 
+// Team channel publishing: connections persist in the durable store when one
+// is attached (in-memory otherwise); env webhooks seed a default channel on
+// first boot. The publisher subscribes to the bus the agents emit on.
+const teamConnections = new ConnectionStore(durableStore, {
+  defaultDetail: Deno.env.get("CAPILLARY_NOTIFY_DETAIL") === "findings" ? "findings" : "summary",
+});
+await teamConnections.init({
+  slackWebhookUrl: Deno.env.get("CAPILLARY_SLACK_WEBHOOK_URL") ?? undefined,
+  teamsWebhookUrl: Deno.env.get("CAPILLARY_TEAMS_WEBHOOK_URL") ?? undefined,
+});
+const channelPublisher = new ChannelPublisher(teamConnections, {
+  publicUrl: Deno.env.get("CAPILLARY_PUBLIC_URL") ?? undefined,
+});
+channelPublisher.start(teamBus);
+
 export const deps = {
   repository,
   githubService,
@@ -104,6 +124,8 @@ export const deps = {
   cdpRetvAgentService,
   llmProviderService,
   storageHealth,
+  teamConnections,
+  channelPublisher,
 };
 
 /**

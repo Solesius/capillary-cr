@@ -17,6 +17,8 @@ export interface ReviewSessionSummary {
   active: boolean;
   startedAt: string;
   eventCount: number;
+  /** Presence: how many clients are attached to the live tail right now. */
+  watchers: number;
 }
 
 interface SessionState {
@@ -168,6 +170,7 @@ export class ReviewSessionHub {
       active: session.active,
       startedAt: session.startedAt,
       eventCount: session.events.length,
+      watchers: session.subscribers.size,
     };
   }
 

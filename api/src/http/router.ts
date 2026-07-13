@@ -2,8 +2,42 @@
 // Copyright 2026 Khalil Warren — capillary
 import { Context, Router } from "jsr:@oak/oak";
 import { AppError } from "../domain/errors.ts";
+import { ReviewAgentRunRecord } from "../domain/entities.ts";
 import { buildPrSummaryComment } from "../services/review_agent_service.ts";
+import { teamBus } from "../services/team/event_bus.ts";
+import { PostedArtifact } from "../domain/entities.ts";
+import { recordPostedArtifact } from "../services/team/posted_artifacts.ts";
 import { deps } from "./deps.ts";
+
+/**
+ * Persist shared posted-state on the run record and announce the publication
+ * on the team bus. Best-effort: the GitHub post already succeeded, so a
+ * persistence hiccup must not fail the request that reports it.
+ */
+async function publishPostedArtifact(
+  record: ReviewAgentRunRecord,
+  input: { kind: PostedArtifact["kind"]; findingId?: string; url: string },
+  meta: { title: string; severity?: string },
+): Promise<void> {
+  try {
+    const artifact = recordPostedArtifact(record, input);
+    await deps.repository.saveReviewAgentRun(record);
+    teamBus.emit({
+      type: "finding.posted",
+      at: artifact.postedAt,
+      runId: record.runId,
+      pullRequestId: record.pullRequestId,
+      repositoryId: record.repositoryId,
+      kind: artifact.kind,
+      findingId: artifact.findingId,
+      title: meta.title,
+      severity: meta.severity,
+      url: artifact.url,
+    });
+  } catch (error) {
+    console.warn("posted-artifact bookkeeping failed:", error);
+  }
+}
 
 const router = new Router();
 
@@ -247,6 +281,9 @@ router.post("/api/review/runs/:runId/pr-comment", async (ctx) => {
     record.pullRequestId,
     buildPrSummaryComment(record),
   );
+  await publishPostedArtifact(record, { kind: "summary", url: result.htmlUrl }, {
+    title: record.title,
+  });
   ctx.response.status = 201;
   ctx.response.body = { posted: true, url: result.htmlUrl };
 });
@@ -279,6 +316,11 @@ router.post("/api/review/runs/:runId/findings/:findingId/suggestion", async (ctx
       note: `**${finding.title}** — ${finding.finding}`,
     },
   );
+  await publishPostedArtifact(record, {
+    kind: "suggestion",
+    findingId: finding.id,
+    url: result.htmlUrl,
+  }, { title: finding.title, severity: finding.severity });
   ctx.response.status = 201;
   ctx.response.body = { posted: true, url: result.htmlUrl };
 });
@@ -311,6 +353,11 @@ router.post("/api/review/runs/:runId/findings/:findingId/comment", async (ctx) =
       body: `**[${severity}] ${finding.title}**\n\n${finding.finding}${fix}`,
     },
   );
+  await publishPostedArtifact(record, {
+    kind: "inline",
+    findingId: finding.id,
+    url: result.htmlUrl,
+  }, { title: finding.title, severity: finding.severity });
   ctx.response.status = 201;
   ctx.response.body = { posted: true, url: result.htmlUrl };
 });
@@ -536,6 +583,62 @@ router.post("/api/cdp/retv/config", async (ctx) => {
     model: body.model,
     baseUrl: body.baseUrl,
   });
+});
+
+// --- team channel connections -------------------------------------------------
+// A connection is a channel (incoming webhooks are minted per channel in both
+// Slack and Teams). Webhook URLs never leave the server unmasked.
+
+router.get("/api/team/connections", (ctx) => {
+  ctx.response.body = {
+    connections: deps.teamConnections.list(),
+    publicUrlConfigured: Boolean(Deno.env.get("CAPILLARY_PUBLIC_URL")?.trim()),
+  };
+});
+
+router.post("/api/team/connections", async (ctx) => {
+  const body = await ctx.request.body.json();
+  try {
+    const connection = await deps.teamConnections.create({
+      app: body.app,
+      label: body.label,
+      webhookUrl: body.webhookUrl,
+      events: body.events,
+      detail: body.detail,
+    });
+    ctx.response.status = 201;
+    ctx.response.body = connection;
+  } catch {
+    ctx.response.status = 400;
+    ctx.response.body = { error: "invalid_webhook_url", message: "Webhook URL must be https." };
+  }
+});
+
+router.patch("/api/team/connections/:id", async (ctx) => {
+  const body = await ctx.request.body.json();
+  const connection = await deps.teamConnections.update(ctx.params.id || "", {
+    label: body.label,
+    events: body.events,
+    detail: body.detail,
+    enabled: body.enabled,
+  });
+  if (!connection) {
+    ctx.response.status = 404;
+    ctx.response.body = { error: "connection_not_found" };
+    return;
+  }
+  ctx.response.body = connection;
+});
+
+router.delete("/api/team/connections/:id", async (ctx) => {
+  ctx.response.body = { deleted: await deps.teamConnections.delete(ctx.params.id || "") };
+});
+
+// Fire the fixed test card so a channel can be verified right after wiring.
+router.post("/api/team/connections/:id/test", async (ctx) => {
+  const result = await deps.channelPublisher.sendTest(ctx.params.id || "");
+  ctx.response.status = result.ok ? 200 : result.error === "connection_not_found" ? 404 : 502;
+  ctx.response.body = result;
 });
 
 router.delete("/api/cdp/sessions/:sessionId", async (ctx) => {

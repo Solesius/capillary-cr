@@ -23,6 +23,7 @@ import {
   ReviewPacket,
   ReviewRun,
 } from "../../domain/entities.ts";
+import { ChannelConnection, ConnectionPersistence } from "../team/connections.ts";
 import { CelerStore, CelerTableDescriptor } from "./celer_mem.ts";
 
 const SCOPE = "review";
@@ -37,6 +38,11 @@ const TABLE = {
   retvRuns: "retv_runs",
   reviewAgentRuns: "review_agent_runs",
   diffs: "diffs",
+  // Team channel connections (webhook publishing config). Not a review
+  // artifact, but the single durable store is shared: one database, one
+  // lifecycle. Webhook URLs are post-only channel secrets — a deliberately
+  // narrower class than the API tokens that are never persisted.
+  connections: "team_connections",
 } as const;
 
 const SCHEMA: CelerTableDescriptor[] = Object.values(TABLE).map((table) => ({
@@ -97,7 +103,7 @@ export interface ReviewArtifactStore {
  * through `onError` and surface as `null`/no-op rather than throwing, so a
  * storage hiccup degrades gracefully instead of breaking the request path.
  */
-export class DurableReviewStore implements ReviewArtifactStore {
+export class DurableReviewStore implements ReviewArtifactStore, ConnectionPersistence {
   #store: CelerStore;
   #onError: (op: string, error: unknown) => void;
 
@@ -224,6 +230,21 @@ export class DurableReviewStore implements ReviewArtifactStore {
   }
   listRuns(): Promise<ReviewRun[]> {
     return this.#scan("listRuns", TABLE.runs);
+  }
+
+  // --- team channel connections (ConnectionPersistence) ---
+  saveConnection(connection: ChannelConnection): Promise<void> {
+    return this.#write("saveConnection", TABLE.connections, connection.id, connection);
+  }
+  async deleteConnection(id: string): Promise<void> {
+    try {
+      await this.#store.delete(SCOPE, TABLE.connections, id);
+    } catch (error) {
+      this.#onError("deleteConnection", error);
+    }
+  }
+  listConnections(): Promise<ChannelConnection[]> {
+    return this.#scan("listConnections", TABLE.connections);
   }
 
   close(): Promise<void> {

@@ -24,6 +24,7 @@ import type { ProviderStreamEvent } from "./providers/provider_core.ts";
 import { createZipArchive, type ZipEntryInput } from "./storage/zip_writer.ts";
 import { CANCELLED, raceCancellation } from "./review_agent_service.ts";
 import { buildAgentRunsheet, buildPlaywrightSpec } from "./driver_export.ts";
+import { retvRecordToEvent, teamBus } from "./team/event_bus.ts";
 
 // Agent runs are bounded by a wall-clock budget so big features that keep making
 // progress aren't cut short by a fixed iteration count. Default 10 minutes;
@@ -936,6 +937,9 @@ export class CdpRetvAgentService {
       trace,
     };
     await this.repository.saveRetvRun(record);
+    // Team surfaces (UI notifications, Slack/Teams channels) hang off the bus;
+    // emission is isolated and can never fail the run.
+    teamBus.emit(retvRecordToEvent(record));
 
     const result: RetvCdpRunResult = {
       runId,
