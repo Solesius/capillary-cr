@@ -91,6 +91,27 @@ function createId(prefix: string): string {
 }
 
 /** Sentinel returned by raceCancellation when a stop request wins the race. Exported for tests. */
+/**
+ * Evidence gate for review completion (the review-side sibling of RetV's
+ * evaluateGoalClaim). A request_changes verdict asserts defects exist; with
+ * zero structured findings recorded, that assertion has no evidence — the
+ * live bug this closes: the planner NARRATED findings in its report text,
+ * never called recordFinding, and completed request_changes with an empty
+ * findings panel. Returns the refusal message, or null when completion is
+ * legitimate.
+ */
+export function reviewCompletionRefusal(
+  verdict: string,
+  recordedFindingCount: number,
+): string | null {
+  if (verdict === "request_changes" && recordedFindingCount === 0) {
+    return "completion rejected: request_changes asserts defects exist, but zero findings " +
+      "were recorded. Call recordFinding {severity, gate, filePath, line, title, finding, " +
+      "evidence[]} for EACH defect (report prose is not a finding), then complete again.";
+  }
+  return null;
+}
+
 export const CANCELLED = Symbol("cancelled");
 
 /**
@@ -321,10 +342,16 @@ export class ReviewAgentService {
     const finishedAt = new Date();
     const goalAchieved = stopReason === "verdict_reached" || stopReason === "deterministic_review";
 
+    // Repo full name rides the record so channel repo-scoping can match
+    // "owner/name" filters against reality instead of the numeric id.
+    const repositoryFullName = (await this.repository.listRepositories())
+      .find((repo) => repo.id === input.repositoryId)?.fullName;
+
     const record: ReviewAgentRunRecord = {
       runId: input.runId,
       pullRequestId: input.pullRequestId,
       repositoryId: input.repositoryId,
+      repositoryFullName,
       title: capture.title,
       verdict,
       model: config ? `${config.providerKind}/${config.model}` : "deterministic",
@@ -652,7 +679,10 @@ export class ReviewAgentService {
       const reply = await raceCancellation(
         plannerChat(config, systemPrompt, userMessage, {
           runContextId: input.runId,
-          maxOutputTokens: input.suggest ? 2400 : 1800,
+          // Finding-heavy cycles (several recordFinding calls with evidence)
+          // outgrow tight budgets, and a truncated JSON reply costs the whole
+          // cycle. Sized so a full findings batch + report always fits.
+          maxOutputTokens: input.suggest ? 3600 : 2800,
         }),
         input.isCancelled,
       );
@@ -780,7 +810,8 @@ export class ReviewAgentService {
         });
 
         if (tool === "complete") {
-          verdict = typeof args.verdict === "string" ? args.verdict : verdict;
+          // Verdict/summary adoption happens at the gated isDone site below —
+          // adopting here would let a refused completion still flip them.
           summary = typeof args.summary === "string" ? args.summary : summary;
         }
       }
@@ -826,7 +857,27 @@ export class ReviewAgentService {
           String((call as Record<string, unknown>)?.tool || "") === "complete"
         );
       if (isDone) {
-        verdict = typeof payload.verdict === "string" ? payload.verdict : verdict;
+        // Evidence-gated completion: a verdict that asserts defects must be
+        // backed by recorded findings, not report prose. Refusals are fed
+        // back as observations so the planner records and re-completes.
+        const claimedVerdict = typeof payload.verdict === "string"
+          ? payload.verdict
+          : typeof (toolCalls.find((call) =>
+              String((call as Record<string, unknown>)?.tool || "") === "complete"
+            ) as Record<string, unknown> | undefined)?.args === "object"
+          ? String(
+            ((toolCalls.find((call) =>
+              String((call as Record<string, unknown>)?.tool || "") === "complete"
+            ) as Record<string, unknown>).args as Record<string, unknown>).verdict ?? verdict,
+          )
+          : verdict;
+        const refusal = reviewCompletionRefusal(claimedVerdict, recordedFindings.length);
+        if (refusal) {
+          input.emit({ type: "log", level: "warn", message: `cycle ${cycle}: ${refusal}` });
+          observations.push(`cycle ${cycle}: ${refusal}`);
+          continue;
+        }
+        verdict = claimedVerdict;
         summary = typeof payload.summary === "string" ? payload.summary : summary;
         stopReason = "verdict_reached";
         break;
@@ -1398,7 +1449,9 @@ const REVIEW_SYSTEM_PROMPT =
   `{"phase":"<TCSRTC gate>","reasoning":"<brief>","toolCalls":[{"tool":"<name>","args":{...},"reason":"<why>"}],` +
   `"done":false}\n` +
   `When you have enough evidence, include a complete tool call (or set "done":true with "verdict" and ` +
-  `"summary"). Record every defect via recordFinding before completing. Do not invent file paths; only ` +
+  `"summary"). Record every defect via recordFinding before completing — a request_changes \` +
+  \`completion with zero recorded findings is REJECTED, and the report's Findings section may \` +
+  \`only restate findings you recorded. Do not invent file paths; only ` +
   `reference paths returned by listChangedFiles/listNeighbors. Keep tool calls focused — a few per turn.\n\n` +
   `Coverage discipline:\n` +
   `- Read the diff of every changed file and every hot path once, and scrutinize each hunk against ` +

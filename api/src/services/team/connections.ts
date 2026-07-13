@@ -172,8 +172,14 @@ export function connectionMatches(connection: ChannelConnection, event: TeamEven
   if (!connection.enabled) {
     return false;
   }
-  const repositoryId = event.type === "retv.completed" ? null : event.repositoryId;
-  if (!repoFilterMatches(connection.repoFilter, repositoryId)) {
+  // Filters are "owner/name"-shaped; events carry the numeric repositoryId
+  // AND (when known) the full name. Match on the full name — comparing a
+  // name-shaped filter against a numeric id silently never matches (flagged
+  // by capillary's own review of this branch).
+  const repoKey = event.type === "retv.completed"
+    ? null
+    : event.repositoryFullName ?? event.repositoryId;
+  if (!repoFilterMatches(connection.repoFilter, repoKey)) {
     return false;
   }
   switch (event.type) {

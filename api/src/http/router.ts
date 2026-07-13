@@ -31,6 +31,7 @@ async function publishPostedArtifact(
       runId: record.runId,
       pullRequestId: record.pullRequestId,
       repositoryId: record.repositoryId,
+      repositoryFullName: record.repositoryFullName,
       kind: artifact.kind,
       findingId: artifact.findingId,
       title: meta.title,
@@ -57,6 +58,9 @@ async function memberSession(ctx: Context): Promise<string> {
       httpOnly: true,
       sameSite: "lax",
       path: "/",
+      // Secure whenever the request itself arrived over TLS; localhost HTTP
+      // dev keeps working (flagged by capillary's review of this branch).
+      secure: ctx.request.secure,
     });
   }
   return sessionId;

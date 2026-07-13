@@ -311,3 +311,48 @@ Deno.test("repoFilterMatches: exact, prefix, unscoped, and repo-less events", ()
   assertEquals(repoFilterMatches("owner/*", null), false);
   assert(repoFilterMatches(undefined, null));
 });
+
+// --- fixes from capillary's own review of this branch ---------------------------
+
+Deno.test("connectionMatches scopes by repository FULL NAME, not the numeric id", async () => {
+  // Regression for the self-review blocker: an "owner/name" filter compared
+  // against the numeric repositoryId silently never matched.
+  const { ConnectionStore } = await import("../src/services/team/connections.ts");
+  const { connectionMatches } = await import("../src/services/team/connections.ts");
+  const store = new ConnectionStore(null);
+  const scoped = await store.create({
+    app: "slack",
+    label: "#cap-only",
+    webhookUrl: "https://hooks.slack.com/services/X",
+  });
+  await store.update(scoped.id, { repoFilter: "Solesius/capillary-cr" });
+  const connection = store.getRaw(scoped.id)!;
+
+  const event = {
+    ...REVIEW_EVENT,
+    repositoryId: "999888777",
+    repositoryFullName: "Solesius/capillary-cr",
+  };
+  assert(connectionMatches(connection, event));
+  assertEquals(
+    connectionMatches(connection, { ...event, repositoryFullName: "Solesius/other" }),
+    false,
+  );
+  // Older records without a full name: the filter cannot match a numeric id —
+  // scoped channels stay silent rather than misrouting.
+  assertEquals(
+    connectionMatches(connection, { ...event, repositoryFullName: undefined }),
+    false,
+  );
+});
+
+Deno.test("reviewCompletionRefusal blocks evidence-free request_changes only", async () => {
+  const { reviewCompletionRefusal } = await import("../src/services/review_agent_service.ts");
+  // The live bug: request_changes narrated in the report, zero recorded.
+  const refusal = reviewCompletionRefusal("request_changes", 0);
+  assert(refusal !== null && refusal.includes("recordFinding"));
+  // Evidence present, or verdicts that assert nothing: completion proceeds.
+  assertEquals(reviewCompletionRefusal("request_changes", 2), null);
+  assertEquals(reviewCompletionRefusal("approve", 0), null);
+  assertEquals(reviewCompletionRefusal("comment", 0), null);
+});

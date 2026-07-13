@@ -435,6 +435,8 @@ export interface ReviewAgentRunRecord {
   runId: string;
   pullRequestId: string;
   repositoryId: string;
+  /** "owner/name" — rides the record so repo-scoped routing matches reality. */
+  repositoryFullName?: string;
   title: string;
   /** "approve" | "request_changes" | "comment". */
   verdict: string;

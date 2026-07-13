@@ -16,6 +16,7 @@ export interface ReviewFinishedEvent {
   runId: string;
   pullRequestId: string;
   repositoryId: string;
+  repositoryFullName?: string;
   title: string;
   verdict: string;
   goalAchieved: boolean;
@@ -59,6 +60,7 @@ export interface FindingPostedEvent {
   runId: string;
   pullRequestId: string;
   repositoryId: string;
+  repositoryFullName?: string;
   kind: "inline" | "suggestion" | "summary" | "dispatch" | "jira";
   findingId?: string;
   title: string;
@@ -133,6 +135,7 @@ export function reviewRecordToEvent(record: ReviewAgentRunRecord): ReviewFinishe
     runId: record.runId,
     pullRequestId: record.pullRequestId,
     repositoryId: record.repositoryId,
+    repositoryFullName: record.repositoryFullName,
     title: record.title,
     verdict: record.verdict,
     goalAchieved: record.goalAchieved,
