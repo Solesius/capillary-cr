@@ -414,6 +414,20 @@ export interface ReviewAgentRunTrace {
   captureManifest?: string;
 }
 
+/**
+ * A review artifact a human published to GitHub from this run. Persisted on
+ * the run record so posted-state is shared: every browser (and teammate)
+ * sees "Commented ✓ — view on GitHub" instead of only the client that
+ * clicked, which also prevents duplicate posts.
+ */
+export interface PostedArtifact {
+  kind: "inline" | "suggestion" | "summary";
+  /** Absent for run-level artifacts (the PR summary comment). */
+  findingId?: string;
+  url: string;
+  postedAt: string;
+}
+
 /** A persisted TCSRTC review run (report always present, trace optional). */
 export interface ReviewAgentRunRecord {
   runId: string;
@@ -450,6 +464,8 @@ export interface ReviewAgentRunRecord {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
+  /** Artifacts humans have published to GitHub from this run (shared state). */
+  postedArtifacts?: PostedArtifact[];
 }
 
 /** Lightweight review-history row (no heavy trace/report/findings payload). */

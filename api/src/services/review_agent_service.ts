@@ -41,6 +41,7 @@ import {
   type PlannerChatConfig,
 } from "./providers/planner_chat.ts";
 import { createZipArchive } from "./storage/zip_writer.ts";
+import { reviewRecordToEvent, teamBus } from "./team/event_bus.ts";
 
 const DEFAULT_REVIEW_MAX_DURATION_MS = 300_000;
 const HARD_CYCLE_CAP = 60;
@@ -356,6 +357,9 @@ export class ReviewAgentService {
     };
 
     await this.repository.saveReviewAgentRun(record);
+    // Team surfaces (UI notifications, Slack/Teams channels) hang off the bus;
+    // emission is isolated and can never fail the run.
+    teamBus.emit(reviewRecordToEvent(record));
 
     return {
       findings: merged,

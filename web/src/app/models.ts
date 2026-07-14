@@ -176,6 +176,8 @@ export interface ReviewSessionSummary {
   active: boolean;
   startedAt: string;
   eventCount: number;
+  /** Presence: clients attached to the live tail (optional on older APIs). */
+  watchers?: number;
 }
 
 /**
@@ -300,6 +302,46 @@ export interface ReviewAgentRunRecord {
   summary: string;
   report: string;
   traceEnabled: boolean;
+  /** Artifacts humans have published to GitHub from this run (shared state). */
+  postedArtifacts?: PostedArtifact[];
+}
+
+/**
+ * A review artifact published to GitHub from a run, persisted server-side so
+ * posted-state is shared: every browser and teammate sees the same
+ * "posted ✓ — view on GitHub" truth instead of client-local memory.
+ */
+export interface PostedArtifact {
+  kind: "inline" | "suggestion" | "summary";
+  findingId?: string;
+  url: string;
+  postedAt: string;
+}
+
+// --- team channel connections ------------------------------------------------
+
+export type ChannelApp = "slack" | "teams";
+export type NotifyDetail = "summary" | "findings";
+
+export interface ChannelEventToggles {
+  reviewCompleted: boolean;
+  reviewCancelled: boolean;
+  retvCompleted: boolean;
+  findingPosted: boolean;
+}
+
+/** A channel connection as the server exposes it — webhook URL always masked. */
+export interface ChannelConnectionView {
+  id: string;
+  app: ChannelApp;
+  label: string;
+  webhookUrlMasked: string;
+  events: ChannelEventToggles;
+  detail: NotifyDetail;
+  enabled: boolean;
+  createdAt: string;
+  lastPostedAt?: string;
+  lastError?: string;
 }
 
 export interface GraphNode {

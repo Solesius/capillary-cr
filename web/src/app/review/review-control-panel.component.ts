@@ -11,7 +11,8 @@ import {
 import { CommonModule } from "@angular/common";
 import { ApiClientService } from "../services/api-client.service";
 import { CapillaryStore } from "../state/capillary.store";
-import { ReviewPhase, TCSRTC_GATES, toReviewPhase } from "../models";
+import { ReviewPhase, ReviewSessionSummary, TCSRTC_GATES, toReviewPhase } from "../models";
+import { watchersLabel } from "../state/rules";
 import { MarkdownPipe } from "../shell/markdown.pipe";
 import { ReviewFindingsPanelComponent } from "./review-findings-panel.component";
 
@@ -105,6 +106,9 @@ import { ReviewFindingsPanelComponent } from "./review-findings-panel.component"
                 <span class="cap-session-dot" [class.live]="session.active"></span>
                 <span class="cap-session-id">{{ session.runId.slice(-6) }}</span>
                 <span class="cap-session-state">{{ session.active ? 'running' : 'done' }}</span>
+                @if (sessionWatchers(session); as watching) {
+                  <span class="cap-session-watchers" title="Clients attached to this live run">👁 {{ watching }}</span>
+                }
               </button>
             }
           </div>
@@ -277,6 +281,7 @@ import { ReviewFindingsPanelComponent } from "./review-findings-panel.component"
     }
     .cap-session-id { font-family: var(--cap-mono, monospace); letter-spacing: 0.03em; }
     .cap-session-state { font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.75; }
+    .cap-session-watchers { font-size: 0.64rem; opacity: 0.8; }
     .cap-session-dot {
       width: 7px;
       height: 7px;
@@ -578,6 +583,11 @@ export class ReviewControlPanelComponent implements OnDestroy {
   readonly runningCount = computed(() =>
     this.store.reviewSessions().filter((session) => session.active).length
   );
+
+  /** Presence label for a session chip, e.g. "3 watching" (null when not news). */
+  sessionWatchers(session: ReviewSessionSummary): string | null {
+    return watchersLabel(session.active, session.watchers);
+  }
 
   switchSession(runId: string): void {
     this.store.switchToSession(runId);

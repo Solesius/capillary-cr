@@ -632,6 +632,124 @@ import { FileExplorerComponent } from "../explorer/file-explorer.component";
                 </div>
               </section>
             </div>
+
+            <section class="cap-panel" style="margin-top: 14px;">
+              <header class="cap-panel-title">
+                <span>Team Channels</span>
+                <span class="cap-muted">Publish finished runs to Slack or Teams</span>
+              </header>
+              <div class="cap-panel-body cap-list cap-setup-form">
+                <p class="cap-muted">
+                  A connection is a channel: create an incoming webhook on the channel
+                  (Slack: app directory → Incoming Webhooks; Teams: channel → Workflows →
+                  "Post to a channel when a webhook request is received"), paste its URL here.
+                  Finished reviews and functional runs post a card with the verdict, counts,
+                  token totals and a link back to this instance. URLs must live on the
+                  platform's webhook hosts (hooks.slack.com; *.webhook.office.com or
+                  *.logic.azure.com for Teams) — self-hosted relays are allowed via
+                  CAPILLARY_WEBHOOK_HOST_ALLOWLIST on the server.
+                </p>
+                @if (!store.teamPublicUrlConfigured()) {
+                  <p class="cap-muted">
+                    ⚠ CAPILLARY_PUBLIC_URL is not set — cards will publish without an
+                    "Open in Capillary" link. Set it to this instance's reachable URL to
+                    enable deep links.
+                  </p>
+                }
+
+                <div class="cap-row" style="gap: 8px; flex-wrap: wrap; align-items: flex-end;">
+                  <div class="cap-list" style="min-width: 110px;">
+                    <label class="cap-muted" for="teamApp">App</label>
+                    <select id="teamApp" class="cap-select" [value]="teamAppInput()"
+                      (change)="teamAppInput.set($any($event.target).value)">
+                      <option value="slack">Slack</option>
+                      <option value="teams">Teams</option>
+                    </select>
+                  </div>
+                  <div class="cap-list" style="min-width: 150px;">
+                    <label class="cap-muted" for="teamLabel">Channel label</label>
+                    <input id="teamLabel" class="cap-input" placeholder="#code-reviews"
+                      [value]="teamLabelInput()"
+                      (input)="teamLabelInput.set($any($event.target).value)" />
+                  </div>
+                  <div class="cap-list" style="flex: 1; min-width: 260px;">
+                    <label class="cap-muted" for="teamWebhook">Incoming webhook URL</label>
+                    <input id="teamWebhook" class="cap-input" type="password"
+                      autocomplete="off" placeholder="https://hooks.slack.com/services/…"
+                      [value]="teamWebhookInput()"
+                      (input)="teamWebhookInput.set($any($event.target).value)" />
+                  </div>
+                  <button class="cap-button cap-button-primary" type="button"
+                    [disabled]="store.teamConnectionBusy() || !teamWebhookInput().trim()"
+                    (click)="addTeamChannel()">
+                    {{ store.teamConnectionBusy() ? 'Adding…' : 'Add channel' }}
+                  </button>
+                </div>
+                @if (store.teamConnectionError()) {
+                  <p class="cap-muted">⚠ {{ store.teamConnectionError() }}</p>
+                }
+
+                @for (connection of store.teamConnections(); track connection.id) {
+                  <div class="cap-card" style="margin-top: 8px;">
+                    <div class="cap-row" style="gap: 10px; flex-wrap: wrap; align-items: center;">
+                      <strong>{{ connection.label }}</strong>
+                      <span class="cap-muted">{{ connection.app }} · {{ connection.webhookUrlMasked }}</span>
+                      <span style="flex: 1;"></span>
+                      <button class="cap-button cap-button-sm" type="button"
+                        [disabled]="store.teamTestState()[connection.id] === 'testing'"
+                        (click)="store.testTeamConnection(connection.id)">
+                        {{ store.teamTestState()[connection.id] === 'testing' ? 'Testing…'
+                          : store.teamTestState()[connection.id] === 'ok' ? 'Test ✓'
+                          : store.teamTestState()[connection.id] === 'failed' ? 'Test ✗ — retry'
+                          : 'Test' }}
+                      </button>
+                      <button class="cap-button cap-button-ghost cap-button-sm" type="button"
+                        (click)="store.removeTeamConnection(connection.id)">
+                        Remove
+                      </button>
+                    </div>
+                    <div class="cap-row" style="gap: 14px; flex-wrap: wrap; margin-top: 8px;">
+                      <label class="cap-option-row">
+                        <input type="checkbox" [checked]="connection.enabled"
+                          (change)="store.patchTeamConnection(connection.id, { enabled: $any($event.target).checked })" />
+                        <span class="cap-option-name">Enabled</span>
+                      </label>
+                      <label class="cap-option-row">
+                        <input type="checkbox" [checked]="connection.events.reviewCompleted"
+                          (change)="store.patchTeamConnection(connection.id, { events: { reviewCompleted: $any($event.target).checked } })" />
+                        <span class="cap-option-name">Reviews</span>
+                      </label>
+                      <label class="cap-option-row">
+                        <input type="checkbox" [checked]="connection.events.retvCompleted"
+                          (change)="store.patchTeamConnection(connection.id, { events: { retvCompleted: $any($event.target).checked } })" />
+                        <span class="cap-option-name">Functional runs</span>
+                      </label>
+                      <label class="cap-option-row">
+                        <input type="checkbox" [checked]="connection.events.reviewCancelled"
+                          (change)="store.patchTeamConnection(connection.id, { events: { reviewCancelled: $any($event.target).checked } })" />
+                        <span class="cap-option-name">Stopped runs</span>
+                      </label>
+                      <label class="cap-option-row">
+                        <input type="checkbox" [checked]="connection.events.findingPosted"
+                          (change)="store.patchTeamConnection(connection.id, { events: { findingPosted: $any($event.target).checked } })" />
+                        <span class="cap-option-name">Posted findings</span>
+                      </label>
+                      <label class="cap-option-row">
+                        <input type="checkbox" [checked]="connection.detail === 'findings'"
+                          (change)="store.patchTeamConnection(connection.id, { detail: $any($event.target).checked ? 'findings' : 'summary' })" />
+                        <span class="cap-option-name">Include finding titles</span>
+                        <span class="cap-option-hint">off = verdict, counts and link only</span>
+                      </label>
+                    </div>
+                    @if (connection.lastError) {
+                      <p class="cap-muted" style="margin-top: 6px;">⚠ last delivery: {{ connection.lastError }}</p>
+                    } @else if (connection.lastPostedAt) {
+                      <p class="cap-muted" style="margin-top: 6px;">last posted {{ connection.lastPostedAt }}</p>
+                    }
+                  </div>
+                }
+              </div>
+            </section>
           </section>
         }
       </div>
@@ -723,10 +841,37 @@ export class CapillaryShellComponent {
     openai_compatible: { model: "local-model", baseUrl: "http://localhost:1234/v1" },
   };
 
+  // Team channel add-form inputs (Setup page).
+  readonly teamAppInput = signal<"slack" | "teams">("slack");
+  readonly teamLabelInput = signal("");
+  readonly teamWebhookInput = signal("");
+
+  async addTeamChannel(): Promise<void> {
+    const ok = await this.store.addTeamConnection({
+      app: this.teamAppInput(),
+      label: this.teamLabelInput().trim(),
+      webhookUrl: this.teamWebhookInput().trim(),
+    });
+    if (ok) {
+      this.teamLabelInput.set("");
+      this.teamWebhookInput.set("");
+    }
+  }
+
   constructor() {
     this.applyTheme(this.theme());
     void this.store.loadRetvRunHistory();
     void this.store.loadReviewRunHistory();
+    void this.store.loadTeamConnections();
+    // Channel-card deep links land on a URL param; route to the right page
+    // once the store resolves what the link points at.
+    effect(() => {
+      const page = this.store.deepLinkPage();
+      if (page) {
+        this.setPage(page);
+        this.store.deepLinkPage.set(null);
+      }
+    });
     effect(() => {
       // Track console length so the effect re-runs as lines stream in.
       this.store.agentConsole().length;
