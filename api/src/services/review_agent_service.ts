@@ -585,7 +585,13 @@ export class ReviewAgentService {
         "This run predates head-sha anchoring; re-run a full review once.",
       );
     }
-    const pull = await this.repository.getPullRequest(prior.repositoryId, prior.pullRequestId);
+    // Ask GitHub, not the in-memory PR cache: the whole point is the CURRENT
+    // head, and the cache may be cold after a restart (live-found bug —
+    // pull_request_not_found on a rebooted instance).
+    const pull = await this.githubService.getPullRequest(
+      prior.repositoryId,
+      prior.pullRequestId,
+    );
     const headSha = pull.headSha ?? "";
     if (!headSha || headSha === prior.reviewedHeadSha) {
       throw new AppError("no_new_commits", 409, "The PR head has not moved since this review.");
