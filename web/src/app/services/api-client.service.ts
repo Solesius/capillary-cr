@@ -12,6 +12,8 @@ import {
   GitHubOAuthPollResponse,
   GitHubOAuthStartResponse,
   GitHubRepository,
+  MemberView,
+  TeamIntegrationsStatus,
   GraphSnapshotView,
   PullRequest,
   PullRequestDiffFile,
@@ -322,6 +324,45 @@ export class ApiClientService {
     return response.json();
   }
 
+  // --- team member identity + integrations ---------------------------------
+
+  async getTeamMe(): Promise<MemberView> {
+    return this.get("/api/team/me");
+  }
+
+  async connectMemberGithub(token: string): Promise<MemberView> {
+    return this.post("/api/team/me/github", { token });
+  }
+
+  async disconnectMemberGithub(): Promise<MemberView> {
+    return this.tracked(async () => {
+      const response = await fetch(`${this.baseUrl}/api/team/me/github`, { method: "DELETE" });
+      if (!response.ok) {
+        throw await this.toApiError(response);
+      }
+      return response.json();
+    });
+  }
+
+  async getTeamIntegrations(): Promise<TeamIntegrationsStatus> {
+    return this.get("/api/team/integrations");
+  }
+
+  async getGithubAppManifest(): Promise<{ manifest: Record<string, unknown>; createUrl: string }> {
+    return this.get("/api/github/app/manifest");
+  }
+
+  async dispatchFinding(runId: string, findingId: string): Promise<{ dispatched: boolean; url: string }> {
+    return this.post(`/api/review/runs/${runId}/findings/${findingId}/dispatch`, {});
+  }
+
+  async createJiraFromFinding(
+    runId: string,
+    findingId: string,
+  ): Promise<{ created: boolean; key: string; url: string }> {
+    return this.post(`/api/review/runs/${runId}/findings/${findingId}/jira`, {});
+  }
+
   // --- team channel connections (webhook URLs only travel to the server) ---
 
   async listTeamConnections(): Promise<{
@@ -346,6 +387,7 @@ export class ApiClientService {
       label?: string;
       events?: Partial<ChannelEventToggles>;
       detail?: NotifyDetail;
+      repoFilter?: string | null;
       enabled?: boolean;
     },
   ): Promise<ChannelConnectionView> {

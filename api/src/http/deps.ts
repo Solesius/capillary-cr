@@ -14,9 +14,14 @@ import { ReviewSessionHub } from "../services/review_session_hub.ts";
 import { TcsrctReviewService } from "../services/tcsrct_review_service.ts";
 import { DurableReviewStore } from "../services/storage/celer_review_store.ts";
 import { storageHealth } from "../services/storage/storage_health.ts";
+import { CheckPublisher } from "../services/team/checks.ts";
 import { ConnectionStore } from "../services/team/connections.ts";
 import { teamBus } from "../services/team/event_bus.ts";
+import { GithubAppService } from "../services/team/github_app.ts";
+import { jiraConfigFromEnv, JiraService } from "../services/team/jira.ts";
+import { MemberSessionStore } from "../services/team/members.ts";
 import { ChannelPublisher } from "../services/team/publisher.ts";
+import { runDeepLink } from "../services/team/cards.ts";
 
 const repository = new CelerReviewRepository();
 let durableStore: DurableReviewStore | null = null;
@@ -120,6 +125,50 @@ const channelPublisher = new ChannelPublisher(teamConnections, {
 });
 channelPublisher.start(teamBus);
 
+// Team-mode member sessions: browser cookie -> optional personal GitHub
+// identity; write paths post as the member. Tokens memory-only.
+const teamMembers = new MemberSessionStore();
+
+// Per-instance GitHub App (manifest flow or env credentials): the honest
+// service identity for check runs and the PR-opened webhook.
+const githubApp = new GithubAppService(durableStore);
+await githubApp.init({
+  appId: Deno.env.get("GITHUB_APP_ID") ?? undefined,
+  privateKeyPem: Deno.env.get("GITHUB_APP_PRIVATE_KEY") ?? undefined,
+  webhookSecret: Deno.env.get("GITHUB_APP_WEBHOOK_SECRET") ?? undefined,
+});
+if (githubApp.configured()) {
+  console.log(`GitHub App configured (app id ${githubApp.status().appId})`);
+}
+const capPublicUrl = Deno.env.get("CAPILLARY_PUBLIC_URL") ?? undefined;
+const checkPublisher = new CheckPublisher({
+  app: githubApp,
+  enabled: Deno.env.get("CAPILLARY_CHECKS") !== "0",
+  deepLink: (runId) => runDeepLink(capPublicUrl, "review", runId),
+  resolveTarget: async (repositoryId, pullRequestId) => {
+    try {
+      const pull = await repository.getPullRequest(repositoryId, pullRequestId);
+      const repos = await repository.listRepositories();
+      const repo = repos.find((item) => item.id === repositoryId);
+      if (!repo || !pull.headSha) {
+        return null;
+      }
+      return { fullName: repo.fullName, headSha: pull.headSha };
+    } catch {
+      return null;
+    }
+  },
+});
+checkPublisher.start(teamBus);
+
+// Jira (finding -> ticket): configured entirely from server env.
+const jiraService = new JiraService(jiraConfigFromEnv({
+  JIRA_BASE_URL: Deno.env.get("JIRA_BASE_URL") ?? undefined,
+  JIRA_EMAIL: Deno.env.get("JIRA_EMAIL") ?? undefined,
+  JIRA_API_TOKEN: Deno.env.get("JIRA_API_TOKEN") ?? undefined,
+  JIRA_PROJECT_KEY: Deno.env.get("JIRA_PROJECT_KEY") ?? undefined,
+}));
+
 export const deps = {
   repository,
   githubService,
@@ -132,6 +181,9 @@ export const deps = {
   storageHealth,
   teamConnections,
   channelPublisher,
+  teamMembers,
+  githubApp,
+  jiraService,
 };
 
 /**

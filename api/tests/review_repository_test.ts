@@ -541,7 +541,9 @@ Deno.test("secrets are never handed to the durable store", async () => {
 Deno.test("boot sweep finalizes runs stranded in 'cancelling' (#38)", async () => {
   const store = new FakeStore();
   // A run whose stop was requested, then the process died mid-landing.
-  await store.saveRun(makeRun("run-stranded", { status: "cancelling", currentPhase: "cancelling" }));
+  await store.saveRun(
+    makeRun("run-stranded", { status: "cancelling", currentPhase: "cancelling" }),
+  );
   await store.saveRun(makeRun("run-live", { status: "reviewing" }));
 
   const repo = new CelerReviewRepository();

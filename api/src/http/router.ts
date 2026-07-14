@@ -5,6 +5,9 @@ import { AppError } from "../domain/errors.ts";
 import { ReviewAgentRunRecord } from "../domain/entities.ts";
 import { buildPrSummaryComment } from "../services/review_agent_service.ts";
 import { teamBus } from "../services/team/event_bus.ts";
+import { buildAppManifest } from "../services/team/github_app.ts";
+import { parseInboundCommand, verifySlackSignature } from "../services/team/inbound.ts";
+import { MEMBER_COOKIE } from "../services/team/members.ts";
 import { PostedArtifact } from "../domain/entities.ts";
 import { recordPostedArtifact } from "../services/team/posted_artifacts.ts";
 import { deps } from "./deps.ts";
@@ -16,7 +19,7 @@ import { deps } from "./deps.ts";
  */
 async function publishPostedArtifact(
   record: ReviewAgentRunRecord,
-  input: { kind: PostedArtifact["kind"]; findingId?: string; url: string },
+  input: { kind: PostedArtifact["kind"]; findingId?: string; url: string; postedBy?: string },
   meta: { title: string; severity?: string },
 ): Promise<void> {
   try {
@@ -28,11 +31,13 @@ async function publishPostedArtifact(
       runId: record.runId,
       pullRequestId: record.pullRequestId,
       repositoryId: record.repositoryId,
+      repositoryFullName: record.repositoryFullName,
       kind: artifact.kind,
       findingId: artifact.findingId,
       title: meta.title,
       severity: meta.severity,
       url: artifact.url,
+      actor: artifact.postedBy,
     });
   } catch (error) {
     console.warn("posted-artifact bookkeeping failed:", error);
@@ -40,6 +45,26 @@ async function publishPostedArtifact(
 }
 
 const router = new Router();
+
+/**
+ * Resolve (or mint) the member session for this request. The cookie is a
+ * random bearer id — HttpOnly, SameSite=Lax; identity attaches separately.
+ */
+async function memberSession(ctx: Context): Promise<string> {
+  const current = await ctx.cookies.get(MEMBER_COOKIE);
+  const { sessionId, isNew } = deps.teamMembers.ensure(current);
+  if (isNew) {
+    await ctx.cookies.set(MEMBER_COOKIE, sessionId, {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      // Secure whenever the request itself arrived over TLS; localhost HTTP
+      // dev keeps working (flagged by capillary's review of this branch).
+      secure: ctx.request.secure,
+    });
+  }
+  return sessionId;
+}
 
 router.post("/api/github/connect", async (ctx) => {
   const body = await ctx.request.body.json();
@@ -276,12 +301,19 @@ router.post("/api/review/runs/:runId/pr-comment", async (ctx) => {
     ctx.response.body = { message: "review_run_not_found" };
     return;
   }
+  const sessionId = await memberSession(ctx);
+  const memberToken = deps.teamMembers.tokenFor(sessionId);
   const result = await deps.githubService.postPullRequestComment(
     record.repositoryId,
     record.pullRequestId,
     buildPrSummaryComment(record),
+    { asToken: memberToken ?? undefined },
   );
-  await publishPostedArtifact(record, { kind: "summary", url: result.htmlUrl }, {
+  await publishPostedArtifact(record, {
+    kind: "summary",
+    url: result.htmlUrl,
+    postedBy: deps.teamMembers.loginFor(sessionId) ?? undefined,
+  }, {
     title: record.title,
   });
   ctx.response.status = 201;
@@ -305,6 +337,7 @@ router.post("/api/review/runs/:runId/findings/:findingId/suggestion", async (ctx
     ctx.response.body = { message: "suggestion_not_found" };
     return;
   }
+  const sessionId = await memberSession(ctx);
   const result = await deps.githubService.postPullRequestSuggestion(
     record.repositoryId,
     record.pullRequestId,
@@ -315,11 +348,13 @@ router.post("/api/review/runs/:runId/findings/:findingId/suggestion", async (ctx
       code: finding.suggestion.code,
       note: `**${finding.title}** — ${finding.finding}`,
     },
+    { asToken: deps.teamMembers.tokenFor(sessionId) ?? undefined },
   );
   await publishPostedArtifact(record, {
     kind: "suggestion",
     findingId: finding.id,
     url: result.htmlUrl,
+    postedBy: deps.teamMembers.loginFor(sessionId) ?? undefined,
   }, { title: finding.title, severity: finding.severity });
   ctx.response.status = 201;
   ctx.response.body = { posted: true, url: result.htmlUrl };
@@ -344,6 +379,7 @@ router.post("/api/review/runs/:runId/findings/:findingId/comment", async (ctx) =
   }
   const severity = finding.severity.toUpperCase();
   const fix = finding.suggestedFix ? `\n\n**Suggested fix:** ${finding.suggestedFix}` : "";
+  const sessionId = await memberSession(ctx);
   const result = await deps.githubService.postPullRequestInlineComment(
     record.repositoryId,
     record.pullRequestId,
@@ -352,11 +388,13 @@ router.post("/api/review/runs/:runId/findings/:findingId/comment", async (ctx) =
       line: finding.line,
       body: `**[${severity}] ${finding.title}**\n\n${finding.finding}${fix}`,
     },
+    { asToken: deps.teamMembers.tokenFor(sessionId) ?? undefined },
   );
   await publishPostedArtifact(record, {
     kind: "inline",
     findingId: finding.id,
     url: result.htmlUrl,
+    postedBy: deps.teamMembers.loginFor(sessionId) ?? undefined,
   }, { title: finding.title, severity: finding.severity });
   ctx.response.status = 201;
   ctx.response.body = { posted: true, url: result.htmlUrl };
@@ -585,6 +623,297 @@ router.post("/api/cdp/retv/config", async (ctx) => {
   });
 });
 
+// --- team member identity ------------------------------------------------------
+// Per-browser sessions; a member attaches their own GitHub identity so posts
+// go out as them. Tokens are memory-only — a restart forgets them.
+
+router.get("/api/team/me", async (ctx) => {
+  const sessionId = await memberSession(ctx);
+  ctx.response.body = deps.teamMembers.view(sessionId);
+});
+
+router.post("/api/team/me/github", async (ctx) => {
+  const sessionId = await memberSession(ctx);
+  const body = await ctx.request.body.json();
+  const token = String(body.token ?? "").trim();
+  if (!token) {
+    ctx.response.status = 400;
+    ctx.response.body = { error: "token_required" };
+    return;
+  }
+  const identity = await deps.githubService.getUserForToken(token);
+  deps.teamMembers.attachIdentity(sessionId, identity, token);
+  ctx.response.body = deps.teamMembers.view(sessionId);
+});
+
+router.delete("/api/team/me/github", async (ctx) => {
+  const sessionId = await memberSession(ctx);
+  deps.teamMembers.detachIdentity(sessionId);
+  ctx.response.body = deps.teamMembers.view(sessionId);
+});
+
+// --- integrations status ---------------------------------------------------------
+
+router.get("/api/team/integrations", (ctx) => {
+  ctx.response.body = {
+    githubApp: deps.githubApp.status(),
+    jira: deps.jiraService.configured(),
+    checksEnabled: Deno.env.get("CAPILLARY_CHECKS") !== "0",
+    autoReviewOnOpen: Deno.env.get("CAPILLARY_AUTO_REVIEW_ON_OPEN") === "1",
+    publicUrlConfigured: Boolean(Deno.env.get("CAPILLARY_PUBLIC_URL")?.trim()),
+  };
+});
+
+// --- per-instance GitHub App (manifest flow) --------------------------------------
+// GET /setup-url returns the GitHub page + manifest the admin submits; GitHub
+// redirects back to /callback with a one-time code we convert to credentials.
+
+router.get("/api/github/app/manifest", (ctx) => {
+  const publicUrl = Deno.env.get("CAPILLARY_PUBLIC_URL")?.trim();
+  if (!publicUrl) {
+    ctx.response.status = 409;
+    ctx.response.body = {
+      error: "public_url_required",
+      message: "Set CAPILLARY_PUBLIC_URL so GitHub can redirect the manifest callback here.",
+    };
+    return;
+  }
+  const organization = ctx.request.url.searchParams.get("org")?.trim();
+  ctx.response.body = {
+    manifest: buildAppManifest(publicUrl),
+    createUrl: organization
+      ? `https://github.com/organizations/${organization}/settings/apps/new`
+      : "https://github.com/settings/apps/new",
+  };
+});
+
+router.get("/api/github/app/callback", async (ctx) => {
+  const code = ctx.request.url.searchParams.get("code") ?? "";
+  if (!code) {
+    ctx.response.status = 400;
+    ctx.response.body = { error: "code_required" };
+    return;
+  }
+  try {
+    const created = await deps.githubApp.completeManifest(code);
+    ctx.response.headers.set("content-type", "text/html; charset=utf-8");
+    ctx.response.body = `<!doctype html><body style="font-family:sans-serif;padding:24px;">` +
+      `<h2>GitHub App created${created.slug ? `: ${escapeHtml(created.slug)}` : ""}</h2>` +
+      `<p>Install it on your repositories${
+        created.htmlUrl
+          ? ` at <a href="${escapeHtml(created.htmlUrl)}/installations/new">${
+            escapeHtml(created.htmlUrl)
+          }</a>`
+          : ""
+      }, then return to Capillary.</p></body>`;
+  } catch (error) {
+    ctx.response.status = 502;
+    ctx.response.body = {
+      error: "app_manifest_conversion_failed",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+});
+
+// Inbound GitHub webhook (the App's): PR opened -> auto-queue a review when
+// the operator opted in. Signature verified against the app webhook secret.
+router.post("/api/github/webhook", async (ctx) => {
+  const raw = new Uint8Array(await ctx.request.body.arrayBuffer());
+  const valid = await deps.githubApp.verifyWebhookSignature(
+    raw,
+    ctx.request.headers.get("x-hub-signature-256"),
+  );
+  if (!valid) {
+    ctx.response.status = 401;
+    ctx.response.body = { error: "invalid_signature" };
+    return;
+  }
+  ctx.response.status = 202;
+  ctx.response.body = { received: true };
+  if (ctx.request.headers.get("x-github-event") !== "pull_request") {
+    return;
+  }
+  if (Deno.env.get("CAPILLARY_AUTO_REVIEW_ON_OPEN") !== "1") {
+    return;
+  }
+  try {
+    const payload = JSON.parse(new TextDecoder().decode(raw)) as {
+      action?: string;
+      repository?: { id?: number };
+      pull_request?: { number?: number; draft?: boolean };
+    };
+    const action = payload.action ?? "";
+    if ((action !== "opened" && action !== "ready_for_review") || payload.pull_request?.draft) {
+      return;
+    }
+    const repositoryId = String(payload.repository?.id ?? "");
+    const pullRequestId = String(payload.pull_request?.number ?? "");
+    if (!repositoryId || !pullRequestId) {
+      return;
+    }
+    // Detached: webhook responses must be fast; the session hub owns the run.
+    void deps.reviewSessionHub.start({ pullRequestId, repositoryId }).catch((error) => {
+      console.warn("auto-review on PR open failed to start:", error);
+    });
+  } catch {
+    // Malformed payloads are ignored; GitHub retries transient failures.
+  }
+});
+
+// --- finding dispatch + Jira -------------------------------------------------------
+// Human-initiated per the standing law: a button per finding, never automatic.
+
+router.post("/api/review/runs/:runId/findings/:findingId/dispatch", async (ctx) => {
+  const runId = ctx.params.runId || "";
+  const findingId = ctx.params.findingId || "";
+  const record = await deps.reviewService.getReviewAgentRun(runId);
+  const finding = record?.findings.find((item) => item.id === findingId);
+  if (!record || !finding) {
+    ctx.response.status = 404;
+    ctx.response.body = { message: "finding_not_found" };
+    return;
+  }
+  const sessionId = await memberSession(ctx);
+  const runLink = Deno.env.get("CAPILLARY_PUBLIC_URL")?.trim()
+    ? `${Deno.env.get("CAPILLARY_PUBLIC_URL")!.trim().replace(/\/+$/, "")}/?run=${record.runId}`
+    : null;
+  const body = [
+    `@copilot please fix the following finding from a Capillary review of PR #${record.pullRequestId} ("${record.title}").`,
+    "",
+    `**[${finding.severity.toUpperCase()}] ${finding.title}**`,
+    "",
+    finding.finding,
+    "",
+    "File: `" + finding.filePath + (finding.line ? `:${finding.line}` : "") + "`",
+    ...(finding.evidence.length
+      ? ["", "Evidence:", ...finding.evidence.slice(0, 5).map((e) => `- ${e}`)]
+      : []),
+    ...(finding.suggestedFix ? ["", `Suggested fix: ${finding.suggestedFix}`] : []),
+    ...(runLink ? ["", `Full run: ${runLink}`] : []),
+    "",
+    `<sub>Dispatched from [Capillary](https://github.com/Solesius/capillary-cr)</sub>`,
+  ].join("\n");
+  const issue = await deps.githubService.createRepositoryIssue(record.repositoryId, {
+    title: `[capillary] ${finding.title}`,
+    body,
+    labels: ["capillary"],
+    // Best-effort: repos with the Copilot coding agent get a real assignment;
+    // GitHub silently drops unknown assignees, leaving the @mention to carry.
+    assignees: ["copilot-swe-agent"],
+  }, { asToken: deps.teamMembers.tokenFor(sessionId) ?? undefined });
+  await publishPostedArtifact(record, {
+    kind: "dispatch",
+    findingId: finding.id,
+    url: issue.htmlUrl,
+    postedBy: deps.teamMembers.loginFor(sessionId) ?? undefined,
+  }, { title: finding.title, severity: finding.severity });
+  ctx.response.status = 201;
+  ctx.response.body = { dispatched: true, url: issue.htmlUrl };
+});
+
+router.post("/api/review/runs/:runId/findings/:findingId/jira", async (ctx) => {
+  if (!deps.jiraService.configured()) {
+    ctx.response.status = 409;
+    ctx.response.body = { error: "jira_not_configured" };
+    return;
+  }
+  const runId = ctx.params.runId || "";
+  const findingId = ctx.params.findingId || "";
+  const record = await deps.reviewService.getReviewAgentRun(runId);
+  const finding = record?.findings.find((item) => item.id === findingId);
+  if (!record || !finding) {
+    ctx.response.status = 404;
+    ctx.response.body = { message: "finding_not_found" };
+    return;
+  }
+  const sessionId = await memberSession(ctx);
+  const runLink = Deno.env.get("CAPILLARY_PUBLIC_URL")?.trim()
+    ? `${Deno.env.get("CAPILLARY_PUBLIC_URL")!.trim().replace(/\/+$/, "")}/?run=${record.runId}`
+    : null;
+  const issue = await deps.jiraService.createIssue(finding, {
+    prTitle: record.title,
+    runLink,
+  });
+  await publishPostedArtifact(record, {
+    kind: "jira",
+    findingId: finding.id,
+    url: issue.url,
+    postedBy: deps.teamMembers.loginFor(sessionId) ?? undefined,
+  }, { title: finding.title, severity: finding.severity });
+  ctx.response.status = 201;
+  ctx.response.body = { created: true, key: issue.key, url: issue.url };
+});
+
+// --- inbound Slack slash command ---------------------------------------------------
+
+router.post("/api/integrations/slack/command", async (ctx) => {
+  const signingSecret = Deno.env.get("CAPILLARY_SLACK_SIGNING_SECRET")?.trim();
+  if (!signingSecret) {
+    ctx.response.status = 409;
+    ctx.response.body = { error: "slack_signing_secret_not_configured" };
+    return;
+  }
+  const raw = new TextDecoder().decode(new Uint8Array(await ctx.request.body.arrayBuffer()));
+  const valid = await verifySlackSignature(
+    signingSecret,
+    raw,
+    ctx.request.headers.get("x-slack-request-timestamp"),
+    ctx.request.headers.get("x-slack-signature"),
+  );
+  if (!valid) {
+    ctx.response.status = 401;
+    ctx.response.body = { error: "invalid_signature" };
+    return;
+  }
+  const params = new URLSearchParams(raw);
+  const command = parseInboundCommand(params.get("text") ?? "");
+  if (command.kind === "status") {
+    const sessions = deps.reviewSessionHub.list();
+    const active = sessions.filter((session) => session.active);
+    ctx.response.body = {
+      response_type: "ephemeral",
+      text: active.length === 0
+        ? `No reviews running. ${sessions.length} recent session(s).`
+        : active.map((s) => `PR #${s.pullRequestId} — running (${s.eventCount} events)`).join("\n"),
+    };
+    return;
+  }
+  if (command.kind === "review") {
+    try {
+      const repos = await deps.githubService.lookupRepositories(command.ownerRepo);
+      const repo = repos.find((item) =>
+        item.fullName.toLowerCase() === command.ownerRepo.toLowerCase()
+      );
+      if (!repo) {
+        ctx.response.body = {
+          response_type: "ephemeral",
+          text: `Repository ${command.ownerRepo} not found or not accessible.`,
+        };
+        return;
+      }
+      const session = await deps.reviewSessionHub.start({
+        pullRequestId: command.prNumber,
+        repositoryId: repo.id,
+      });
+      ctx.response.body = {
+        response_type: "in_channel",
+        text: `Capillary review started for ${command.ownerRepo}#${command.prNumber} ` +
+          `(run ${session.runId}). The card lands here when it finishes.`,
+      };
+    } catch (error) {
+      ctx.response.body = {
+        response_type: "ephemeral",
+        text: `Could not start review: ${error instanceof Error ? error.message : "unknown error"}`,
+      };
+    }
+    return;
+  }
+  ctx.response.body = {
+    response_type: "ephemeral",
+    text: "Usage: /capillary review owner/repo#123 · /capillary status",
+  };
+});
+
 // --- team channel connections -------------------------------------------------
 // A connection is a channel (incoming webhooks are minted per channel in both
 // Slack and Teams). Webhook URLs never leave the server unmasked.
@@ -625,6 +954,7 @@ router.patch("/api/team/connections/:id", async (ctx) => {
     label: body.label,
     events: body.events,
     detail: body.detail,
+    repoFilter: body.repoFilter,
     enabled: body.enabled,
   });
   if (!connection) {

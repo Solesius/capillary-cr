@@ -94,6 +94,35 @@ import { CapillaryStore } from "../state/capillary.store";
                 }
               </div>
             }
+            <div class="cap-finding-actions">
+              @if (store.dispatchState()[finding.id] === 'done') {
+                <a class="cap-button cap-button-ghost cap-button-sm" [href]="store.dispatchUrl()[finding.id]" target="_blank" rel="noopener">Dispatched ✓ — view issue</a>
+              } @else {
+                <button
+                  class="cap-button cap-button-ghost cap-button-sm"
+                  type="button"
+                  title="File a GitHub issue assigned to the Copilot coding agent with this finding's full context"
+                  [class.busy]="store.dispatchState()[finding.id] === 'working'"
+                  [disabled]="store.dispatchState()[finding.id] === 'working'"
+                  (click)="dispatchFix(finding.id)">
+                  {{ store.dispatchState()[finding.id] === 'failed' ? 'Retry — dispatch fix' : 'Dispatch fix → coding agent' }}
+                </button>
+              }
+              @if (store.teamIntegrations()?.jira) {
+                @if (store.jiraState()[finding.id] === 'done') {
+                  <a class="cap-button cap-button-ghost cap-button-sm" [href]="store.jiraUrl()[finding.id]" target="_blank" rel="noopener">Jira ✓ — open ticket</a>
+                } @else {
+                  <button
+                    class="cap-button cap-button-ghost cap-button-sm"
+                    type="button"
+                    [class.busy]="store.jiraState()[finding.id] === 'working'"
+                    [disabled]="store.jiraState()[finding.id] === 'working'"
+                    (click)="createJira(finding.id)">
+                    {{ store.jiraState()[finding.id] === 'failed' ? 'Retry — Jira ticket' : 'Create Jira issue' }}
+                  </button>
+                }
+              }
+            </div>
             @if (finding.suggestion; as sug) {
               <div class="cap-suggestion">
                 <div class="cap-suggestion-head">
@@ -135,6 +164,14 @@ export class ReviewFindingsPanelComponent {
 
   postComment(findingId: string): void {
     void this.store.postFindingComment(findingId);
+  }
+
+  dispatchFix(findingId: string): void {
+    void this.store.dispatchFinding(findingId);
+  }
+
+  createJira(findingId: string): void {
+    void this.store.createJiraFromFinding(findingId);
   }
 
   postAll(): void {

@@ -70,6 +70,19 @@ services:
       CAPILLARY_TEAMS_WEBHOOK_URL: "${CAPILLARY_TEAMS_WEBHOOK_URL:-}"
       CAPILLARY_NOTIFY_DETAIL: "${CAPILLARY_NOTIFY_DETAIL:-}"
       CAPILLARY_WEBHOOK_HOST_ALLOWLIST: "${CAPILLARY_WEBHOOK_HOST_ALLOWLIST:-}"
+      # Team 1.1.0: per-instance GitHub App (env override for manifest-flow
+      # credentials), check-run publishing toggle, PR-opened auto-review,
+      # Slack slash-command signing secret, and Jira (finding -> ticket).
+      GITHUB_APP_ID: "${GITHUB_APP_ID:-}"
+      GITHUB_APP_PRIVATE_KEY: "${GITHUB_APP_PRIVATE_KEY:-}"
+      GITHUB_APP_WEBHOOK_SECRET: "${GITHUB_APP_WEBHOOK_SECRET:-}"
+      CAPILLARY_CHECKS: "${CAPILLARY_CHECKS:-}"
+      CAPILLARY_AUTO_REVIEW_ON_OPEN: "${CAPILLARY_AUTO_REVIEW_ON_OPEN:-}"
+      CAPILLARY_SLACK_SIGNING_SECRET: "${CAPILLARY_SLACK_SIGNING_SECRET:-}"
+      JIRA_BASE_URL: "${JIRA_BASE_URL:-}"
+      JIRA_EMAIL: "${JIRA_EMAIL:-}"
+      JIRA_API_TOKEN: "${JIRA_API_TOKEN:-}"
+      JIRA_PROJECT_KEY: "${JIRA_PROJECT_KEY:-}"
       # RetV browser agent: the image bundles chromium with headless launch
       # flags baked in — functional tests work out of the box. Point
       # CDP_BASE_URL at an external endpoint to use a different browser, or

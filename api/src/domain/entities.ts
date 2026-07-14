@@ -421,11 +421,13 @@ export interface ReviewAgentRunTrace {
  * clicked, which also prevents duplicate posts.
  */
 export interface PostedArtifact {
-  kind: "inline" | "suggestion" | "summary";
+  kind: "inline" | "suggestion" | "summary" | "dispatch" | "jira";
   /** Absent for run-level artifacts (the PR summary comment). */
   findingId?: string;
   url: string;
   postedAt: string;
+  /** GitHub login of the member who published it (service identity when absent). */
+  postedBy?: string;
 }
 
 /** A persisted TCSRTC review run (report always present, trace optional). */
@@ -433,6 +435,8 @@ export interface ReviewAgentRunRecord {
   runId: string;
   pullRequestId: string;
   repositoryId: string;
+  /** "owner/name" — rides the record so repo-scoped routing matches reality. */
+  repositoryFullName?: string;
   title: string;
   /** "approve" | "request_changes" | "comment". */
   verdict: string;
