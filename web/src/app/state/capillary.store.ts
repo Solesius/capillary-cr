@@ -2258,7 +2258,9 @@ export class CapillaryStore {
 
   // --- per-finding dispatch (coding agent) + Jira -------------------------------
 
-  readonly dispatchState = signal<Record<string, "idle" | "working" | "done" | "failed">>({});
+  readonly dispatchState = signal<
+    Record<string, "idle" | "working" | "done" | "done_unassigned" | "failed">
+  >({});
   readonly dispatchUrl = signal<Record<string, string>>({});
   readonly jiraState = signal<Record<string, "idle" | "working" | "done" | "failed">>({});
   readonly jiraUrl = signal<Record<string, string>>({});
@@ -2266,14 +2268,19 @@ export class CapillaryStore {
   async dispatchFinding(findingId: string): Promise<void> {
     const runId = this.selectedReviewRunId() ?? this.reviewRun()?.id;
     const state = this.dispatchState()[findingId];
-    if (!runId || state === "working" || state === "done") {
+    if (!runId || state === "working" || state === "done" || state === "done_unassigned") {
       return;
     }
     this.dispatchState.update((map) => ({ ...map, [findingId]: "working" }));
     try {
       const result = await this.api.dispatchFinding(runId, findingId);
       this.dispatchUrl.update((map) => ({ ...map, [findingId]: result.url }));
-      this.dispatchState.update((map) => ({ ...map, [findingId]: "done" }));
+      // assigned === false: the issue landed but GitHub refused the coding
+      // agent assignment (token shape / seat) — say so instead of a clean ✓.
+      this.dispatchState.update((map) => ({
+        ...map,
+        [findingId]: result.assigned === false ? "done_unassigned" : "done",
+      }));
     } catch (error) {
       this.dispatchState.update((map) => ({ ...map, [findingId]: "failed" }));
       this.lastError.set(`Dispatch failed: ${toMessage(error)}`);

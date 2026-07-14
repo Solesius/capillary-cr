@@ -809,9 +809,11 @@ router.post("/api/review/runs/:runId/findings/:findingId/dispatch", async (ctx) 
     title: `[capillary] ${finding.title}`,
     body,
     labels: ["capillary"],
-    // Best-effort: repos with the Copilot coding agent get a real assignment;
-    // GitHub silently drops unknown assignees, leaving the @mention to carry.
-    assignees: ["copilot-swe-agent"],
+    // Assignment is best-effort and never sinks the issue; `assigned: false`
+    // in the response means the coding agent must be assigned by hand.
+    // REST knows the coding agent as "Copilot" (Bot) — "copilot-swe-agent"
+    // is its GraphQL actor login and REST silently drops it as unknown.
+    assignees: ["Copilot"],
   }, { asToken: deps.teamMembers.tokenFor(sessionId) ?? undefined });
   await publishPostedArtifact(record, {
     kind: "dispatch",
@@ -820,7 +822,7 @@ router.post("/api/review/runs/:runId/findings/:findingId/dispatch", async (ctx) 
     postedBy: deps.teamMembers.loginFor(sessionId) ?? undefined,
   }, { title: finding.title, severity: finding.severity });
   ctx.response.status = 201;
-  ctx.response.body = { dispatched: true, url: issue.htmlUrl };
+  ctx.response.body = { dispatched: true, url: issue.htmlUrl, assigned: issue.assigned };
 });
 
 router.post("/api/review/runs/:runId/findings/:findingId/jira", async (ctx) => {
