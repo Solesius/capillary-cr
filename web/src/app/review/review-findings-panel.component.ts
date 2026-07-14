@@ -96,14 +96,14 @@ import { CapillaryStore } from "../state/capillary.store";
             }
             <div class="cap-finding-actions">
               @if (store.dispatchState()[finding.id] === 'done' || store.dispatchState()[finding.id] === 'done_unassigned') {
-                <a class="cap-button cap-button-ghost cap-button-sm" [href]="store.dispatchUrl()[finding.id]" target="_blank" rel="noopener">{{
-                  store.dispatchState()[finding.id] === 'done_unassigned' ? 'Issue filed — assign Copilot yourself' : 'Dispatched ✓ — view comment'
+                <a class="cap-button cap-button-ghost cap-button-sm" [href]="store.dispatchUrl()[finding.id]" target="_blank" rel="noopener" [title]="store.dispatchState()[finding.id] === 'done_unassigned' ? 'GitHub refused the coding-agent assignment (token shape or Copilot seat) — open the issue and assign Copilot yourself' : ''">{{
+                  store.dispatchState()[finding.id] === 'done_unassigned' ? 'Issue filed — assign Copilot yourself' : 'Dispatched ✓ — view issue'
                 }}</a>
               } @else {
                 <button
                   class="cap-button cap-button-ghost cap-button-sm"
                   type="button"
-                  title="Comment on the PR tagging the @copilot coding agent with this finding's full context"
+                  title="File a GitHub issue assigned to the Copilot coding agent with this finding's full context"
                   [class.busy]="store.dispatchState()[finding.id] === 'working'"
                   [disabled]="store.dispatchState()[finding.id] === 'working'"
                   (click)="dispatchFix(finding.id)">
