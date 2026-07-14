@@ -951,6 +951,14 @@ export class GitHubOakService {
         break;
       }
     }
+    if (!issue.assigned) {
+      // Never silent: a dropped assignment looks identical to success (201)
+      // and cost a live debugging session to spot on 2026-07-14.
+      console.warn(
+        `issue #${issue.number} created but assignees [${input.assignees.join(", ")}] ` +
+          `did not stick (status ok, assignee absent or refused)`,
+      );
+    }
     return issue;
   }
 

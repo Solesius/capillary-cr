@@ -811,7 +811,9 @@ router.post("/api/review/runs/:runId/findings/:findingId/dispatch", async (ctx) 
     labels: ["capillary"],
     // Assignment is best-effort and never sinks the issue; `assigned: false`
     // in the response means the coding agent must be assigned by hand.
-    assignees: ["copilot-swe-agent"],
+    // REST knows the coding agent as "Copilot" (Bot) — "copilot-swe-agent"
+    // is its GraphQL actor login and REST silently drops it as unknown.
+    assignees: ["Copilot"],
   }, { asToken: deps.teamMembers.tokenFor(sessionId) ?? undefined });
   await publishPostedArtifact(record, {
     kind: "dispatch",

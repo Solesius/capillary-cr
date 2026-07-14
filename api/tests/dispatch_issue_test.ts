@@ -72,12 +72,12 @@ const draft = {
   title: "[capillary] finding",
   body: "@copilot please fix",
   labels: ["capillary"],
-  assignees: ["copilot-swe-agent"],
+  assignees: ["Copilot"],
 };
 
 Deno.test("should_create_issue_without_assignees_in_the_create_call", async () => {
   const { service, calls } = await buildService(() =>
-    new Response(JSON.stringify({ assignees: [{ login: "copilot-swe-agent" }] }), { status: 201 })
+    new Response(JSON.stringify({ assignees: [{ login: "Copilot" }] }), { status: 201 })
   );
   const issue = await service.createRepositoryIssue(REPO_ID, draft);
   assertEquals(calls.createBodies.length, 1);
@@ -106,11 +106,25 @@ Deno.test("should_report_unassigned_when_github_silently_drops_the_assignee", as
   assertEquals(issue.assigned, false);
 });
 
+Deno.test("should_not_count_a_different_returned_login_as_assigned", async () => {
+  // The 2026-07-14 live failure: REST silently drops "copilot-swe-agent"
+  // (the GraphQL actor login) — only "Copilot" is the REST-assignable Bot.
+  // A response whose assignees don't include the requested login is a miss.
+  const { service } = await buildService(() =>
+    new Response(JSON.stringify({ assignees: [{ login: "Solesius" }] }), { status: 201 })
+  );
+  const issue = await service.createRepositoryIssue(REPO_ID, {
+    ...draft,
+    assignees: ["copilot-swe-agent"],
+  });
+  assertEquals(issue.assigned, false);
+});
+
 Deno.test("should_retry_assignment_with_the_instance_token_when_the_member_token_is_refused", async () => {
   const { service, calls } = await buildService((token) =>
     token === "member-token"
       ? new Response(JSON.stringify({ message: "Validation Failed" }), { status: 422 })
-      : new Response(JSON.stringify({ assignees: [{ login: "copilot-swe-agent" }] }), {
+      : new Response(JSON.stringify({ assignees: [{ login: "Copilot" }] }), {
         status: 201,
       })
   );
