@@ -6,7 +6,8 @@
 // Run this on the machine where Claude Code is installed and logged in, then
 // point a containerized Capillary API at it:
 //
-//   deno run --allow-net --allow-run --allow-env api/scripts/claude_ws_bridge.ts
+//   deno run --allow-net --allow-run --allow-env --allow-read --allow-write api/scripts/claude_ws_bridge.ts
+//   (write/read: the bridge mints a hermetic scratch cwd per spawn)
 //   # container env: CLAUDE_CODE_URL=ws://host.docker.internal:7898
 //
 // Protocol (one JSON object per text frame, see createClaudeWsSpawner):
