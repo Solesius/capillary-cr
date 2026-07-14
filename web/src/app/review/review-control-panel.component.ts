@@ -12,7 +12,7 @@ import { CommonModule } from "@angular/common";
 import { ApiClientService } from "../services/api-client.service";
 import { CapillaryStore } from "../state/capillary.store";
 import { ReviewPhase, ReviewSessionSummary, TCSRTC_GATES, toReviewPhase } from "../models";
-import { watchersLabel } from "../state/rules";
+import { shouldShowFinalOutput, watchersLabel } from "../state/rules";
 import { MarkdownPipe } from "../shell/markdown.pipe";
 import { ReviewFindingsPanelComponent } from "./review-findings-panel.component";
 
@@ -529,7 +529,7 @@ export class ReviewControlPanelComponent implements OnDestroy {
   }
   readonly reviewStatus = computed(() => this.store.reviewRun()?.status ?? this.store.status());
   readonly showFinalOutput = computed(() =>
-    this.store.status() === "completed" && Boolean(this.store.reviewReport())
+    shouldShowFinalOutput(this.store.status(), Boolean(this.store.reviewReport()))
   );
   readonly narrative = computed(() => this.store.reviewNarrative().slice(-48));
   readonly phase = computed<ReviewPhase>(() => {

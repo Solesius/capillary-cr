@@ -5,6 +5,7 @@ import {
   isBeginEnabled,
   seedPostedState,
   shouldShowCleanState,
+  shouldShowFinalOutput,
   shouldShowGraphSummary,
   watchersLabel,
   windowRepositories,
@@ -112,6 +113,34 @@ describe("countOpenPullRequests", () => {
 });
 
 import { isStopArmed } from "../src/app/state/rules";
+
+describe("shouldShowFinalOutput (durable report vs live connection status, #51)", () => {
+  it("should_render_a_loaded_report_after_a_refresh_while_merely_connected", () => {
+    // The refresh regression: record loaded from history, socket says
+    // "connected" — the report must render, not a blank "Waiting" wall.
+    expect(shouldShowFinalOutput("connected", true)).to.equal(true);
+    expect(shouldShowFinalOutput("idle", true)).to.equal(true);
+  });
+
+  it("should_render_a_loaded_report_across_selection_and_terminal_states", () => {
+    expect(shouldShowFinalOutput("repository_selected", true)).to.equal(true);
+    expect(shouldShowFinalOutput("pull_request_selected", true)).to.equal(true);
+    expect(shouldShowFinalOutput("completed", true)).to.equal(true);
+  });
+
+  it("should_suppress_the_prior_report_only_while_a_run_is_streaming", () => {
+    expect(shouldShowFinalOutput("queued", true)).to.equal(false);
+    expect(shouldShowFinalOutput("graphing", true)).to.equal(false);
+    expect(shouldShowFinalOutput("wetting", true)).to.equal(false);
+    expect(shouldShowFinalOutput("reviewing", true)).to.equal(false);
+    expect(shouldShowFinalOutput("cancelling", true)).to.equal(false);
+  });
+
+  it("should_stay_empty_with_no_report_loaded", () => {
+    expect(shouldShowFinalOutput("connected", false)).to.equal(false);
+    expect(shouldShowFinalOutput("completed", false)).to.equal(false);
+  });
+});
 
 describe("isStopArmed (cooperative cancellation, client side)", () => {
   it("should_arm_stop_while_the_local_run_is_in_flight", () => {
