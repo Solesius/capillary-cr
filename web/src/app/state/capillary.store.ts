@@ -1050,6 +1050,23 @@ export class CapillaryStore {
     const latestActive = this.reviewSessions().find((session) => session.active);
     if (latestActive && !this.#reviewStream) {
       this.attachToSession(latestActive.runId);
+      return;
+    }
+    // Nothing live: the Run board must still wake up showing the most recent
+    // review — report, findings, posted-state — never a blank wall. Reviews
+    // are durable; a refresh should read like reopening a notebook, not
+    // losing your place (user-reported).
+    try {
+      if (this.selectedReviewRunId()) {
+        return;
+      }
+      const runs = await this.api.listReviewAgentRuns();
+      const newest = [...runs].sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
+      if (newest) {
+        await this.openReviewFromHistory(newest.runId);
+      }
+    } catch {
+      // Empty history is a valid state; the empty Run board is honest then.
     }
   }
 
