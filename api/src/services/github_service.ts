@@ -877,35 +877,38 @@ export class GitHubOakService {
 
   /**
    * Create a repository issue (dispatch-to-coding-agent, Jira-adjacent flows).
-   * `assignees` is best-effort: GitHub silently drops invalid assignees, so a
-   * repo without the Copilot coding agent still gets the issue + mention.
+   *
+   * Assignment is a separate best-effort step AFTER the issue exists: GitHub
+   * only silently drops unknown usernames — a real-but-unassignable bot
+   * (copilot-swe-agent behind a token shape without Copilot assignment rights)
+   * 422s the whole request, and the dispatch must never lose the issue over
+   * a refused assignee. Refusal degrades to `assigned: false`.
    */
   async createRepositoryIssue(
     repositoryId: string,
     input: { title: string; body: string; labels?: string[]; assignees?: string[] },
     options: { asToken?: string } = {},
-  ): Promise<{ htmlUrl: string; number: number }> {
+  ): Promise<{ htmlUrl: string; number: number; assigned: boolean }> {
     this.validateRepositoryId(repositoryId);
     enforceTextBody(input.body, "issue_body");
     const token = await this.requireGithubToken();
     const postToken = options.asToken || token;
     const repo = await this.findRepositoryById(repositoryId, token);
+    const headers = {
+      accept: "application/vnd.github+json",
+      "content-type": "application/json",
+      "x-github-api-version": "2022-11-28",
+    };
 
     const response = await this.fetcher(
       `https://api.github.com/repos/${repo.full_name}/issues`,
       {
         method: "POST",
-        headers: {
-          authorization: `Bearer ${postToken}`,
-          accept: "application/vnd.github+json",
-          "content-type": "application/json",
-          "x-github-api-version": "2022-11-28",
-        },
+        headers: { ...headers, authorization: `Bearer ${postToken}` },
         body: JSON.stringify({
           title: input.title.slice(0, 250),
           body: input.body,
           ...(input.labels?.length ? { labels: input.labels } : {}),
-          ...(input.assignees?.length ? { assignees: input.assignees } : {}),
         }),
       },
     );
@@ -917,7 +920,38 @@ export class GitHubOakService {
       );
     }
     const dto = await response.json() as { html_url?: string; number?: number };
-    return { htmlUrl: String(dto.html_url || repo.full_name), number: Number(dto.number || 0) };
+    const issue = {
+      htmlUrl: String(dto.html_url || repo.full_name),
+      number: Number(dto.number || 0),
+      assigned: false,
+    };
+    if (!input.assignees?.length || !issue.number) {
+      return issue;
+    }
+    // Best-effort assignment; on refusal, retry once with the instance token —
+    // member identities are often OAuth/fine-grained shapes GitHub refuses for
+    // Copilot assignment, while the instance PAT may hold the seat.
+    for (const attemptToken of [postToken, token]) {
+      const assign = await this.fetcher(
+        `https://api.github.com/repos/${repo.full_name}/issues/${issue.number}/assignees`,
+        {
+          method: "POST",
+          headers: { ...headers, authorization: `Bearer ${attemptToken}` },
+          body: JSON.stringify({ assignees: input.assignees }),
+        },
+      );
+      // GitHub 201s even when it silently drops an assignee: confirm presence.
+      if (assign.ok) {
+        const updated = await assign.json() as { assignees?: { login?: string }[] };
+        issue.assigned = (updated.assignees ?? []).some((a) =>
+          input.assignees!.includes(String(a.login ?? ""))
+        );
+      }
+      if (issue.assigned || attemptToken === token) {
+        break;
+      }
+    }
+    return issue;
   }
 
   private async findRepositoryById(

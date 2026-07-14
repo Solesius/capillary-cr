@@ -357,7 +357,10 @@ export class ApiClientService {
     return this.get("/api/github/app/manifest");
   }
 
-  async dispatchFinding(runId: string, findingId: string): Promise<{ dispatched: boolean; url: string }> {
+  async dispatchFinding(
+    runId: string,
+    findingId: string,
+  ): Promise<{ dispatched: boolean; url: string; assigned?: boolean }> {
     return this.post(`/api/review/runs/${runId}/findings/${findingId}/dispatch`, {});
   }
 

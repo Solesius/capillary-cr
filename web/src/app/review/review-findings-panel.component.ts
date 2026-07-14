@@ -95,8 +95,10 @@ import { CapillaryStore } from "../state/capillary.store";
               </div>
             }
             <div class="cap-finding-actions">
-              @if (store.dispatchState()[finding.id] === 'done') {
-                <a class="cap-button cap-button-ghost cap-button-sm" [href]="store.dispatchUrl()[finding.id]" target="_blank" rel="noopener">Dispatched ✓ — view issue</a>
+              @if (store.dispatchState()[finding.id] === 'done' || store.dispatchState()[finding.id] === 'done_unassigned') {
+                <a class="cap-button cap-button-ghost cap-button-sm" [href]="store.dispatchUrl()[finding.id]" target="_blank" rel="noopener" [title]="store.dispatchState()[finding.id] === 'done_unassigned' ? 'GitHub refused the coding-agent assignment (token shape or Copilot seat) — open the issue and assign Copilot yourself' : ''">{{
+                  store.dispatchState()[finding.id] === 'done_unassigned' ? 'Issue filed — assign Copilot yourself' : 'Dispatched ✓ — view issue'
+                }}</a>
               } @else {
                 <button
                   class="cap-button cap-button-ghost cap-button-sm"
