@@ -68,6 +68,7 @@ services:
       # whichever provider key(s) you use. See .env.example / ARCHITECTURE.md.
       CAPILLARY_LLM_API_KEY: "${CAPILLARY_LLM_API_KEY:-}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
       GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
       GITHUB_COPILOT_TOKEN: "${GITHUB_COPILOT_TOKEN:-}"

@@ -272,6 +272,7 @@ const AVAILABLE_PLANNER_PROVIDER_KINDS: RetvPlannerProviderKind[] = [
   "ihhi_bedrock",
   "codex_app_server",
   "claude_code",
+  "openai",
   "openai_compatible",
 ];
 
@@ -284,6 +285,7 @@ function normalizePlannerProviderKind(raw: string): RetvPlannerProviderKind | nu
     case "gemini":
     case "ihhi_bedrock":
     case "codex_app_server":
+    case "openai":
     case "openai_compatible":
       return normalized as RetvPlannerProviderKind;
     case "copilot":

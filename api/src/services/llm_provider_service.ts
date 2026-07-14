@@ -31,6 +31,7 @@ function normalizeProviderKind(raw: string): ProviderKind | null {
     case "anthropic":
     case "github_copilot":
     case "codex_app_server":
+    case "openai":
       return normalized as ProviderKind;
     case "copilot":
     case "github":

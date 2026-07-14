@@ -10,6 +10,7 @@ import {
   createCodexAppServerProviderOps,
   createCopilotProviderOps,
   createGeminiProviderOps,
+  createOpenAiProviderOps,
   createOpenRouterProviderOps,
 } from "./transports/mod.ts";
 
@@ -45,6 +46,10 @@ const PROVIDER_DEFAULTS: Record<ProviderKind, { baseUrl: string; model: string }
     baseUrl: "stdio://claude-code",
     model: DEFAULT_CLAUDE_CODE_MODEL,
   },
+  openai: {
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-5.5",
+  },
 };
 
 // Operator-set env overrides (e.g. ws://host.docker.internal:7899) let a
@@ -73,6 +78,7 @@ const PROVIDER_OPS: Record<ProviderKind, ProviderOps> = {
   github_copilot: createCopilotProviderOps(),
   codex_app_server: createCodexAppServerProviderOps(),
   claude_code: createClaudeCodeProviderOps(),
+  openai: createOpenAiProviderOps(),
 };
 
 const ORDERED_PROVIDER_KINDS: ProviderKind[] = [
@@ -83,6 +89,7 @@ const ORDERED_PROVIDER_KINDS: ProviderKind[] = [
   "github_copilot",
   "codex_app_server",
   "claude_code",
+  "openai",
 ];
 
 const DEFAULT_PROVIDER_API_KEY_ENV = "CAPILLARY_LLM_API_KEY";
@@ -101,6 +108,7 @@ const PROVIDER_API_KEY_CHAIN: Record<ProviderKind, string[]> = {
   ],
   // Claude Code authenticates via its own subscription OAuth login; no API key is used.
   claude_code: [],
+  openai: ["OPENAI_API_KEY", DEFAULT_PROVIDER_API_KEY_ENV],
 };
 
 export function listProviderKinds(): ProviderKind[] {

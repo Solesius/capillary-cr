@@ -7,4 +7,5 @@ export { createGeminiProviderOps } from "./gemini.ts";
 export { createBedrockProviderOps } from "./bedrock.ts";
 export { createCodexAppServerProviderOps } from "./codex_app_server.ts";
 export { createClaudeCodeProviderOps } from "./claude_code.ts";
+export { createOpenAiProviderOps } from "./openai.ts";
 export type { FetchLike } from "./common.ts";

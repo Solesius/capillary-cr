@@ -7,7 +7,8 @@ export type ProviderKind =
   | "anthropic"
   | "github_copilot"
   | "codex_app_server"
-  | "claude_code";
+  | "claude_code"
+  | "openai";
 
 export type ProviderErrorKind =
   | "auth"
