@@ -1290,6 +1290,35 @@ export function buildPrSummaryComment(record: ReviewAgentRunRecord): string {
   return lines.join("\n");
 }
 
+/**
+ * Dispatch-to-coding-agent comment: a @copilot mention on the reviewed PR's
+ * conversation. The mention path needs no assignment API — no token shape can
+ * 422 it the way assigning copilot-swe-agent to an issue can — and the agent
+ * picks the work up right where the change lives.
+ */
+export function buildCopilotDispatchComment(
+  record: ReviewAgentRunRecord,
+  finding: ReviewFinding,
+  runLink: string | null,
+): string {
+  return [
+    `@copilot please fix the following finding from a Capillary review of this pull request.`,
+    "",
+    `**[${finding.severity.toUpperCase()}] ${finding.title}**`,
+    "",
+    finding.finding,
+    "",
+    "File: `" + finding.filePath + (finding.line ? `:${finding.line}` : "") + "`",
+    ...(finding.evidence.length
+      ? ["", "Evidence:", ...finding.evidence.slice(0, 5).map((e) => `- ${e}`)]
+      : []),
+    ...(finding.suggestedFix ? ["", `Suggested fix: ${finding.suggestedFix}`] : []),
+    ...(runLink ? ["", `Full run: ${runLink}`] : []),
+    "",
+    `<sub>Dispatched from [Capillary](https://github.com/Solesius/capillary-cr) · run \`${record.runId}\`</sub>`,
+  ].join("\n");
+}
+
 function normalizeFindingPath(path: string): string {
   return path.replaceAll("\\", "/").replace(/^\.\//, "").replace(/^\/+/, "");
 }

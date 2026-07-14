@@ -3,7 +3,10 @@
 import { Context, Router } from "jsr:@oak/oak";
 import { AppError } from "../domain/errors.ts";
 import { ReviewAgentRunRecord } from "../domain/entities.ts";
-import { buildPrSummaryComment } from "../services/review_agent_service.ts";
+import {
+  buildCopilotDispatchComment,
+  buildPrSummaryComment,
+} from "../services/review_agent_service.ts";
 import { teamBus } from "../services/team/event_bus.ts";
 import { buildAppManifest, isPubliclyReachableUrl } from "../services/team/github_app.ts";
 import { parseInboundCommand, verifySlackSignature } from "../services/team/inbound.ts";
@@ -789,38 +792,23 @@ router.post("/api/review/runs/:runId/findings/:findingId/dispatch", async (ctx) 
   const runLink = Deno.env.get("CAPILLARY_PUBLIC_URL")?.trim()
     ? `${Deno.env.get("CAPILLARY_PUBLIC_URL")!.trim().replace(/\/+$/, "")}/?run=${record.runId}`
     : null;
-  const body = [
-    `@copilot please fix the following finding from a Capillary review of PR #${record.pullRequestId} ("${record.title}").`,
-    "",
-    `**[${finding.severity.toUpperCase()}] ${finding.title}**`,
-    "",
-    finding.finding,
-    "",
-    "File: `" + finding.filePath + (finding.line ? `:${finding.line}` : "") + "`",
-    ...(finding.evidence.length
-      ? ["", "Evidence:", ...finding.evidence.slice(0, 5).map((e) => `- ${e}`)]
-      : []),
-    ...(finding.suggestedFix ? ["", `Suggested fix: ${finding.suggestedFix}`] : []),
-    ...(runLink ? ["", `Full run: ${runLink}`] : []),
-    "",
-    `<sub>Dispatched from [Capillary](https://github.com/Solesius/capillary-cr)</sub>`,
-  ].join("\n");
-  const issue = await deps.githubService.createRepositoryIssue(record.repositoryId, {
-    title: `[capillary] ${finding.title}`,
-    body,
-    labels: ["capillary"],
-    // Assignment is best-effort and never sinks the issue; `assigned: false`
-    // in the response means the coding agent must be assigned by hand.
-    assignees: ["copilot-swe-agent"],
-  }, { asToken: deps.teamMembers.tokenFor(sessionId) ?? undefined });
+  // Dispatch rides the PR conversation: a @copilot mention needs no
+  // assignment API, so no token shape can 422 it — and the agent picks the
+  // work up on the PR where the change lives instead of a detached issue.
+  const comment = await deps.githubService.postPullRequestComment(
+    record.repositoryId,
+    record.pullRequestId,
+    buildCopilotDispatchComment(record, finding, runLink),
+    { asToken: deps.teamMembers.tokenFor(sessionId) ?? undefined },
+  );
   await publishPostedArtifact(record, {
     kind: "dispatch",
     findingId: finding.id,
-    url: issue.htmlUrl,
+    url: comment.htmlUrl,
     postedBy: deps.teamMembers.loginFor(sessionId) ?? undefined,
   }, { title: finding.title, severity: finding.severity });
   ctx.response.status = 201;
-  ctx.response.body = { dispatched: true, url: issue.htmlUrl, assigned: issue.assigned };
+  ctx.response.body = { dispatched: true, url: comment.htmlUrl };
 });
 
 router.post("/api/review/runs/:runId/findings/:findingId/jira", async (ctx) => {

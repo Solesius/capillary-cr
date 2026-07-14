@@ -8,6 +8,8 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import { CelerReviewRepository } from "../src/repositories/review_repository.ts";
 import { GitHubOakService } from "../src/services/github_service.ts";
+import { buildCopilotDispatchComment } from "../src/services/review_agent_service.ts";
+import type { ReviewAgentRunRecord, ReviewFinding } from "../src/domain/entities.ts";
 
 const REPO_ID = "1207713294";
 
@@ -117,6 +119,52 @@ Deno.test("should_retry_assignment_with_the_instance_token_when_the_member_token
   const issue = await service.createRepositoryIssue(REPO_ID, draft, { asToken: "member-token" });
   assertEquals(calls.assignTokens, ["member-token", "instance-token"]);
   assertEquals(issue.assigned, true);
+});
+
+Deno.test("should_open_the_dispatch_comment_with_a_copilot_mention_and_carry_the_evidence", () => {
+  const finding = {
+    id: "f1",
+    runId: "run_1",
+    severity: "high",
+    passName: "Review",
+    filePath: "api/src/services/check_changes.ts",
+    line: 247,
+    title: "carryStillPresentFindings drops posted-artifact state",
+    finding: "Prior artifacts are not carried forward.",
+    evidence: ["check_changes.ts:235 doc comment", "review_agent_service.ts:621-625"],
+    suggestedFix: "Thread priorArtifacts through the follow-up record.",
+    confidence: 0.85,
+  } as ReviewFinding;
+  const record = { runId: "run_1" } as ReviewAgentRunRecord;
+  const body = buildCopilotDispatchComment(record, finding, "http://localhost:7858/?run=run_1");
+  assert(body.startsWith("@copilot "));
+  assert(body.includes("[HIGH] carryStillPresentFindings drops posted-artifact state"));
+  assert(body.includes("api/src/services/check_changes.ts:247"));
+  assert(body.includes("- check_changes.ts:235 doc comment"));
+  assert(body.includes("Suggested fix: Thread priorArtifacts"));
+  assert(body.includes("Full run: http://localhost:7858/?run=run_1"));
+  assert(body.includes("run `run_1`"));
+});
+
+Deno.test("should_omit_run_link_and_optionals_from_the_dispatch_comment_when_absent", () => {
+  const finding = {
+    id: "f2",
+    runId: "run_2",
+    severity: "medium",
+    passName: "Sanitize",
+    filePath: "api/src/services/github_service.ts",
+    title: "compareCommits ignores file-list truncation",
+    finding: "GitHub caps the files array around ~300 entries.",
+    evidence: [],
+    confidence: 0.75,
+  } as ReviewFinding;
+  const record = { runId: "run_2" } as ReviewAgentRunRecord;
+  const body = buildCopilotDispatchComment(record, finding, null);
+  assert(body.startsWith("@copilot "));
+  assert(body.includes("File: `api/src/services/github_service.ts`"));
+  assert(!body.includes("Evidence:"));
+  assert(!body.includes("Suggested fix:"));
+  assert(!body.includes("Full run:"));
 });
 
 Deno.test("should_skip_assignment_entirely_when_no_assignees_are_requested", async () => {
