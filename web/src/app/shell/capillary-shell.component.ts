@@ -706,6 +706,13 @@ import { FileExplorerComponent } from "../explorer/file-explorer.component";
                     </div>
                     @if (!store.teamIntegrations()?.publicUrlConfigured) {
                       <p class="cap-muted">⚠ Set CAPILLARY_PUBLIC_URL first.</p>
+                    } @else if (store.teamIntegrations()?.webhookCapable === false) {
+                      <p class="cap-muted">
+                        ℹ localhost URL: the app is created <strong>without webhooks</strong>
+                        (GitHub can't reach you) — merge-box checks and identity still work.
+                        PR-opened auto-review needs a publicly reachable URL or a tunnel;
+                        add the webhook in the app's GitHub settings once deployed.
+                      </p>
                     }
                   }
                 </div>

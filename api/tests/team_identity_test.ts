@@ -356,3 +356,25 @@ Deno.test("reviewCompletionRefusal blocks evidence-free request_changes only", a
   assertEquals(reviewCompletionRefusal("approve", 0), null);
   assertEquals(reviewCompletionRefusal("comment", 0), null);
 });
+
+Deno.test("manifest omits webhooks on unreachable hosts (GitHub rejects localhost hooks)", async () => {
+  const { buildAppManifest, isPubliclyReachableUrl } = await import(
+    "../src/services/team/github_app.ts"
+  );
+  assert(isPubliclyReachableUrl("https://cap.example.com"));
+  assertEquals(isPubliclyReachableUrl("http://localhost:7858"), false);
+  assertEquals(isPubliclyReachableUrl("http://127.0.0.1:7858"), false);
+  assertEquals(isPubliclyReachableUrl("https://192.168.1.20"), false);
+  assertEquals(isPubliclyReachableUrl("https://172.20.0.5"), false);
+  assertEquals(isPubliclyReachableUrl("https://cap.corp.internal"), false);
+
+  const local = buildAppManifest("http://localhost:7858") as Record<string, unknown>;
+  assertEquals("hook_attributes" in local, false);
+  assertEquals("default_events" in local, false);
+  assertEquals(String(local.redirect_url), "http://localhost:7858/api/github/app/callback");
+
+  const publicManifest = buildAppManifest("https://cap.example.com") as {
+    hook_attributes: { url: string };
+  };
+  assertEquals(publicManifest.hook_attributes.url, "https://cap.example.com/api/github/webhook");
+});

@@ -5,7 +5,7 @@ import { AppError } from "../domain/errors.ts";
 import { ReviewAgentRunRecord } from "../domain/entities.ts";
 import { buildPrSummaryComment } from "../services/review_agent_service.ts";
 import { teamBus } from "../services/team/event_bus.ts";
-import { buildAppManifest } from "../services/team/github_app.ts";
+import { buildAppManifest, isPubliclyReachableUrl } from "../services/team/github_app.ts";
 import { parseInboundCommand, verifySlackSignature } from "../services/team/inbound.ts";
 import { MEMBER_COOKIE } from "../services/team/members.ts";
 import { PostedArtifact } from "../domain/entities.ts";
@@ -400,6 +400,15 @@ router.post("/api/review/runs/:runId/findings/:findingId/comment", async (ctx) =
   ctx.response.body = { posted: true, url: result.htmlUrl };
 });
 
+// "Check changes": delta re-review after new commits — verifies prior
+// findings and reviews only the compare delta. Synchronous single planner
+// call; 409s carry the reason (no_new_commits / run_not_checkable / llm).
+router.post("/api/review/runs/:runId/check-changes", async (ctx) => {
+  const record = await deps.reviewService.runCheckChanges(ctx.params.runId || "");
+  ctx.response.status = 201;
+  ctx.response.body = record;
+});
+
 router.post("/api/review/runs/:runId/cancel", async (ctx) => {
   const runId = ctx.params.runId || "";
   ctx.response.body = {
@@ -661,6 +670,9 @@ router.get("/api/team/integrations", (ctx) => {
     checksEnabled: Deno.env.get("CAPILLARY_CHECKS") !== "0",
     autoReviewOnOpen: Deno.env.get("CAPILLARY_AUTO_REVIEW_ON_OPEN") === "1",
     publicUrlConfigured: Boolean(Deno.env.get("CAPILLARY_PUBLIC_URL")?.trim()),
+    // localhost/private URLs mint the app without webhooks (GitHub rejects
+    // unreachable hook URLs at manifest time); checks still work.
+    webhookCapable: isPubliclyReachableUrl(Deno.env.get("CAPILLARY_PUBLIC_URL") ?? ""),
   };
 });
 

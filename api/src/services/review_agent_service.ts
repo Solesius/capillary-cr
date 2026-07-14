@@ -30,6 +30,8 @@ import {
   ReviewSeverity,
   ReviewSuggestion,
 } from "../domain/entities.ts";
+import { AppError } from "../domain/errors.ts";
+import { enforceDefensiveInput } from "../lib/validation.ts";
 import { ReviewRunEvent, TCSRTC_GATES, TcsrtcGate, toTcsrtcGate } from "../domain/review_phase.ts";
 import { ReviewRepository } from "../repositories/review_repository.ts";
 import { GitHubOakService } from "./github_service.ts";
@@ -42,6 +44,14 @@ import {
 } from "./providers/planner_chat.ts";
 import { createZipArchive } from "./storage/zip_writer.ts";
 import { reviewRecordToEvent, teamBus } from "./team/event_bus.ts";
+import {
+  buildCheckChangesPrompt,
+  buildCheckChangesReport,
+  carryStillPresentFindings,
+  CHECK_CHANGES_SYSTEM_PROMPT,
+  guardFollowUpVerdict,
+  parseCheckChangesReply,
+} from "./check_changes.ts";
 
 const DEFAULT_REVIEW_MAX_DURATION_MS = 300_000;
 const HARD_CYCLE_CAP = 60;
@@ -346,12 +356,18 @@ export class ReviewAgentService {
     // "owner/name" filters against reality instead of the numeric id.
     const repositoryFullName = (await this.repository.listRepositories())
       .find((repo) => repo.id === input.repositoryId)?.fullName;
+    // Head sha anchors future "Check changes" follow-ups to what was read.
+    const reviewedHeadSha = await this.repository
+      .getPullRequest(input.repositoryId, input.pullRequestId)
+      .then((pull) => pull.headSha)
+      .catch(() => undefined);
 
     const record: ReviewAgentRunRecord = {
       runId: input.runId,
       pullRequestId: input.pullRequestId,
       repositoryId: input.repositoryId,
       repositoryFullName,
+      reviewedHeadSha,
       title: capture.title,
       verdict,
       model: config ? `${config.providerKind}/${config.model}` : "deterministic",
@@ -550,6 +566,147 @@ export class ReviewAgentService {
   }
 
   // --- LLM config ----------------------------------------------------------
+
+  /**
+   * "Check changes": delta re-review of a finished run after new commits.
+   * One planner call over prior findings + the compare delta — token cost
+   * scales with the delta, not the PR. Produces a linked follow-up record.
+   */
+  async runCheckChanges(runId: string): Promise<ReviewAgentRunRecord> {
+    enforceDefensiveInput(runId, "run_id");
+    const prior = await this.repository.getReviewAgentRun(runId);
+    if (!prior) {
+      throw new AppError("review_run_not_found", 404, "review_run_not_found");
+    }
+    if (!prior.reviewedHeadSha) {
+      throw new AppError(
+        "run_not_checkable",
+        409,
+        "This run predates head-sha anchoring; re-run a full review once.",
+      );
+    }
+    // Ask GitHub, not the in-memory PR cache: the whole point is the CURRENT
+    // head, and the cache may be cold after a restart (live-found bug —
+    // pull_request_not_found on a rebooted instance).
+    const pull = await this.githubService.getPullRequest(
+      prior.repositoryId,
+      prior.pullRequestId,
+    );
+    const headSha = pull.headSha ?? "";
+    if (!headSha || headSha === prior.reviewedHeadSha) {
+      throw new AppError("no_new_commits", 409, "The PR head has not moved since this review.");
+    }
+    const delta = await this.githubService.compareCommits(
+      prior.repositoryId,
+      prior.reviewedHeadSha,
+      headSha,
+    );
+    if (delta.length === 0) {
+      throw new AppError("no_new_commits", 409, "No changed files between the reviewed commits.");
+    }
+    const config = await this.resolvePlannerConfig();
+    if (!config) {
+      throw new AppError("llm_unavailable", 409, "No planner provider configured.");
+    }
+
+    const startedAt = new Date();
+    const reply = await plannerChat(
+      config,
+      CHECK_CHANGES_SYSTEM_PROMPT,
+      buildCheckChangesPrompt(prior.findings, delta),
+      { runContextId: `${runId}-check`, maxOutputTokens: 2800 },
+    );
+    if (!reply.ok || !reply.value) {
+      throw new AppError("planner_error", 502, "Follow-up planner call failed.");
+    }
+    const payload = extractJsonObject(reply.value.content);
+    if (!payload) {
+      throw new AppError("planner_error", 502, "Follow-up planner reply unparseable.");
+    }
+
+    const parsed = parseCheckChangesReply(payload, prior.findings);
+    const verdict = guardFollowUpVerdict(parsed);
+    const newRunId = createId("run");
+    const { findings: carried, carriedArtifacts } = carryStillPresentFindings(
+      prior.findings,
+      parsed.resolutions,
+      newRunId,
+      prior.postedArtifacts,
+    );
+    const patchByPath = new Map(delta.map((file) => [file.path, file.patch]));
+    const newFindings: ReviewFinding[] = parsed.newFindings.map((raw) => ({
+      id: createId("finding"),
+      runId: newRunId,
+      severity: normalizeSeverity(raw.severity),
+      passName: "Review",
+      filePath: raw.filePath,
+      line: postableDiffLine(
+        patchByPath.get(raw.filePath) ?? "",
+        raw.line,
+        `${raw.title} ${raw.finding}`,
+      ),
+      title: raw.title,
+      finding: raw.finding,
+      evidence: raw.evidence,
+      confidence: 0.6,
+    }));
+    const findings = [...carried, ...newFindings];
+
+    const inputTokens = reply.value.inputTokens ?? 0;
+    const outputTokens = reply.value.outputTokens ?? 0;
+    const baseReport = buildCheckChangesReport({
+      priorRunId: prior.runId,
+      baseSha: prior.reviewedHeadSha,
+      headSha,
+      reply: parsed,
+      verdict,
+      deltaFileCount: delta.length,
+    });
+    const report = inputTokens + outputTokens > 0
+      ? `${baseReport}\n\n---\n<sub>Model usage — in ${inputTokens.toLocaleString()} · ` +
+        `out ${outputTokens.toLocaleString()} · total ${
+          (inputTokens + outputTokens).toLocaleString()
+        } tokens</sub>`
+      : baseReport;
+
+    const finishedAt = new Date();
+    const record: ReviewAgentRunRecord = {
+      runId: newRunId,
+      pullRequestId: prior.pullRequestId,
+      repositoryId: prior.repositoryId,
+      repositoryFullName: prior.repositoryFullName,
+      reviewedHeadSha: headSha,
+      priorRunId: prior.runId,
+      resolutions: parsed.resolutions,
+      title: `Follow-up: ${prior.title}`,
+      verdict,
+      model: `${config.providerKind}/${config.model}`,
+      goalAchieved: true,
+      stopReason: "check_changes",
+      startedAt: startedAt.toISOString(),
+      finishedAt: finishedAt.toISOString(),
+      durationMs: finishedAt.getTime() - startedAt.getTime(),
+      cycleCount: 1,
+      findingCount: findings.length,
+      blockerCount: findings.filter((f) => f.severity === "blocker").length,
+      highCount: findings.filter((f) => f.severity === "high").length,
+      changedFileCount: delta.length,
+      nodeCount: 0,
+      edgeCount: 0,
+      torusVariance: 0,
+      findings,
+      summary: parsed.summary,
+      report,
+      inputTokens,
+      outputTokens,
+      totalTokens: inputTokens + outputTokens,
+      traceEnabled: false,
+      postedArtifacts: carriedArtifacts.length > 0 ? carriedArtifacts : undefined,
+    };
+    await this.repository.saveReviewAgentRun(record);
+    teamBus.emit(reviewRecordToEvent(record));
+    return record;
+  }
 
   private async resolvePlannerConfig(): Promise<PlannerChatConfig | null> {
     const runtime = await this.repository.getRuntimeLlmConfig();

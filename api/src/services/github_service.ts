@@ -810,6 +810,50 @@ export class GitHubOakService {
   }
 
   /**
+   * Compare two commits — the delta feed for "Check changes" follow-up
+   * reviews. Returns per-file patches only; token cost scales with the delta.
+   */
+  async compareCommits(
+    repositoryId: string,
+    baseSha: string,
+    headSha: string,
+  ): Promise<{ path: string; status: string; patch?: string }[]> {
+    this.validateRepositoryId(repositoryId);
+    if (!/^[0-9a-f]{7,40}$/i.test(baseSha) || !/^[0-9a-f]{7,40}$/i.test(headSha)) {
+      throw new AppError("invalid_commit_sha", 400, "invalid_commit_sha");
+    }
+    const token = await this.requireGithubToken();
+    const repo = await this.findRepositoryById(repositoryId, token);
+    // The compare API paginates its file list (and hard-caps around 300
+    // files). Walk a bounded number of pages and, when the cap is hit,
+    // append an explicit truncation marker so the follow-up prompt says the
+    // delta is incomplete instead of silently reviewing a partial diff.
+    const files: { path: string; status: string; patch?: string }[] = [];
+    const perPage = 100;
+    const maxPages = 3;
+    for (let page = 1; page <= maxPages; page++) {
+      const dto = await this.githubGet<{
+        files?: { filename: string; status: string; patch?: string }[];
+      }>(
+        `/repos/${repo.full_name}/compare/${baseSha}...${headSha}?per_page=${perPage}&page=${page}`,
+        token,
+      );
+      const batch = dto.files ?? [];
+      for (const file of batch) {
+        files.push({ path: file.filename, status: file.status, patch: file.patch });
+      }
+      if (batch.length < perPage) {
+        return files;
+      }
+    }
+    files.push({
+      path: `(delta truncated at ${files.length} files — compare API cap; review the PR directly)`,
+      status: "truncated",
+    });
+    return files;
+  }
+
+  /**
    * Validate a member's personal token and return its GitHub identity —
    * team-mode identity attach. The token is only ever held in memory.
    */

@@ -437,6 +437,17 @@ export interface ReviewAgentRunRecord {
   repositoryId: string;
   /** "owner/name" — rides the record so repo-scoped routing matches reality. */
   repositoryFullName?: string;
+  /** PR head sha this review examined — the base for "Check changes". */
+  reviewedHeadSha?: string;
+  /** Set on follow-up (Check changes) runs: the run this one verifies. */
+  priorRunId?: string;
+  /** Follow-up runs: per-prior-finding resolution classifications. */
+  resolutions?: {
+    findingId: string;
+    title: string;
+    status: "fixed" | "still_present" | "unverifiable";
+    evidence: string;
+  }[];
   title: string;
   /** "approve" | "request_changes" | "comment". */
   verdict: string;

@@ -38,17 +38,63 @@ export interface GithubAppPersistence {
   getGithubApp(): Promise<GithubAppCredentials | null>;
 }
 
-/** The manifest GitHub consumes to create the per-instance app. */
+/**
+ * Can GitHub's servers reach this URL? Manifest creation VALIDATES the hook
+ * URL and rejects localhost/private hosts outright ("Hook url is not
+ * supported because it isn't reachable over the public Internet"). Redirect
+ * URLs are exempt — the developer's own browser follows those.
+ */
+export function isPubliclyReachableUrl(base: string): boolean {
+  try {
+    const url = new URL(base);
+    if (url.protocol !== "https:" && url.protocol !== "http:") {
+      return false;
+    }
+    const host = url.hostname.toLowerCase();
+    if (
+      host === "localhost" || host === "127.0.0.1" || host === "::1" ||
+      host === "[::1]" || host.endsWith(".local") || host.endsWith(".internal") ||
+      host === "host.docker.internal"
+    ) {
+      return false;
+    }
+    if (
+      /^10\./.test(host) || /^192\.168\./.test(host) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+      // Link-local + cloud metadata (169.254.0.0/16, incl. 169.254.169.254).
+      /^169\.254\./.test(host) || host === "0.0.0.0" || host === "metadata.google.internal"
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The manifest GitHub consumes to create the per-instance app. On a
+ * localhost/private CAPILLARY_PUBLIC_URL the app is minted WITHOUT webhooks —
+ * checks, installation tokens and member flows all work; only PR-opened
+ * auto-review needs hooks, and that needs a public URL regardless. Deploy
+ * publicly later and add the webhook URL in the app's GitHub settings.
+ */
 export function buildAppManifest(
   publicUrl: string,
   instanceName?: string,
 ): Record<string, unknown> {
   const base = publicUrl.trim().replace(/\/+$/, "");
+  const webhookCapable = isPubliclyReachableUrl(base);
   return {
     name: (instanceName ?? `capillary-${new URL(base).hostname}`).slice(0, 34),
     url: "https://github.com/Solesius/capillary-cr",
     redirect_url: `${base}/api/github/app/callback`,
-    hook_attributes: { url: `${base}/api/github/webhook`, active: true },
+    ...(webhookCapable
+      ? {
+        hook_attributes: { url: `${base}/api/github/webhook`, active: true },
+        default_events: ["pull_request"],
+      }
+      : {}),
     public: false,
     default_permissions: {
       contents: "read",
@@ -57,7 +103,6 @@ export function buildAppManifest(
       checks: "write",
       issues: "write",
     },
-    default_events: ["pull_request"],
   };
 }
 

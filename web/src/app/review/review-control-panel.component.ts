@@ -185,6 +185,15 @@ import { ReviewFindingsPanelComponent } from "./review-findings-panel.component"
               <button
                 class="cap-button cap-button-ghost cap-button-sm"
                 type="button"
+                title="New commits since this review? Verify the fixes and review only the delta — a fraction of a full re-review."
+                [class.busy]="store.checkChangesBusy()"
+                [disabled]="store.checkChangesBusy()"
+                (click)="store.checkChanges()">
+                {{ store.checkChangesBusy() ? 'Checking changes…' : 'Check changes ↻' }}
+              </button>
+              <button
+                class="cap-button cap-button-ghost cap-button-sm"
+                type="button"
                 (click)="store.downloadSelectedReviewReport()">
                 Download report (.md)
               </button>

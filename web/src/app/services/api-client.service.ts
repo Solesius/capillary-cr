@@ -151,6 +151,11 @@ export class ApiClientService {
     return this.get(`/api/review/runs/${runId}/checklist`);
   }
 
+  /** Delta re-review: verify prior findings + review only the new commits. */
+  async checkChanges(runId: string): Promise<ReviewAgentRunRecord> {
+    return this.post(`/api/review/runs/${runId}/check-changes`, {});
+  }
+
   async cancelReview(runId: string): Promise<{ cancelled: boolean }> {
     return this.post(`/api/review/runs/${runId}/cancel`, {});
   }

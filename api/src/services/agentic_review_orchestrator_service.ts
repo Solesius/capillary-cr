@@ -548,6 +548,11 @@ export class AgenticReviewService {
   }
 
   /** Fetch a persisted review-agent run record (report + optional trace). */
+  /** "Check changes": delta re-review of a finished run (see ReviewAgentService). */
+  runCheckChanges(runId: string): Promise<ReviewAgentRunRecord> {
+    return this.reviewAgent.runCheckChanges(runId);
+  }
+
   getReviewAgentRun(runId: string): Promise<ReviewAgentRunRecord | null> {
     enforceDefensiveInput(runId, "run_id");
     return this.repository.getReviewAgentRun(runId);
