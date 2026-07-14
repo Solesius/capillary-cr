@@ -69,7 +69,7 @@ ENV HOME=/tmp
 EXPOSE 8080
 USER deno
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+HEALTHCHECK --interval=60s --timeout=5s --start-period=20s --retries=3 \
   CMD ["deno", "eval", "const r = await fetch(`http://127.0.0.1:${Deno.env.get('PORT') || 8080}/healthz`); if (!r.ok) Deno.exit(1);"]
 
 CMD ["deno", "run", "--allow-net", "--allow-env", "--allow-run", "--allow-read", "--allow-write", "--allow-ffi", "src/main.ts"]
