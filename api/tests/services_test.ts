@@ -727,7 +727,7 @@ Deno.test("should_use_chrome_path_when_auto_detection_fails", async () => {
 
 Deno.test("should_resolve_provider_ops_for_all_ihhi_provider_kinds", async () => {
   const kinds = listProviderKinds();
-  assertEquals(kinds.length, 7);
+  assertEquals(kinds.length, 8);
 
   for (const kind of kinds) {
     const ops = resolveProviderOps(kind);

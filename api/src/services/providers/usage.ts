@@ -122,6 +122,19 @@ export function normalizeOpenAiUsage(usage: unknown): NormalizedUsage {
 }
 
 /**
+ * OpenAI Responses API dialect (native /responses endpoint — distinct from
+ * chat-completions): `input_tokens` already INCLUDES the cached portion; the
+ * split lives in `input_tokens_details.cached_tokens`. `output_tokens`
+ * includes reasoning tokens (billed as output — do not subtract them).
+ */
+export function normalizeOpenAiResponsesUsage(usage: unknown): NormalizedUsage {
+  const u = rec(usage);
+  const input = num(u.input_tokens);
+  const cached = Math.min(input, num(rec(u.input_tokens_details).cached_tokens));
+  return build(input - cached, cached, 0, num(u.output_tokens));
+}
+
+/**
  * Gemini dialect: `promptTokenCount` includes `cachedContentTokenCount`;
  * output is `candidatesTokenCount`.
  */
