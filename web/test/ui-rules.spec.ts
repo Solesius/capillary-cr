@@ -5,6 +5,7 @@ import {
   isBeginEnabled,
   seedPostedState,
   shouldShowCleanState,
+  shouldShowFinalOutput,
   shouldShowGraphSummary,
   watchersLabel,
   windowRepositories,
@@ -112,6 +113,36 @@ describe("countOpenPullRequests", () => {
 });
 
 import { isStopArmed } from "../src/app/state/rules";
+
+describe("shouldShowFinalOutput (durable report visibility)", () => {
+  it("should_render_loaded_reports_for_connection_and_selection_states", () => {
+    expect(shouldShowFinalOutput("connected", true)).to.equal(true);
+    expect(shouldShowFinalOutput("idle", true)).to.equal(true);
+    expect(shouldShowFinalOutput("repository_selected", true)).to.equal(true);
+    expect(shouldShowFinalOutput("pull_request_selected", true)).to.equal(true);
+  });
+
+  it("should_render_loaded_reports_for_terminal_states_including_failures", () => {
+    expect(shouldShowFinalOutput("completed", true)).to.equal(true);
+    expect(shouldShowFinalOutput("failed", true)).to.equal(true);
+    expect(shouldShowFinalOutput("cancelled", true)).to.equal(true);
+  });
+
+  it("should_hide_loaded_reports_only_while_streaming", () => {
+    expect(shouldShowFinalOutput("queued", true)).to.equal(false);
+    expect(shouldShowFinalOutput("graphing", true)).to.equal(false);
+    expect(shouldShowFinalOutput("wetting", true)).to.equal(false);
+    expect(shouldShowFinalOutput("reviewing", true)).to.equal(false);
+    expect(shouldShowFinalOutput("cancelling", true)).to.equal(false);
+  });
+
+  it("should_stay_hidden_when_no_report_is_loaded", () => {
+    expect(shouldShowFinalOutput("connected", false)).to.equal(false);
+    expect(shouldShowFinalOutput("completed", false)).to.equal(false);
+    expect(shouldShowFinalOutput("failed", false)).to.equal(false);
+    expect(shouldShowFinalOutput("cancelled", false)).to.equal(false);
+  });
+});
 
 describe("isStopArmed (cooperative cancellation, client side)", () => {
   it("should_arm_stop_while_the_local_run_is_in_flight", () => {

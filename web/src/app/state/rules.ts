@@ -161,6 +161,16 @@ export function watchersLabel(active: boolean, watchers: number | undefined): st
   return `${watchers} watching`;
 }
 
+/**
+ * A loaded review is durable state; only an actively streaming run may
+ * suppress it.
+ */
+export function shouldShowFinalOutput(status: string, hasReport: boolean): boolean {
+  const streaming = status === "queued" || status === "graphing" ||
+    status === "wetting" || status === "reviewing" || status === "cancelling";
+  return !streaming && hasReport;
+}
+
 export function isStopArmed(
   runStatus: string | null,
   attachedSessionActive: boolean,
