@@ -161,10 +161,16 @@ export function parseCheckChangesReply(
     });
   }
 
+  // Verdicts are a closed set; anything else the model invents degrades to
+  // "comment" rather than flowing downstream as an unknown state.
+  const rawVerdict = String(payload.verdict ?? "comment");
+  const verdict = rawVerdict === "approve" || rawVerdict === "request_changes"
+    ? rawVerdict
+    : "comment";
   return {
     resolutions,
     newFindings,
-    verdict: String(payload.verdict ?? "comment"),
+    verdict,
     summary: String(payload.summary ?? "").slice(0, 2000),
   };
 }
@@ -232,11 +238,18 @@ export function buildCheckChangesReport(input: {
   return lines.join("\n");
 }
 
-/** Prior artifacts to carry forward so posted-state survives the follow-up. */
+/**
+ * Carry still-present prior findings into the follow-up run — WITH their
+ * posted-artifact state, so a finding already posted/dispatched from the
+ * prior run renders "posted ✓" in the follow-up instead of a re-postable
+ * button (flagged HIGH by capillary's live review of this feature: the
+ * carriedArtifacts half of this contract was previously dead).
+ */
 export function carryStillPresentFindings(
   priorFindings: readonly ReviewFinding[],
   resolutions: readonly FindingResolution[],
   newRunId: string,
+  priorArtifacts: readonly PostedArtifact[] = [],
 ): { findings: ReviewFinding[]; carriedArtifacts: PostedArtifact[] } {
   const still = new Set(
     resolutions.filter((r) => r.status !== "fixed").map((r) => r.findingId),
@@ -244,5 +257,8 @@ export function carryStillPresentFindings(
   const findings = priorFindings
     .filter((finding) => still.has(finding.id))
     .map((finding) => ({ ...finding, runId: newRunId }));
-  return { findings, carriedArtifacts: [] };
+  const carriedArtifacts = priorArtifacts.filter(
+    (artifact) => artifact.findingId !== undefined && still.has(artifact.findingId),
+  );
+  return { findings, carriedArtifacts };
 }

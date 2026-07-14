@@ -58,7 +58,12 @@ export function isPubliclyReachableUrl(base: string): boolean {
     ) {
       return false;
     }
-    if (/^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)) {
+    if (
+      /^10\./.test(host) || /^192\.168\./.test(host) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+      // Link-local + cloud metadata (169.254.0.0/16, incl. 169.254.169.254).
+      /^169\.254\./.test(host) || host === "0.0.0.0" || host === "metadata.google.internal"
+    ) {
       return false;
     }
     return true;

@@ -31,6 +31,7 @@ import {
   ReviewSuggestion,
 } from "../domain/entities.ts";
 import { AppError } from "../domain/errors.ts";
+import { enforceDefensiveInput } from "../lib/validation.ts";
 import { ReviewRunEvent, TCSRTC_GATES, TcsrtcGate, toTcsrtcGate } from "../domain/review_phase.ts";
 import { ReviewRepository } from "../repositories/review_repository.ts";
 import { GitHubOakService } from "./github_service.ts";
@@ -572,6 +573,7 @@ export class ReviewAgentService {
    * scales with the delta, not the PR. Produces a linked follow-up record.
    */
   async runCheckChanges(runId: string): Promise<ReviewAgentRunRecord> {
+    enforceDefensiveInput(runId, "run_id");
     const prior = await this.repository.getReviewAgentRun(runId);
     if (!prior) {
       throw new AppError("review_run_not_found", 404, "review_run_not_found");
@@ -619,10 +621,11 @@ export class ReviewAgentService {
     const parsed = parseCheckChangesReply(payload, prior.findings);
     const verdict = guardFollowUpVerdict(parsed);
     const newRunId = createId("run");
-    const { findings: carried } = carryStillPresentFindings(
+    const { findings: carried, carriedArtifacts } = carryStillPresentFindings(
       prior.findings,
       parsed.resolutions,
       newRunId,
+      prior.postedArtifacts,
     );
     const patchByPath = new Map(delta.map((file) => [file.path, file.patch]));
     const newFindings: ReviewFinding[] = parsed.newFindings.map((raw) => ({
@@ -692,6 +695,7 @@ export class ReviewAgentService {
       outputTokens,
       totalTokens: inputTokens + outputTokens,
       traceEnabled: false,
+      postedArtifacts: carriedArtifacts.length > 0 ? carriedArtifacts : undefined,
     };
     await this.repository.saveReviewAgentRun(record);
     teamBus.emit(reviewRecordToEvent(record));

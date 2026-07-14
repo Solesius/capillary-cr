@@ -824,17 +824,33 @@ export class GitHubOakService {
     }
     const token = await this.requireGithubToken();
     const repo = await this.findRepositoryById(repositoryId, token);
-    const dto = await this.githubGet<{
-      files?: { filename: string; status: string; patch?: string }[];
-    }>(
-      `/repos/${repo.full_name}/compare/${baseSha}...${headSha}?per_page=100`,
-      token,
-    );
-    return (dto.files ?? []).map((file) => ({
-      path: file.filename,
-      status: file.status,
-      patch: file.patch,
-    }));
+    // The compare API paginates its file list (and hard-caps around 300
+    // files). Walk a bounded number of pages and, when the cap is hit,
+    // append an explicit truncation marker so the follow-up prompt says the
+    // delta is incomplete instead of silently reviewing a partial diff.
+    const files: { path: string; status: string; patch?: string }[] = [];
+    const perPage = 100;
+    const maxPages = 3;
+    for (let page = 1; page <= maxPages; page++) {
+      const dto = await this.githubGet<{
+        files?: { filename: string; status: string; patch?: string }[];
+      }>(
+        `/repos/${repo.full_name}/compare/${baseSha}...${headSha}?per_page=${perPage}&page=${page}`,
+        token,
+      );
+      const batch = dto.files ?? [];
+      for (const file of batch) {
+        files.push({ path: file.filename, status: file.status, patch: file.patch });
+      }
+      if (batch.length < perPage) {
+        return files;
+      }
+    }
+    files.push({
+      path: `(delta truncated at ${files.length} files — compare API cap; review the PR directly)`,
+      status: "truncated",
+    });
+    return files;
   }
 
   /**
