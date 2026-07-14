@@ -26,10 +26,26 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # (No init: needed — the deno base image already runs tini as PID 1, so
+    # chromium zombies from RetV runs are reaped; adding docker-init would
+    # just nest a second tini that warns.)
+    # Review runs stream a lot of stdout; uncapped json-file logs turn into
+    # real disk I/O on laptop/WSL2 hosts. Cap and rotate.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     ports:
       - "${CAPILLARY_PORT:-8080}:8080"
     environment:
       PORT: "8080"
+      # V8 tuning passthrough (Deno reads this natively). Null-form: the var
+      # reaches the container ONLY when set in .env/shell — Deno hard-errors
+      # on an empty DENO_V8_FLAGS, so never default it to "". Laptops can
+      # bound GC pressure with e.g.:
+      #   DENO_V8_FLAGS=--max-old-space-size=768,--optimize-for-size
+      DENO_V8_FLAGS:
       CORS_ORIGIN: "${CORS_ORIGIN:-http://localhost:8080}"
       CAPILLARY_SERVE_WEB: "1"
       CAPILLARY_WEB_DIST: "/app/web-dist"
@@ -98,8 +114,10 @@ services:
       - capillary-data:/var/lib/capillary
       - capillary-captures:/app/api/.data/review_captures
     healthcheck:
+      # Each probe boots a fresh Deno runtime — constant background CPU on
+      # laptops. 60s keeps orchestrators honest at half the idle cost.
       test: ["CMD", "deno", "eval", "const r = await fetch(`http://127.0.0.1:$${Deno.env.get('PORT') || 8080}/healthz`); if (!r.ok) Deno.exit(1);"]
-      interval: 30s
+      interval: 60s
       timeout: 5s
       start_period: 20s
       retries: 3
