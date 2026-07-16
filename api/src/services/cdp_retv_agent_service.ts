@@ -7,8 +7,11 @@ import type {
   RetvCdpRunRecord,
   RetvCdpRunTrace,
   RetvCdpTraceCycle,
+  RetvCdpTraceDialog,
 } from "../domain/entities.ts";
 import {
+  type CdpDialogOccurrence,
+  type CdpDialogPolicy,
   CdpDriverService,
   CdpWorkStep,
   CdpWorkStepResult,
@@ -132,6 +135,8 @@ export interface RetvCdpObservation {
   interactiveLabels: string[];
   visibleText: string;
   timestamp: string;
+  /** Dialogs auto-handled since the previous observation, planner-readable. */
+  dialogs?: string[];
 }
 
 export interface RetvCdpCycleSummary {
@@ -162,6 +167,12 @@ export interface RetvCdpRunRequest {
    * throwaway testing runs) only the report + metadata are persisted.
    */
   trace?: boolean;
+  /**
+   * How the driver answers confirm/prompt dialogs during this run (alert and
+   * beforeunload are always accepted). Default "dismiss" — the least
+   * state-changing answer.
+   */
+  dialogPolicy?: CdpDialogPolicy;
 }
 
 export type RetvCdpRunEvent =
@@ -177,6 +188,7 @@ export type RetvCdpRunEvent =
     findings: string[];
   }
   | { type: "screenshot"; cycle: number; dataUrl: string }
+  | { type: "dialog"; occurrence: CdpDialogOccurrence }
   | {
     type: "cycle";
     cycle: RetvCdpCycleSummary;
@@ -245,6 +257,21 @@ export function evaluateGoalClaim(
     };
   }
   return { accepted: true };
+}
+
+/**
+ * One-line planner-facing account of an auto-handled dialog. Dialogs block the
+ * page until answered, so the driver responds immediately and the planner
+ * learns what happened here, in its next observation. Exported for direct
+ * unit testing.
+ */
+export function formatDialogObservation(
+  occurrence: { dialogType: string; message: string; action: string },
+): string {
+  const message = occurrence.message.length > 140
+    ? `${occurrence.message.slice(0, 140)}…`
+    : occurrence.message;
+  return `${occurrence.dialogType} appeared: "${message}" — auto-${occurrence.action}`;
 }
 
 interface PlannerResult {
@@ -610,285 +637,363 @@ export class CdpRetvAgentService {
     let runInputTokens = 0;
     let runOutputTokens = 0;
 
-    let structuredPlan = this.defaultPlan(goal);
-    emit({ type: "plan", structuredPlan });
-    const cycles: RetvCdpCycleSummary[] = [];
-    const traceCycles: RetvCdpTraceCycle[] = [];
-    const traceScreenshots: { cycle: number; dataUrl: string }[] = [];
-    let roundsWithoutProgress = 0;
-    let driftWarnings = 0;
-    let completedMilestones = 0;
-    let goalAchieved = false;
+    // The driver answers dialogs the moment they open (an unanswered dialog
+    // freezes the page); this run only observes what happened so the planner
+    // hears about it in its next observation.
+    this.cdpDriver.setSessionDialogPolicy(sessionId, request.dialogPolicy ?? "dismiss");
+    const pendingDialogs: CdpDialogOccurrence[] = [];
+    const traceDialogs: RetvCdpTraceDialog[] = [];
+    const unsubscribeDialogs = this.cdpDriver.onSessionDialog(sessionId, (occurrence) => {
+      pendingDialogs.push(occurrence);
+      if (traceEnabled) {
+        traceDialogs.push(occurrence);
+      }
+      emit({ type: "dialog", occurrence });
+    });
 
-    // Retry resilience: a single failed step no longer aborts the run. We keep
-    // cycling so the planner can read the raw page and try a different selector,
-    // only bailing once the SAME step/action has failed MAX_STEP_ATTEMPTS times
-    // (or the wall-clock budget is exhausted).
-    const MAX_STEP_ATTEMPTS = 20;
-    const stepFailureCounts = new Map<string, number>();
-    let maxStepFailures = 0;
-    let stopReason = "time_budget_exhausted";
+    try {
+      let structuredPlan = this.defaultPlan(goal);
+      emit({ type: "plan", structuredPlan });
+      const cycles: RetvCdpCycleSummary[] = [];
+      const traceCycles: RetvCdpTraceCycle[] = [];
+      const traceScreenshots: { cycle: number; dataUrl: string }[] = [];
+      let roundsWithoutProgress = 0;
+      let driftWarnings = 0;
+      let completedMilestones = 0;
+      let goalAchieved = false;
 
-    let cycle = 0;
-    while (true) {
-      cycle += 1;
-      if (cycle > 1 && Date.now() >= deadlineAt) {
-        stopReason = "time_budget_exhausted";
-        break;
-      }
-      if (isCancelled()) {
-        stopReason = "cancelled";
-        break;
-      }
-      if (cycle > HARD_CYCLE_CAP) {
-        stopReason = "iteration_budget_exhausted";
-        break;
-      }
-      const observation = await this.observePageState(sessionId, cycle);
-      emit({ type: "observation", cycle, observation });
-      if (!driftScopeDisabled && isDrift(observation.url, allowedOriginSet)) {
-        driftWarnings += 1;
-      }
+      // Retry resilience: a single failed step no longer aborts the run. We keep
+      // cycling so the planner can read the raw page and try a different selector,
+      // only bailing once the SAME step/action has failed MAX_STEP_ATTEMPTS times
+      // (or the wall-clock budget is exhausted).
+      const MAX_STEP_ATTEMPTS = 20;
+      const stepFailureCounts = new Map<string, number>();
+      let maxStepFailures = 0;
+      let stopReason = "time_budget_exhausted";
 
-      // Race the planner turn against a stop request: Stop must not wait out
-      // a 30-60s model call. The orphaned call settles in the background.
-      const plannerOrCancelled = await raceCancellation(
-        this.planNextCycle(
-          goal,
+      let cycle = 0;
+      while (true) {
+        cycle += 1;
+        if (cycle > 1 && Date.now() >= deadlineAt) {
+          stopReason = "time_budget_exhausted";
+          break;
+        }
+        if (isCancelled()) {
+          stopReason = "cancelled";
+          break;
+        }
+        if (cycle > HARD_CYCLE_CAP) {
+          stopReason = "iteration_budget_exhausted";
+          break;
+        }
+        const observation = await this.observePageState(sessionId, cycle);
+        if (pendingDialogs.length > 0) {
+          observation.dialogs = pendingDialogs.splice(0).map(formatDialogObservation);
+        }
+        emit({ type: "observation", cycle, observation });
+        if (!driftScopeDisabled && isDrift(observation.url, allowedOriginSet)) {
+          driftWarnings += 1;
+        }
+
+        // Race the planner turn against a stop request: Stop must not wait out
+        // a 30-60s model call. The orphaned call settles in the background.
+        const plannerOrCancelled = await raceCancellation(
+          this.planNextCycle(
+            goal,
+            cycle,
+            allowedOrigin,
+            observation,
+            cycles,
+            structuredPlan,
+            runId,
+            (text) => {
+              if (!text) {
+                return;
+              }
+              emit({ type: "planner_delta", cycle, text });
+            },
+          ),
+          isCancelled,
+        );
+        if (plannerOrCancelled === CANCELLED) {
+          stopReason = "cancelled";
+          break;
+        }
+        const planner = plannerOrCancelled;
+        runInputTokens += planner.inputTokens ?? 0;
+        runOutputTokens += planner.outputTokens ?? 0;
+        if (planner.structuredPlan) {
+          structuredPlan = planner.structuredPlan;
+          emit({ type: "plan", structuredPlan });
+        }
+
+        if (isCancelled()) {
+          stopReason = "cancelled";
+          break;
+        }
+        const plannedCalls = planner.nextToolCalls.length > 0
+          ? planner.nextToolCalls
+          : this.fallbackToolCalls(goal, cycle, startUrl);
+
+        emit({
+          type: "planner",
           cycle,
-          allowedOrigin,
-          observation,
-          cycles,
+          rawContent: planner.rawContent || "",
+          toolCalls: plannedCalls,
+          findings: planner.findings,
+        });
+
+        const steps = this.toCdpSteps(plannedCalls, startUrl, sessionId);
+        const workUnit = await this.cdpDriver.executeWorkUnit(sessionId, {
+          name: `retv_goal_cycle_${cycle}`,
+          stopOnFailure: true,
+          steps,
+        });
+
+        const screenshot = await this.captureCycleScreenshot(sessionId);
+        if (screenshot) {
+          emit({ type: "screenshot", cycle, dataUrl: screenshot });
+        }
+
+        const failedSteps = workUnit.steps.filter((step) => !step.ok).length;
+        this.#capturePageRefs(sessionId, workUnit.steps);
+        const toolOutputs = summarizeToolOutputs(plannedCalls, steps, workUnit.steps);
+        const cycleFindings = this.collectCycleFindings(workUnit, planner.findings, driftWarnings);
+
+        const progress = this.normalizeProgress(
+          planner.progress,
           structuredPlan,
-          runId,
-          (text) => {
-            if (!text) {
-              return;
-            }
-            emit({ type: "planner_delta", cycle, text });
-          },
-        ),
-        isCancelled,
-      );
-      if (plannerOrCancelled === CANCELLED) {
-        stopReason = "cancelled";
-        break;
-      }
-      const planner = plannerOrCancelled;
-      runInputTokens += planner.inputTokens ?? 0;
-      runOutputTokens += planner.outputTokens ?? 0;
-      if (planner.structuredPlan) {
-        structuredPlan = planner.structuredPlan;
-        emit({ type: "plan", structuredPlan });
-      }
-
-      if (isCancelled()) {
-        stopReason = "cancelled";
-        break;
-      }
-      const plannedCalls = planner.nextToolCalls.length > 0
-        ? planner.nextToolCalls
-        : this.fallbackToolCalls(goal, cycle, startUrl);
-
-      emit({
-        type: "planner",
-        cycle,
-        rawContent: planner.rawContent || "",
-        toolCalls: plannedCalls,
-        findings: planner.findings,
-      });
-
-      const steps = this.toCdpSteps(plannedCalls, startUrl, sessionId);
-      const workUnit = await this.cdpDriver.executeWorkUnit(sessionId, {
-        name: `retv_goal_cycle_${cycle}`,
-        stopOnFailure: true,
-        steps,
-      });
-
-      const screenshot = await this.captureCycleScreenshot(sessionId);
-      if (screenshot) {
-        emit({ type: "screenshot", cycle, dataUrl: screenshot });
-      }
-
-      const failedSteps = workUnit.steps.filter((step) => !step.ok).length;
-      this.#capturePageRefs(sessionId, workUnit.steps);
-      const toolOutputs = summarizeToolOutputs(plannedCalls, steps, workUnit.steps);
-      const cycleFindings = this.collectCycleFindings(workUnit, planner.findings, driftWarnings);
-
-      const progress = this.normalizeProgress(
-        planner.progress,
-        structuredPlan,
-        completedMilestones,
-        failedSteps === 0,
-        !planner.findings.some((finding) => finding.startsWith("planner_unavailable")),
-        roundsWithoutProgress,
-        driftWarnings,
-      );
-
-      if (progress.completedMilestones > completedMilestones) {
-        roundsWithoutProgress = 0;
-        // Forward progress is the opposite of drift: decay accumulated
-        // warnings so early-run turbulence cannot pause a recovering run.
-        driftWarnings = 0;
-      } else {
-        roundsWithoutProgress += 1;
-      }
-
-      completedMilestones = progress.completedMilestones;
-      goalAchieved = progress.goalAchieved ||
-        (
-          !planner.findings.some((finding) => finding.startsWith("planner_unavailable")) &&
-          progress.completedMilestones >= progress.totalMilestones
+          completedMilestones,
+          failedSteps === 0,
+          !planner.findings.some((finding) => finding.startsWith("planner_unavailable")),
+          roundsWithoutProgress,
+          driftWarnings,
         );
 
-      const cycleSummary: RetvCdpCycleSummary = {
-        cycle,
-        observation,
-        toolCalls: plannedCalls,
-        workUnit: {
-          name: workUnit.name,
-          success: workUnit.success,
-          failedSteps,
-        },
-        toolOutputs,
-        findings: cycleFindings,
-        plannerRaw: planner.rawContent,
-        screenshot,
-      };
-      // Completion-contract teeth: an unproven goalAchieved claim becomes a
-      // visible rejection finding, teaching the planner what evidence it owes.
-      const claimGate = evaluateGoalClaim(
-        Boolean(planner.progress?.goalAchieved),
-        planner.progress?.evidence,
-        progress.completedMilestones >= progress.totalMilestones,
-      );
-      if (claimGate.rejection) {
-        cycleFindings.push(claimGate.rejection);
-        cycleSummary.findings = cycleFindings;
-      }
-      cycles.push(cycleSummary);
-      emit({
-        type: "cycle",
-        cycle: cycleSummary,
-        progress,
-        tokens: {
-          input: runInputTokens,
-          output: runOutputTokens,
-          total: runInputTokens + runOutputTokens,
-        },
-      });
-
-      if (traceEnabled) {
-        traceCycles.push({
-          cycle,
-          startedAt: observation.timestamp || new Date().toISOString(),
-          url: observation.url,
-          title: observation.title,
-          headings: observation.headings.slice(),
-          interactiveLabels: observation.interactiveLabels.slice(),
-          plannerRaw: planner.rawContent,
-          toolCalls: plannedCalls.map((call) => ({
-            tool: call.tool,
-            args: call.args,
-            reason: call.reason,
-          })),
-          steps: workUnit.steps.map((step, index) => ({
-            index,
-            action: step.action,
-            ok: step.ok,
-            durationMs: step.durationMs,
-            output: traceStepOutput(step.output),
-            error: step.error,
-          })),
-          workUnitName: workUnit.name,
-          workUnitSuccess: workUnit.success,
-          failedSteps,
-          findings: cycleFindings.slice(),
-        });
-        if (screenshot) {
-          traceScreenshots.push({ cycle, dataUrl: screenshot });
+        if (progress.completedMilestones > completedMilestones) {
+          roundsWithoutProgress = 0;
+          // Forward progress is the opposite of drift: decay accumulated
+          // warnings so early-run turbulence cannot pause a recovering run.
+          driftWarnings = 0;
+        } else {
+          roundsWithoutProgress += 1;
         }
-      }
 
-      if (!workUnit.success) {
-        workUnit.steps.forEach((result, index) => {
-          if (result.ok) {
-            return;
-          }
-          const signature = stepFailureSignature(steps[index], result);
-          const attempts = (stepFailureCounts.get(signature) || 0) + 1;
-          stepFailureCounts.set(signature, attempts);
-          maxStepFailures = Math.max(maxStepFailures, attempts);
+        completedMilestones = progress.completedMilestones;
+        goalAchieved = progress.goalAchieved ||
+          (
+            !planner.findings.some((finding) => finding.startsWith("planner_unavailable")) &&
+            progress.completedMilestones >= progress.totalMilestones
+          );
+
+        const cycleSummary: RetvCdpCycleSummary = {
+          cycle,
+          observation,
+          toolCalls: plannedCalls,
+          workUnit: {
+            name: workUnit.name,
+            success: workUnit.success,
+            failedSteps,
+          },
+          toolOutputs,
+          findings: cycleFindings,
+          plannerRaw: planner.rawContent,
+          screenshot,
+        };
+        // Completion-contract teeth: an unproven goalAchieved claim becomes a
+        // visible rejection finding, teaching the planner what evidence it owes.
+        const claimGate = evaluateGoalClaim(
+          Boolean(planner.progress?.goalAchieved),
+          planner.progress?.evidence,
+          progress.completedMilestones >= progress.totalMilestones,
+        );
+        if (claimGate.rejection) {
+          cycleFindings.push(claimGate.rejection);
+          cycleSummary.findings = cycleFindings;
+        }
+        cycles.push(cycleSummary);
+        emit({
+          type: "cycle",
+          cycle: cycleSummary,
+          progress,
+          tokens: {
+            input: runInputTokens,
+            output: runOutputTokens,
+            total: runInputTokens + runOutputTokens,
+          },
         });
 
-        if (maxStepFailures >= MAX_STEP_ATTEMPTS) {
-          stopReason = "step_failed";
+        if (traceEnabled) {
+          traceCycles.push({
+            cycle,
+            startedAt: observation.timestamp || new Date().toISOString(),
+            url: observation.url,
+            title: observation.title,
+            headings: observation.headings.slice(),
+            interactiveLabels: observation.interactiveLabels.slice(),
+            plannerRaw: planner.rawContent,
+            toolCalls: plannedCalls.map((call) => ({
+              tool: call.tool,
+              args: call.args,
+              reason: call.reason,
+            })),
+            steps: workUnit.steps.map((step, index) => ({
+              index,
+              action: step.action,
+              ok: step.ok,
+              durationMs: step.durationMs,
+              output: traceStepOutput(step.output),
+              error: step.error,
+            })),
+            workUnitName: workUnit.name,
+            workUnitSuccess: workUnit.success,
+            failedSteps,
+            findings: cycleFindings.slice(),
+          });
+          if (screenshot) {
+            traceScreenshots.push({ cycle, dataUrl: screenshot });
+          }
+        }
+
+        if (!workUnit.success) {
+          workUnit.steps.forEach((result, index) => {
+            if (result.ok) {
+              return;
+            }
+            const signature = stepFailureSignature(steps[index], result);
+            const attempts = (stepFailureCounts.get(signature) || 0) + 1;
+            stepFailureCounts.set(signature, attempts);
+            maxStepFailures = Math.max(maxStepFailures, attempts);
+          });
+
+          if (maxStepFailures >= MAX_STEP_ATTEMPTS) {
+            stopReason = "step_failed";
+            break;
+          }
+
+          // Recoverable failure: keep cycling (within the time budget) so the
+          // planner can call readPage to find a valid selector and retry.
+          stopReason = "step_retry";
+          continue;
+        }
+
+        if (goalAchieved) {
+          stopReason = "goal_achieved";
           break;
         }
 
-        // Recoverable failure: keep cycling (within the time budget) so the
-        // planner can call readPage to find a valid selector and retry.
-        stopReason = "step_retry";
-        continue;
+        if (driftWarnings >= 2) {
+          stopReason = "drift_pause";
+          break;
+        }
+
+        if (roundsWithoutProgress >= 3) {
+          stopReason = "no_progress_pause";
+          break;
+        }
+
+        if (explicitMaxCycles !== undefined && cycle >= explicitMaxCycles) {
+          stopReason = "iteration_budget_exhausted";
+          break;
+        }
       }
 
-      if (goalAchieved) {
-        stopReason = "goal_achieved";
-        break;
-      }
+      const findings = dedupe(cycles.flatMap((cycle) => cycle.findings));
+      const progress = {
+        percent: Math.round(
+          (completedMilestones / Math.max(1, structuredPlan.milestones.length)) * 100,
+        ),
+        completedMilestones,
+        totalMilestones: structuredPlan.milestones.length,
+        nextMilestone: structuredPlan.milestones[completedMilestones] || "complete",
+        roundsWithoutProgress,
+        driftWarnings,
+        goalAchieved,
+      };
 
-      if (driftWarnings >= 2) {
-        stopReason = "drift_pause";
-        break;
-      }
-
-      if (roundsWithoutProgress >= 3) {
-        stopReason = "no_progress_pause";
-        break;
-      }
-
-      if (explicitMaxCycles !== undefined && cycle >= explicitMaxCycles) {
-        stopReason = "iteration_budget_exhausted";
-        break;
-      }
-    }
-
-    const findings = dedupe(cycles.flatMap((cycle) => cycle.findings));
-    const progress = {
-      percent: Math.round(
-        (completedMilestones / Math.max(1, structuredPlan.milestones.length)) * 100,
-      ),
-      completedMilestones,
-      totalMilestones: structuredPlan.milestones.length,
-      nextMilestone: structuredPlan.milestones[completedMilestones] || "complete",
-      roundsWithoutProgress,
-      driftWarnings,
-      goalAchieved,
-    };
-
-    this.#activeRuns.delete(runId);
-    this.#cancelRequested.delete(runId);
-    const wasCancelled = stopReason === "cancelled";
-    const functionalTestSucceeded = goalAchieved && cycles.every((cycle) => cycle.workUnit.success);
-    // A stopped run exits now — no verdict turn, no report turn, no tokens.
-    const summary = wasCancelled ? "Run stopped by user." : await this.summarizeRun({
-      runId,
-      goal,
-      stopReason,
-      functionalTestSucceeded,
-      goalAchieved,
-      structuredPlan,
-      progress,
-      cycles,
-      findings,
-    });
-    emit({ type: "summary", summary });
-
-    const report = wasCancelled
-      ? "# Functional Test Report\n\n## Verdict\n**STOPPED** — cancelled by user after " +
-        `${cycles.length} cycle${cycles.length === 1 ? "" : "s"}.\n\n${summary}`
-      : await this.generateRunReport({
+      this.#activeRuns.delete(runId);
+      this.#cancelRequested.delete(runId);
+      const wasCancelled = stopReason === "cancelled";
+      const functionalTestSucceeded = goalAchieved &&
+        cycles.every((cycle) => cycle.workUnit.success);
+      // A stopped run exits now — no verdict turn, no report turn, no tokens.
+      const summary = wasCancelled ? "Run stopped by user." : await this.summarizeRun({
         runId,
+        goal,
+        stopReason,
+        functionalTestSucceeded,
+        goalAchieved,
+        structuredPlan,
+        progress,
+        cycles,
+        findings,
+      });
+      emit({ type: "summary", summary });
+
+      const report = wasCancelled
+        ? "# Functional Test Report\n\n## Verdict\n**STOPPED** — cancelled by user after " +
+          `${cycles.length} cycle${cycles.length === 1 ? "" : "s"}.\n\n${summary}`
+        : await this.generateRunReport({
+          runId,
+          goal,
+          allowedOrigin,
+          stopReason,
+          functionalTestSucceeded,
+          goalAchieved,
+          structuredPlan,
+          progress,
+          cycles,
+          findings,
+          summary,
+        });
+      const meteredReport = runInputTokens + runOutputTokens > 0
+        ? `${report}\n\n---\n<sub>Model usage — in ${runInputTokens.toLocaleString()} · ` +
+          `out ${runOutputTokens.toLocaleString()} · total ${
+            (runInputTokens + runOutputTokens).toLocaleString()
+          } tokens</sub>`
+        : report;
+      emit({ type: "report", report: meteredReport });
+
+      const finishedAt = new Date().toISOString();
+      const trace: RetvCdpRunTrace | undefined = traceEnabled
+        ? {
+          cycles: traceCycles,
+          screenshots: traceScreenshots,
+          ...(traceDialogs.length > 0 ? { dialogs: traceDialogs } : {}),
+        }
+        : undefined;
+      const record: RetvCdpRunRecord = {
+        runId,
+        sessionId,
+        goal,
+        allowedOrigin,
+        stopReason,
+        functionalTestSucceeded,
+        inputTokens: runInputTokens,
+        outputTokens: runOutputTokens,
+        totalTokens: runInputTokens + runOutputTokens,
+        goalAchieved,
+        startedAt,
+        finishedAt,
+        durationMs: Math.max(0, Date.parse(finishedAt) - Date.parse(startedAt)),
+        cycleCount: cycles.length,
+        milestonesCompleted: progress.completedMilestones,
+        milestonesTotal: progress.totalMilestones,
+        percent: progress.percent,
+        findings,
+        summary,
+        report: meteredReport,
+        traceEnabled,
+        trace,
+      };
+      await this.repository.saveRetvRun(record);
+      // Team surfaces (UI notifications, Slack/Teams channels) hang off the bus;
+      // emission is isolated and can never fail the run.
+      teamBus.emit(retvRecordToEvent(record));
+
+      const result: RetvCdpRunResult = {
+        runId,
+        sessionId,
         goal,
         allowedOrigin,
         stopReason,
@@ -899,66 +1004,20 @@ export class CdpRetvAgentService {
         cycles,
         findings,
         summary,
-      });
-    const meteredReport = runInputTokens + runOutputTokens > 0
-      ? `${report}\n\n---\n<sub>Model usage — in ${runInputTokens.toLocaleString()} · ` +
-        `out ${runOutputTokens.toLocaleString()} · total ${
-          (runInputTokens + runOutputTokens).toLocaleString()
-        } tokens</sub>`
-      : report;
-    emit({ type: "report", report: meteredReport });
-
-    const finishedAt = new Date().toISOString();
-    const trace: RetvCdpRunTrace | undefined = traceEnabled
-      ? { cycles: traceCycles, screenshots: traceScreenshots }
-      : undefined;
-    const record: RetvCdpRunRecord = {
-      runId,
-      sessionId,
-      goal,
-      allowedOrigin,
-      stopReason,
-      functionalTestSucceeded,
-      inputTokens: runInputTokens,
-      outputTokens: runOutputTokens,
-      totalTokens: runInputTokens + runOutputTokens,
-      goalAchieved,
-      startedAt,
-      finishedAt,
-      durationMs: Math.max(0, Date.parse(finishedAt) - Date.parse(startedAt)),
-      cycleCount: cycles.length,
-      milestonesCompleted: progress.completedMilestones,
-      milestonesTotal: progress.totalMilestones,
-      percent: progress.percent,
-      findings,
-      summary,
-      report: meteredReport,
-      traceEnabled,
-      trace,
-    };
-    await this.repository.saveRetvRun(record);
-    // Team surfaces (UI notifications, Slack/Teams channels) hang off the bus;
-    // emission is isolated and can never fail the run.
-    teamBus.emit(retvRecordToEvent(record));
-
-    const result: RetvCdpRunResult = {
-      runId,
-      sessionId,
-      goal,
-      allowedOrigin,
-      stopReason,
-      functionalTestSucceeded,
-      goalAchieved,
-      structuredPlan,
-      progress,
-      cycles,
-      findings,
-      summary,
-      report,
-      traceEnabled,
-    };
-    emit({ type: "done", result });
-    return result;
+        report,
+        traceEnabled,
+      };
+      emit({ type: "done", result });
+      return result;
+    } finally {
+      unsubscribeDialogs();
+      // Exception-safe registry cleanup: a throw mid-loop previously leaked
+      // the runId in #activeRuns forever. The happy-path deletes above remain
+      // (cancellation must be cleared before the summary turn); these are
+      // idempotent.
+      this.#activeRuns.delete(runId);
+      this.#cancelRequested.delete(runId);
+    }
   }
 
   private async summarizeRun(input: {

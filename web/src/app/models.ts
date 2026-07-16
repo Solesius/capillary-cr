@@ -492,6 +492,7 @@ export interface RetvCdpCycleSummary {
     interactiveLabels: string[];
     visibleText: string;
     timestamp: string;
+    dialogs?: string[];
   };
   toolCalls: RetvCdpToolCall[];
   workUnit: {
@@ -619,6 +620,10 @@ export type RetvCdpRunEvent =
     findings: string[];
   }
   | { type: "screenshot"; cycle: number; dataUrl: string }
+  | {
+    type: "dialog";
+    occurrence: { at: string; url: string; dialogType: string; message: string; action: string };
+  }
   | {
     type: "cycle";
     cycle: RetvCdpCycleSummary;

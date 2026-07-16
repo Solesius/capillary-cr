@@ -645,6 +645,12 @@ export class CapillaryStore {
         this.agentScreenshot.set(event.dataUrl);
         this.pushConsole("observe", `cycle ${event.cycle} screenshot captured`);
         break;
+      case "dialog":
+        this.pushConsole(
+          "system",
+          `dialog ${event.occurrence.dialogType} auto-${event.occurrence.action}: "${event.occurrence.message}"`,
+        );
+        break;
       case "cycle":
         this.agentRunPhase.set("observing");
         if (event.tokens) {

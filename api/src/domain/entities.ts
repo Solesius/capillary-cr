@@ -317,10 +317,20 @@ export interface RetvCdpTraceScreenshot {
   dataUrl: string;
 }
 
+/** A JavaScript dialog the driver auto-handled during the run. */
+export interface RetvCdpTraceDialog {
+  at: string;
+  url: string;
+  dialogType: string;
+  message: string;
+  action: string;
+}
+
 /** The complete trace payload, retained only for traced runs. */
 export interface RetvCdpRunTrace {
   cycles: RetvCdpTraceCycle[];
   screenshots: RetvCdpTraceScreenshot[];
+  dialogs?: RetvCdpTraceDialog[];
 }
 
 /** A persisted RetV functional-test run (report always present, trace optional). */

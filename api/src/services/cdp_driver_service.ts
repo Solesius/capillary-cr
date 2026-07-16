@@ -113,8 +113,77 @@ interface CdpEvaluateResponse {
   };
 }
 
+export type CdpDialogPolicy = "accept" | "dismiss";
+
+/** A JavaScript dialog the driver auto-handled on behalf of a session. */
+export interface CdpDialogOccurrence {
+  at: string;
+  url: string;
+  dialogType: string;
+  message: string;
+  action: "accepted" | "dismissed";
+}
+
+/**
+ * How to answer a JavaScript dialog: alert has only an accept path, and
+ * beforeunload must be accepted or the pending navigation stalls forever;
+ * confirm/prompt follow the session policy (default "dismiss" — the least
+ * state-changing answer). Exported for direct unit testing.
+ */
+export function resolveDialogAction(
+  dialogType: string,
+  policy: CdpDialogPolicy,
+): { accept: boolean } {
+  if (dialogType === "alert" || dialogType === "beforeunload") {
+    return { accept: true };
+  }
+  return { accept: policy === "accept" };
+}
+
+/**
+ * Registry for CDP protocol events (payloads without an id — dropped entirely
+ * before this existed, which let an unanswered confirm() freeze a run until
+ * its time budget died). Handler throws are swallowed so one bad subscriber
+ * can never break the socket loop or its peers.
+ */
+export class CdpEventHub {
+  #handlers = new Map<string, Set<(params: Record<string, unknown>) => void>>();
+
+  on(method: string, handler: (params: Record<string, unknown>) => void): () => void {
+    let handlers = this.#handlers.get(method);
+    if (!handlers) {
+      handlers = new Set();
+      this.#handlers.set(method, handlers);
+    }
+    handlers.add(handler);
+    return () => {
+      handlers.delete(handler);
+    };
+  }
+
+  dispatch(method: string, params: Record<string, unknown>): void {
+    const handlers = this.#handlers.get(method);
+    if (!handlers) {
+      return;
+    }
+    for (const handler of [...handlers]) {
+      try {
+        handler(params);
+      } catch {
+        // Subscriber isolation: a throwing handler never blocks peers.
+      }
+    }
+  }
+
+  clear(): void {
+    this.#handlers.clear();
+  }
+}
+
 interface CdpSessionState extends CdpSessionSummary {
   connection: CdpConnection;
+  dialogPolicy: CdpDialogPolicy;
+  dialogListeners: Set<(occurrence: CdpDialogOccurrence) => void>;
 }
 
 const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]", "0.0.0.0"]);
@@ -223,6 +292,12 @@ class CdpConnection {
     number,
     { resolve: (value: unknown) => void; reject: (error: unknown) => void }
   >();
+  #events = new CdpEventHub();
+
+  /** Subscribe to a CDP protocol event (e.g. "Page.javascriptDialogOpening"). */
+  on(method: string, handler: (params: Record<string, unknown>) => void): () => void {
+    return this.#events.on(method, handler);
+  }
 
   async connect(url: string): Promise<void> {
     if (this.#socket) {
@@ -254,6 +329,9 @@ class CdpConnection {
     this.#socket.addEventListener("message", (event) => {
       const payload = JSON.parse(String(event.data));
       if (typeof payload.id !== "number") {
+        if (typeof payload.method === "string") {
+          this.#events.dispatch(payload.method, payload.params ?? {});
+        }
         return;
       }
 
@@ -278,6 +356,7 @@ class CdpConnection {
         pending.reject(new AppError("cdp_socket_closed", 410, "cdp_socket_closed"));
       }
       this.#pending.clear();
+      this.#events.clear();
       this.#socket = null;
     });
   }
@@ -300,6 +379,7 @@ class CdpConnection {
 
   close(): void {
     this.#socket?.close();
+    this.#events.clear();
     this.#socket = null;
   }
 }
@@ -358,12 +438,79 @@ export class CdpDriverService {
       lastActiveAt: now,
     };
 
-    this.#sessions.set(sessionId, {
+    const state: CdpSessionState = {
       ...summary,
       connection,
+      dialogPolicy: "dismiss",
+      dialogListeners: new Set(),
+    };
+
+    // The driver is the SINGLE dialog responder for the session: an unanswered
+    // JavaScript dialog freezes the page, which stalls every runner on it. A
+    // second responder would race this one into "No dialog is showing" errors,
+    // so consumers observe via onSessionDialog and never answer themselves.
+    connection.on("Page.javascriptDialogOpening", (params) => {
+      this.#handleDialogOpening(state, params);
     });
 
+    this.#sessions.set(sessionId, state);
+
     return summary;
+  }
+
+  #handleDialogOpening(state: CdpSessionState, params: Record<string, unknown>): void {
+    const dialogType = typeof params.type === "string" ? params.type : "alert";
+    const { accept } = resolveDialogAction(dialogType, state.dialogPolicy);
+    try {
+      state.connection.send("Page.handleJavaScriptDialog", {
+        accept,
+        ...(dialogType === "prompt" ? { promptText: "" } : {}),
+      }).catch(() => {
+        // The dialog may already be gone (navigation raced us). An unhandled
+        // rejection here would take down the whole process — never surface.
+      });
+    } catch {
+      // Socket closed between event and response; nothing left to answer.
+    }
+
+    const occurrence: CdpDialogOccurrence = {
+      at: new Date().toISOString(),
+      url: typeof params.url === "string" ? params.url : state.targetUrl,
+      dialogType,
+      message: typeof params.message === "string" ? params.message : "",
+      action: accept ? "accepted" : "dismissed",
+    };
+    for (const listener of [...state.dialogListeners]) {
+      try {
+        listener(occurrence);
+      } catch {
+        // Listener isolation mirrors CdpEventHub: observers cannot break us.
+      }
+    }
+  }
+
+  setSessionDialogPolicy(sessionId: string, policy: CdpDialogPolicy): void {
+    this.getSession(sessionId).dialogPolicy = policy;
+  }
+
+  onSessionDialog(
+    sessionId: string,
+    listener: (occurrence: CdpDialogOccurrence) => void,
+  ): () => void {
+    const session = this.getSession(sessionId);
+    session.dialogListeners.add(listener);
+    return () => {
+      session.dialogListeners.delete(listener);
+    };
+  }
+
+  /** Generic protocol-event tap for a session (Network.*, Page.*, …). */
+  onSessionCdpEvent(
+    sessionId: string,
+    method: string,
+    handler: (params: Record<string, unknown>) => void,
+  ): () => void {
+    return this.getSession(sessionId).connection.on(method, handler);
   }
 
   /**
