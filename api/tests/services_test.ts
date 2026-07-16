@@ -1360,13 +1360,20 @@ Deno.test("should_stream_claude_code_text_deltas_and_parse_result", async () => 
   assertEquals(chunks.join(""), "Hello, world");
   assertEquals(completed, true);
 
-  // Mirrors Codex: drives the local CLI in print mode, prompt via stdin, system
-  // prompt appended, and OAuth-only auth (the API key env is stripped, never sent).
+  // Drives the local CLI in print mode as a PURE TEXT MODEL: prompt via stdin,
+  // the agent system prompt fully REPLACED (append leaked the Claude Code
+  // identity + empty-scratch-cwd framing into review reports), all built-in
+  // tools disabled, and OAuth-only auth (the API key env is stripped, never
+  // sent).
   const invocation = captured as ClaudeCliInvocation | null;
   assertEquals(invocation?.args.includes("-p"), true);
   assertEquals(invocation?.args.includes("--output-format"), true);
   assertEquals(invocation?.args.includes("stream-json"), true);
-  assertEquals(invocation?.args.includes("--append-system-prompt"), true);
+  assertEquals(invocation?.args.includes("--system-prompt"), true);
+  assertEquals(invocation?.args.includes("--append-system-prompt"), false);
+  const toolsIndex = invocation?.args.indexOf("--tools") ?? -1;
+  assertEquals(toolsIndex >= 0, true);
+  assertEquals(invocation?.args[toolsIndex + 1], "");
   assertEquals(invocation?.args.includes("--model"), true);
   assertEquals(invocation?.stdin, "say hi");
   assertEquals(

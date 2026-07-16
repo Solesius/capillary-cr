@@ -88,7 +88,13 @@ const ALLOWED_FLAGS: Record<
   "--no-session-persistence": { takesValue: false },
   "--verbose": { takesValue: false },
   "--include-partial-messages": { takesValue: false },
-  // Value is prompt text — safe in argv position (no shell), any content allowed.
+  // Only the empty value: the transport disables ALL built-in tools. Any
+  // request to enable tools is exactly what this allowlist exists to reject.
+  "--tools": { takesValue: true, validate: (v) => v === "" },
+  // Value is prompt text — safe in argv position (no shell), any content
+  // allowed. --system-prompt REPLACES the Claude Code agent prompt (current
+  // transports); --append-system-prompt kept for older container images.
+  "--system-prompt": { takesValue: true },
   "--append-system-prompt": { takesValue: true },
 };
 

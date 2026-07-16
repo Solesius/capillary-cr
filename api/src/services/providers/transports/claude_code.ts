@@ -296,12 +296,21 @@ function buildClaudeArgs(
     "--output-format",
     outputFormat,
     "--no-session-persistence",
+    // The CLI is a text model here, not an agent. "--tools \"\"" removes the
+    // built-in tool set and "--system-prompt" REPLACES the Claude Code agent
+    // prompt instead of appending to it — with append, the model kept its
+    // Claude Code identity plus environment framing, saw the bridge's
+    // deliberately empty scratch cwd ("not a git checkout"), and wrote review
+    // reports disclaiming that it could not open the diff. (Requires a CLI
+    // with --tools/--system-prompt in print mode, e.g. >= 2.1.x.)
+    "--tools",
+    "",
   ];
   if (outputFormat === "stream-json") {
     args.push("--verbose", "--include-partial-messages");
   }
   if (systemPrompt) {
-    args.push("--append-system-prompt", systemPrompt);
+    args.push("--system-prompt", systemPrompt);
   }
   return args;
 }
