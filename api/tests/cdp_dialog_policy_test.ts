@@ -51,6 +51,16 @@ Deno.test("dialog observation truncates a long message", () => {
   assert(line.endsWith("— auto-accepted"));
 });
 
+Deno.test("truncation never splits a surrogate pair (page-controlled text)", () => {
+  // 139 ASCII points + an astral emoji straddling the old UTF-16 cut point.
+  const line = formatDialogObservation({
+    dialogType: "confirm",
+    message: "x".repeat(139) + "💥" + "y".repeat(50),
+    action: "dismissed",
+  });
+  assert(line.includes("💥…"));
+});
+
 Deno.test("event hub delivers to every subscriber of a method", () => {
   const hub = new CdpEventHub();
   const seen: string[] = [];

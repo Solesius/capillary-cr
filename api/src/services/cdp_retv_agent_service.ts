@@ -268,9 +268,11 @@ export function evaluateGoalClaim(
 export function formatDialogObservation(
   occurrence: { dialogType: string; message: string; action: string },
 ): string {
-  const message = occurrence.message.length > 140
-    ? `${occurrence.message.slice(0, 140)}…`
-    : occurrence.message;
+  // Truncate by code points, not UTF-16 units: dialog text is page-controlled
+  // and a surrogate pair straddling the cut would emit mojibake into the
+  // planner observation and the console.
+  const points = [...occurrence.message];
+  const message = points.length > 140 ? `${points.slice(0, 140).join("")}…` : occurrence.message;
   return `${occurrence.dialogType} appeared: "${message}" — auto-${occurrence.action}`;
 }
 

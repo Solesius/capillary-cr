@@ -461,16 +461,24 @@ export class CdpDriverService {
   #handleDialogOpening(state: CdpSessionState, params: Record<string, unknown>): void {
     const dialogType = typeof params.type === "string" ? params.type : "alert";
     const { accept } = resolveDialogAction(dialogType, state.dialogPolicy);
+    // Failures must never throw (an unhandled rejection here takes down the
+    // process) but must never be silent either: if the answer genuinely
+    // failed, the dialog may still be up — a frozen page with no diagnostic
+    // trail is exactly the failure mode this feature exists to kill.
+    const logAnswerFailure = (error: unknown) => {
+      console.error(
+        `[cdp] ${state.sessionId} dialog answer failed (${dialogType}):`,
+        error instanceof Error ? error.message : String(error),
+      );
+    };
     try {
       state.connection.send("Page.handleJavaScriptDialog", {
         accept,
         ...(dialogType === "prompt" ? { promptText: "" } : {}),
-      }).catch(() => {
-        // The dialog may already be gone (navigation raced us). An unhandled
-        // rejection here would take down the whole process — never surface.
-      });
-    } catch {
-      // Socket closed between event and response; nothing left to answer.
+      }).catch(logAnswerFailure);
+    } catch (error) {
+      // Socket closed between event and response.
+      logAnswerFailure(error);
     }
 
     const occurrence: CdpDialogOccurrence = {
@@ -510,6 +518,17 @@ export class CdpDriverService {
     method: string,
     handler: (params: Record<string, unknown>) => void,
   ): () => void {
+    // The single-responder contract is enforced here, not by convention:
+    // dialog events are observable only via onSessionDialog (notify-only), so
+    // no second subscriber can ever answer a dialog and race the driver into
+    // "No dialog is showing" errors.
+    if (method === "Page.javascriptDialogOpening") {
+      throw new AppError(
+        "dialog_events_reserved: subscribe via onSessionDialog — the driver is the only responder",
+        400,
+        "dialog_events_reserved",
+      );
+    }
     return this.getSession(sessionId).connection.on(method, handler);
   }
 
