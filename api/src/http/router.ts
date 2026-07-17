@@ -509,6 +509,9 @@ router.post("/api/cdp/retv/run", async (ctx) => {
     maxCycles: body.maxCycles,
     maxDurationMs: body.maxDurationMs,
     trace: body.trace === true,
+    dialogPolicy: body.dialogPolicy === "accept" || body.dialogPolicy === "dismiss"
+      ? body.dialogPolicy
+      : undefined,
     allowedOrigins: Array.isArray(body.allowedOrigins)
       ? body.allowedOrigins
       : parseAllowedDomains(body.allowedDomains),
@@ -526,6 +529,10 @@ router.get("/api/cdp/retv/run/stream", async (ctx) => {
   const maxDurationMs = maxDurationMsRaw ? Number(maxDurationMsRaw) : undefined;
   const traceRaw = params.get("trace");
   const trace = traceRaw === "1" || traceRaw === "true";
+  const dialogPolicyRaw = params.get("dialogPolicy");
+  const dialogPolicy = dialogPolicyRaw === "accept" || dialogPolicyRaw === "dismiss"
+    ? dialogPolicyRaw
+    : undefined;
   const allowedOrigins = parseAllowedDomains(params.get("allowedDomains"));
 
   const target = await ctx.sendEvents();
@@ -539,7 +546,7 @@ router.get("/api/cdp/retv/run/stream", async (ctx) => {
 
   try {
     await deps.cdpRetvAgentService.runGoalRound(
-      { goal, sessionId, startUrl, maxCycles, maxDurationMs, trace, allowedOrigins },
+      { goal, sessionId, startUrl, maxCycles, maxDurationMs, trace, dialogPolicy, allowedOrigins },
       send,
     );
   } catch (error) {
