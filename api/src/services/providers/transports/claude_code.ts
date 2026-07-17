@@ -301,8 +301,10 @@ function buildClaudeArgs(
     // prompt instead of appending to it — with append, the model kept its
     // Claude Code identity plus environment framing, saw the bridge's
     // deliberately empty scratch cwd ("not a git checkout"), and wrote review
-    // reports disclaiming that it could not open the diff. (Requires a CLI
-    // with --tools/--system-prompt in print mode, e.g. >= 2.1.x.)
+    // reports disclaiming that it could not open the diff. Requires a CLI
+    // with --tools/--system-prompt in print mode (>= 2.1.x); older CLIs and
+    // bridges reject these flags, and dispatch() retries once with
+    // buildLegacyClaudeArgs when that happens.
     "--tools",
     "",
   ];
@@ -313,6 +315,47 @@ function buildClaudeArgs(
     args.push("--system-prompt", systemPrompt);
   }
   return args;
+}
+
+// Pre-#60 flag shape: agent prompt appended, no tool control. Only used as a
+// one-shot retry when the modern contract is rejected by an older CLI
+// ("unknown option") or an older bridge allowlist — never as the first choice.
+function buildLegacyClaudeArgs(
+  model: string,
+  systemPrompt: string,
+  outputFormat: "json" | "stream-json",
+): string[] {
+  const args = [
+    "-p",
+    "--model",
+    model,
+    "--output-format",
+    outputFormat,
+    "--no-session-persistence",
+  ];
+  if (outputFormat === "stream-json") {
+    args.push("--verbose", "--include-partial-messages");
+  }
+  if (systemPrompt) {
+    args.push("--append-system-prompt", systemPrompt);
+  }
+  return args;
+}
+
+/**
+ * Does this failure mean the OTHER SIDE doesn't speak the modern flag
+ * contract (--system-prompt/--tools)? Two known dialects: an older claude CLI
+ * rejects the flags ("unknown option"), and an older ws bridge allowlist
+ * rejects the whole invocation ("claude_bridge_args_rejected"). Both fail
+ * immediately with no streamed output, so a legacy retry is safe. Exported
+ * for direct unit testing.
+ */
+export function isLegacyContractError(message: string): boolean {
+  const haystack = message.toLowerCase();
+  return haystack.includes("unknown option") ||
+    haystack.includes("unrecognized option") ||
+    haystack.includes("unknown argument") ||
+    haystack.includes("claude_bridge_args_rejected");
 }
 
 function mapClaudeResultError(subtype: string, message: string): ProviderError {
@@ -551,6 +594,9 @@ export function createClaudeCodeProviderOps(
     const { systemPrompt, userText } = buildClaudePrompt(request);
     const { env, clearEnv } = buildClaudeChildEnv();
 
+    // Every caller of this transport is an LLM text channel (planner and
+    // report turns) — built-in tools are intentionally never available, so
+    // the tool-free modern contract is global, not review-specific.
     const invocation: ClaudeCliInvocation = {
       args: buildClaudeArgs(model, systemPrompt, "stream-json"),
       stdin: userText,
@@ -559,7 +605,27 @@ export function createClaudeCodeProviderOps(
     };
 
     const activeSpawner = useWs ? createClaudeWsSpawner(baseUrl) : spawner;
-    return await runClaudeStream(activeSpawner, invocation, model, onStream);
+    const result = await runClaudeStream(activeSpawner, invocation, model, onStream);
+    if (result.ok || !isLegacyContractError(result.error?.message ?? "")) {
+      return result;
+    }
+
+    // The counterpart doesn't speak the modern contract yet (older CLI or
+    // older bridge). These rejections fail before any output streams, so one
+    // legacy retry is lossless. The legacy shape re-appends the agent prompt,
+    // which is exactly the report-disclaimer bug on newer CLIs — but on the
+    // old versions that reach this path, append was the working behavior.
+    console.warn(
+      "[claude_code] modern flag contract rejected (" + (result.error?.message ?? "") +
+        "); retrying with legacy args — upgrade the claude CLI/bridge to >= 2.1.x",
+    );
+    const legacyInvocation: ClaudeCliInvocation = {
+      args: buildLegacyClaudeArgs(model, systemPrompt, "stream-json"),
+      stdin: userText,
+      env,
+      clearEnv,
+    };
+    return await runClaudeStream(activeSpawner, legacyInvocation, model, onStream);
   };
 
   return {
