@@ -22,7 +22,10 @@ import { createAnthropicProviderOps } from "../src/services/providers/transports
 import { createGeminiProviderOps } from "../src/services/providers/transports/mod.ts";
 import { createBedrockProviderOps } from "../src/services/providers/transports/mod.ts";
 import { createCodexAppServerProviderOps } from "../src/services/providers/transports/mod.ts";
-import { createClaudeCodeProviderOps } from "../src/services/providers/transports/mod.ts";
+import {
+  createClaudeCodeProviderOps,
+  isLegacyContractError,
+} from "../src/services/providers/transports/mod.ts";
 import type {
   ClaudeCliInvocation,
   ClaudeCliProcess,
@@ -1360,19 +1363,119 @@ Deno.test("should_stream_claude_code_text_deltas_and_parse_result", async () => 
   assertEquals(chunks.join(""), "Hello, world");
   assertEquals(completed, true);
 
-  // Mirrors Codex: drives the local CLI in print mode, prompt via stdin, system
-  // prompt appended, and OAuth-only auth (the API key env is stripped, never sent).
+  // Drives the local CLI in print mode as a PURE TEXT MODEL: prompt via stdin,
+  // the agent system prompt fully REPLACED (append leaked the Claude Code
+  // identity + empty-scratch-cwd framing into review reports), all built-in
+  // tools disabled, and OAuth-only auth (the API key env is stripped, never
+  // sent).
   const invocation = captured as ClaudeCliInvocation | null;
   assertEquals(invocation?.args.includes("-p"), true);
   assertEquals(invocation?.args.includes("--output-format"), true);
   assertEquals(invocation?.args.includes("stream-json"), true);
-  assertEquals(invocation?.args.includes("--append-system-prompt"), true);
+  assertEquals(invocation?.args.includes("--system-prompt"), true);
+  assertEquals(invocation?.args.includes("--append-system-prompt"), false);
+  const toolsIndex = invocation?.args.indexOf("--tools") ?? -1;
+  assertEquals(toolsIndex >= 0, true);
+  assertEquals(invocation?.args[toolsIndex + 1], "");
   assertEquals(invocation?.args.includes("--model"), true);
   assertEquals(invocation?.stdin, "say hi");
   assertEquals(
     Object.prototype.hasOwnProperty.call(invocation?.env ?? {}, "ANTHROPIC_API_KEY"),
     false,
   );
+});
+
+Deno.test("should_emit_tools_flag_even_without_a_system_prompt", async () => {
+  let captured: ClaudeCliInvocation | null = null;
+  const ops = createClaudeCodeProviderOps((invocation) => {
+    captured = invocation;
+    return makeClaudeProcess([
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "ok",
+      }),
+    ]);
+  });
+
+  const result = await ops.send(
+    { kind: "claude_code", apiKey: "", baseUrl: "stdio://claude-code", model: "sonnet" },
+    { messages: [{ role: "user", content: "no system prompt here" }] },
+  );
+
+  assertEquals(result.ok, true);
+  const invocation = captured as ClaudeCliInvocation | null;
+  const toolsIndex = invocation?.args.indexOf("--tools") ?? -1;
+  assertEquals(toolsIndex >= 0, true);
+  assertEquals(invocation?.args[toolsIndex + 1], "");
+  assertEquals(invocation?.args.includes("--system-prompt"), false);
+  assertEquals(invocation?.args.includes("--append-system-prompt"), false);
+});
+
+Deno.test("should_retry_with_legacy_args_when_modern_flags_are_rejected", async () => {
+  // First spawn: an older CLI rejects --tools. Second spawn must carry the
+  // legacy shape (--append-system-prompt, no --tools/--system-prompt) and its
+  // success becomes the call's result.
+  const invocations: ClaudeCliInvocation[] = [];
+  const ops = createClaudeCodeProviderOps((invocation) => {
+    invocations.push(invocation);
+    if (invocations.length === 1) {
+      return makeClaudeProcess([], {
+        success: false,
+        code: 1,
+        stderr: "error: unknown option '--tools'",
+      });
+    }
+    return makeClaudeProcess([
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "legacy path answer",
+        usage: { input_tokens: 5, output_tokens: 2 },
+      }),
+    ]);
+  });
+
+  const result = await ops.send(
+    { kind: "claude_code", apiKey: "", baseUrl: "stdio://claude-code", model: "sonnet" },
+    { messages: [{ role: "user", content: "hi" }], systemPrompt: "Be terse." },
+  );
+
+  assertEquals(result.ok, true);
+  assertEquals(result.value?.content, "legacy path answer");
+  assertEquals(invocations.length, 2);
+  assertEquals(invocations[0].args.includes("--tools"), true);
+  assertEquals(invocations[0].args.includes("--system-prompt"), true);
+  assertEquals(invocations[1].args.includes("--tools"), false);
+  assertEquals(invocations[1].args.includes("--system-prompt"), false);
+  assertEquals(invocations[1].args.includes("--append-system-prompt"), true);
+});
+
+Deno.test("should_not_retry_legacy_args_on_unrelated_failures", async () => {
+  const invocations: ClaudeCliInvocation[] = [];
+  const ops = createClaudeCodeProviderOps((invocation) => {
+    invocations.push(invocation);
+    return makeClaudeProcess([], { success: false, code: 1, stderr: "not logged in" });
+  });
+
+  const result = await ops.send(
+    { kind: "claude_code", apiKey: "", baseUrl: "stdio://claude-code", model: "sonnet" },
+    { messages: [{ role: "user", content: "hi" }] },
+  );
+
+  assertEquals(result.ok, false);
+  assertEquals(invocations.length, 1);
+});
+
+Deno.test("should_classify_legacy_contract_errors_only", () => {
+  assertEquals(isLegacyContractError("error: unknown option '--tools'"), true);
+  assertEquals(isLegacyContractError("Unrecognized option: --system-prompt"), true);
+  assertEquals(isLegacyContractError("claude_bridge_args_rejected"), true);
+  assertEquals(isLegacyContractError("rate limit exceeded"), false);
+  assertEquals(isLegacyContractError("not logged in"), false);
+  assertEquals(isLegacyContractError(""), false);
 });
 
 Deno.test("should_map_claude_code_result_error_to_provider_error", async () => {
