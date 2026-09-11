@@ -353,11 +353,30 @@ export class GraphTorusViewportComponent implements AfterViewInit, OnDestroy {
     }
   }
 
+  private lastSize = { width: 0, height: 0 };
+
   private onResize(): void {
     const canvas = this.canvasRef.nativeElement;
-    const width = canvas.clientWidth || 640;
-    const height = canvas.clientHeight || 360;
+    const width = canvas.clientWidth;
+    const height = canvas.clientHeight;
+    // Hidden stage (Trail tab) measures 0×0: keep the last backing store and
+    // let the observer re-fire when the stage is shown again. The old 640×360
+    // fallback here got pinned as an inline size and stuck after tab switches.
+    if (width === 0 || height === 0) {
+      return;
+    }
+    if (width === this.lastSize.width && height === this.lastSize.height) {
+      return;
+    }
+    this.lastSize = { width, height };
     this.illo?.setSize(width, height);
+    // Zdog's hi-DPI path (devicePixelRatio > 1, resize: false) pins inline px
+    // width/height on the canvas. Under the app's global border-box sizing
+    // that value excludes the 1px border, so the box shrank 2px, the observer
+    // fired, and the canvas ratcheted smaller every frame. CSS owns layout;
+    // Zdog only sizes the backing store.
+    canvas.style.removeProperty("width");
+    canvas.style.removeProperty("height");
   }
 
   private buildScene(): void {
