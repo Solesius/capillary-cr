@@ -74,6 +74,21 @@ Deno.test("should_concatenate_message_text_and_skip_reasoning_items", async () =
   assertEquals(result.value?.finishReason, "completed");
 });
 
+Deno.test("should_treat_incomplete_status_as_completed_for_partial_content", async () => {
+  const ops = createOpenAiProviderOps(
+    mockFetch({
+      status: "incomplete",
+      output: [
+        { type: "message", content: [{ type: "output_text", text: "partial answer" }] },
+      ],
+    }),
+  );
+  const result = await ops.send(provider, request);
+  assert(result.ok);
+  assertEquals(result.value?.content, "partial answer");
+  assertEquals(result.value?.finishReason, "completed");
+});
+
 Deno.test("should_normalize_responses_usage_with_cached_split", async () => {
   const ops = createOpenAiProviderOps(mockFetch(completedPayload));
   const result = await ops.send(provider, request);

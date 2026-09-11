@@ -108,11 +108,12 @@ export function createOpenAiProviderOps(fetchLike: FetchLike = fetch): ProviderO
 
     const usage = normalizeOpenAiResponsesUsage(data?.usage);
     logRawUsageOnce("openai_responses", data?.usage);
+    const status = data?.status;
     return toResponse(
       provider,
       model,
       content,
-      data?.status === "completed" ? "completed" : "failed",
+      status === "completed" || status === "incomplete" ? "completed" : "failed",
       usage.inputTotal,
       usage.output || estimateTokens(content),
     );
