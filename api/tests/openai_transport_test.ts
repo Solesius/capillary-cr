@@ -4,6 +4,7 @@
 // Native OpenAI Responses API transport — fully offline (mocked fetch).
 import { assert, assertEquals } from "jsr:@std/assert";
 import { buildProviderFromKind } from "../src/services/providers/provider_registry.ts";
+import { estimateTokens } from "../src/services/providers/provider_helpers.ts";
 import {
   createOpenAiProviderOps,
   parseOpenAiResponsesText,
@@ -66,6 +67,30 @@ Deno.test("should_post_to_the_responses_endpoint_with_native_fields", async () =
   assert(!("max_completion_tokens" in (capture.body ?? {})));
 });
 
+Deno.test("should_map_401_and_429_http_errors", async () => {
+  const authOps = createOpenAiProviderOps(
+    mockFetch({ error: { message: "bad key" } }, 401),
+  );
+  const authResult = await authOps.send(provider, request);
+  assert(!authResult.ok);
+  assertEquals(authResult.error?.kind, "auth");
+
+  const rateLimitOps = createOpenAiProviderOps(
+    mockFetch({ error: { message: "too many requests" } }, 429),
+  );
+  const rateLimitResult = await rateLimitOps.send(provider, request);
+  assert(!rateLimitResult.ok);
+  assertEquals(rateLimitResult.error?.kind, "rate_limit");
+});
+
+Deno.test("should_pass_through_temperature_to_responses_request_body", async () => {
+  const capture: { body?: Record<string, unknown> } = {};
+  const ops = createOpenAiProviderOps(mockFetch(completedPayload, 200, capture));
+  const result = await ops.send(provider, { ...request, temperature: 0.7 });
+  assert(result.ok);
+  assertEquals(capture.body?.temperature, 0.7);
+});
+
 Deno.test("should_concatenate_message_text_and_skip_reasoning_items", async () => {
   const ops = createOpenAiProviderOps(mockFetch(completedPayload));
   const result = await ops.send(provider, request);
@@ -101,6 +126,21 @@ Deno.test("should_normalize_responses_usage_with_cached_split", async () => {
   assertEquals(usage.inputCacheRead, 60);
   assertEquals(usage.inputFresh, 40);
   assertEquals(usage.inputTotal, 100);
+});
+
+Deno.test("should_fallback_to_estimated_output_tokens_when_usage_is_missing", async () => {
+  const content = "token fallback";
+  const ops = createOpenAiProviderOps(
+    mockFetch({
+      status: "completed",
+      output: [
+        { type: "message", content: [{ type: "output_text", text: content }] },
+      ],
+    }),
+  );
+  const result = await ops.send(provider, request);
+  assert(result.ok);
+  assertEquals(result.value?.outputTokens, estimateTokens(content));
 });
 
 Deno.test("should_fail_auth_without_an_api_key", async () => {
