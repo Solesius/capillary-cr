@@ -6,7 +6,7 @@ import { ArtifactService } from "../src/services/artifact_service.ts";
 import { BuildOrchestrationService } from "../src/services/build_orchestration_service.ts";
 import { ClickClackCoordinationService } from "../src/services/click_clack_coordination_service.ts";
 import { DiffDagService } from "../src/services/diff_dag_service.ts";
-import { GitHubOakService } from "../src/services/github_service.ts";
+import { GitHubOakService, parseLastPageFromLinkHeader } from "../src/services/github_service.ts";
 import { GraphMathService } from "../src/services/graph_math_service.ts";
 import { LlmProviderService } from "../src/services/llm_provider_service.ts";
 import { buildRetvLoop, runRetvLoop } from "../src/services/providers/retv_loop.ts";
@@ -549,6 +549,96 @@ Deno.test("should_paginate_past_100_visible_repositories", async () => {
   const repositories = await githubService.listRepositories();
   assertEquals(repositories.length, 102);
   assertEquals(repositories.some((repo) => repo.name === "repo-102"), true);
+});
+
+// Regression: the walker used to stop at 30 pages (3000 repos), and the
+// picker silently lost every repo past that on large org accounts. With a
+// Link header the walk must cover every page GitHub reports, tolerate one
+// transient failure per page, and dedupe repos that shift between pages.
+Deno.test("should_walk_every_page_past_3000_repositories_using_link_header", async () => {
+  const totalPages = 42; // 4101 repos: 41 full pages + 1
+  const perPage = 100;
+  const total = (totalPages - 1) * perPage + 1;
+  const buildRepoDto = (id: number) => ({
+    id,
+    owner: { login: "corp" },
+    name: `repo-${id}`,
+    full_name: `corp/repo-${id}`,
+    default_branch: "main",
+    private: true,
+    html_url: `https://github.com/corp/repo-${id}`,
+    language: "TypeScript",
+    open_issues_count: 0,
+    updated_at: new Date(Date.UTC(2026, 0, 1) + id * 1000).toISOString(),
+  });
+  const failedOnce = new Set<number>();
+  const pageCalls: number[] = [];
+  const fetcher = ((input: string | URL | Request): Promise<Response> => {
+    const url = typeof input === "string"
+      ? input
+      : input instanceof URL
+      ? input.toString()
+      : input.url;
+    if (url.endsWith("/user")) {
+      return Promise.resolve(
+        new Response(JSON.stringify({ id: 1, login: "corp-user", name: "Corp" }), { status: 200 }),
+      );
+    }
+    if (url.includes("/user/repos")) {
+      const page = Number(new URL(url).searchParams.get("page") || "1");
+      pageCalls.push(page);
+      // One transient blip on page 17 must not fail the whole catalog.
+      if (page === 17 && !failedOnce.has(page)) {
+        failedOnce.add(page);
+        return Promise.resolve(new Response("bad gateway", { status: 502 }));
+      }
+      const from = (page - 1) * perPage + 1;
+      const to = Math.min(page * perPage, total);
+      const batch = from > total
+        ? []
+        : Array.from({ length: to - from + 1 }, (_, i) => buildRepoDto(from + i));
+      // Page 2 also repeats a repo from page 1 (a push during the walk
+      // shifted it): the catalog must hold it once.
+      if (page === 2) {
+        batch.push(buildRepoDto(1));
+      }
+      const headers = new Headers({
+        link: `<https://api.github.com/user/repos?per_page=${perPage}&page=${
+          Math.min(page + 1, totalPages)
+        }>; rel="next", <https://api.github.com/user/repos?per_page=${perPage}&page=${totalPages}>; rel="last"`,
+      });
+      return Promise.resolve(new Response(JSON.stringify(batch), { status: 200, headers }));
+    }
+    return Promise.resolve(new Response("{}", { status: 404 }));
+  }) as typeof fetch;
+
+  const repository = new CelerReviewRepository();
+  const githubService = new GitHubOakService(repository, fetcher);
+  await githubService.connectGithub("valid", "ghp_test_token");
+
+  const repositories = await githubService.listRepositories();
+  assertEquals(repositories.length, total);
+  assertEquals(repositories.some((repo) => repo.name === `repo-${total}`), true);
+  // Every page requested exactly once, plus the single retry of page 17.
+  assertEquals(new Set(pageCalls).size, totalPages);
+  assertEquals(pageCalls.length, totalPages + 1);
+  // Most recently active first, so the picker's unfiltered window stays relevant.
+  assertEquals(repositories[0].name, `repo-${total}`);
+  assertEquals(repositories[repositories.length - 1].name, "repo-1");
+});
+
+Deno.test("should_parse_last_page_from_github_link_header", () => {
+  assertEquals(
+    parseLastPageFromLinkHeader(
+      '<https://api.github.com/user/repos?per_page=100&page=2>; rel="next", <https://api.github.com/user/repos?per_page=100&page=12>; rel="last"',
+    ),
+    12,
+  );
+  assertEquals(parseLastPageFromLinkHeader(null), null);
+  assertEquals(
+    parseLastPageFromLinkHeader('<https://api.github.com/user/repos?page=1>; rel="prev"'),
+    null,
+  );
 });
 
 Deno.test("should_list_repositories_when_identity_is_connected", async () => {

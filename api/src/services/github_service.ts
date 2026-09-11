@@ -18,6 +18,29 @@ interface GitHubUserDto {
   avatar_url: string | null;
 }
 
+/** `<https://api.github.com/user/repos?per_page=100&page=12>; rel="last"` → 12. */
+export function parseLastPageFromLinkHeader(link: string | null): number | null {
+  if (!link) {
+    return null;
+  }
+  const match = link.match(/<([^>]+)>;\s*rel="last"/);
+  if (!match) {
+    return null;
+  }
+  try {
+    const page = Number(new URL(match[1]).searchParams.get("page"));
+    return Number.isInteger(page) && page > 0 ? page : null;
+  } catch {
+    return null;
+  }
+}
+
+function repositoryActivityMs(repo: { updated_at?: string; pushed_at?: string }): number {
+  const updated = repo.updated_at ? Date.parse(repo.updated_at) : Number.NaN;
+  const pushed = repo.pushed_at ? Date.parse(repo.pushed_at) : Number.NaN;
+  return Math.max(Number.isFinite(updated) ? updated : 0, Number.isFinite(pushed) ? pushed : 0);
+}
+
 interface GitHubRepositoryDto {
   id: number;
   owner: {
@@ -30,6 +53,8 @@ interface GitHubRepositoryDto {
   html_url: string;
   language: string | null;
   open_issues_count: number;
+  updated_at?: string;
+  pushed_at?: string;
 }
 
 interface GitHubPullRequestListDto {
@@ -992,50 +1017,100 @@ export class GitHubOakService {
     }
   }
 
-  // GitHub caps per_page at 100, so accounts that can see more repos than
-  // that (org members especially) silently lost everything past the first
-  // page. Page 1 establishes whether more exist; the rest fetch in parallel
-  // waves — a 1000-repo account costs ~3 round-trip times instead of 10+
-  // serial ones. Merging stops at the first short page; the page cap bounds
-  // worst-case latency for accounts with thousands of visible repos.
+  // Walk every page the token can see — no ceiling. The previous walker
+  // stopped at maxPages=30 and silently dropped everything past 3000 repos,
+  // and a single transient 5xx / secondary-rate-limit response on any page
+  // failed the whole catalog. Now: page 1's Link header (rel="last") gives
+  // the exact page count so the remainder fetches in bounded-concurrency
+  // waves; without a Link header (small accounts, test stubs) the walk is
+  // serial until a short page. Each page retries transient failures.
+  // The walk uses GitHub's stable default order (full_name): sort=updated
+  // shifts repos across page boundaries while pages are in flight, which
+  // duplicated some and dropped others. The catalog is deduped by id and
+  // sorted by activity afterwards, so the picker's "most recent first"
+  // window is unchanged.
   private async fetchAllUserRepositories(token: string): Promise<GitHubRepositoryDto[]> {
     const perPage = 100;
-    const maxPages = 30;
-    const waveSize = 5;
-    const fetchPage = (page: number) =>
-      this.githubGet<GitHubRepositoryDto[]>(
-        `/user/repos?per_page=${perPage}&sort=updated&direction=desc&page=${page}`,
-        token,
-      );
+    const concurrency = 5;
+    // Loop guard only (500k repos), never a product limit.
+    const loopGuardPages = 5000;
+    const pagePath = (page: number) => `/user/repos?per_page=${perPage}&page=${page}`;
 
-    const all = await fetchPage(1);
-    if (all.length < perPage) {
-      return all;
-    }
-    let page = 2;
-    while (page <= maxPages) {
-      const wave = Array.from(
-        { length: Math.min(waveSize, maxPages - page + 1) },
-        (_, index) => page + index,
-      );
-      const batches = await Promise.all(wave.map((p) => fetchPage(p)));
-      let sawShortPage = false;
-      for (const batch of batches) {
-        all.push(...batch);
+    const first = await this.githubGetWithHeaders<GitHubRepositoryDto[]>(pagePath(1), token);
+    const pages: GitHubRepositoryDto[][] = [first.body];
+    const lastPage = parseLastPageFromLinkHeader(first.headers.get("link"));
+
+    if (lastPage !== null && lastPage > 1) {
+      for (let start = 2; start <= lastPage; start += concurrency) {
+        const wave = Array.from(
+          { length: Math.min(concurrency, lastPage - start + 1) },
+          (_, index) => start + index,
+        );
+        const batches = await Promise.all(
+          wave.map((page) =>
+            this.githubGetPageWithRetry<GitHubRepositoryDto[]>(pagePath(page), token)
+          ),
+        );
+        pages.push(...batches);
+      }
+    } else if (lastPage === null && first.body.length >= perPage) {
+      for (let page = 2; page <= loopGuardPages; page += 1) {
+        const batch = await this.githubGetPageWithRetry<GitHubRepositoryDto[]>(
+          pagePath(page),
+          token,
+        );
+        pages.push(batch);
         if (batch.length < perPage) {
-          sawShortPage = true;
           break;
         }
       }
-      if (sawShortPage) {
-        break;
-      }
-      page += wave.length;
     }
+
+    const byId = new Map<number, GitHubRepositoryDto>();
+    for (const batch of pages) {
+      for (const repo of batch) {
+        byId.set(repo.id, repo);
+      }
+    }
+    const all = [...byId.values()].sort((a, b) =>
+      repositoryActivityMs(b) - repositoryActivityMs(a)
+    );
+    console.info(
+      `github: repository catalog walked ${pages.length} page(s), ${all.length} repositories visible to token`,
+    );
     return all;
   }
 
+  // Transient failures mid-walk (502/503/504, 403/429 secondary rate limit,
+  // dropped connection) retry with short backoff instead of failing the
+  // whole catalog. 401/404 and other client errors surface immediately.
+  private async githubGetPageWithRetry<T>(path: string, token: string): Promise<T> {
+    const attempts = 3;
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        return (await this.githubGetWithHeaders<T>(path, token)).body;
+      } catch (error) {
+        lastError = error;
+        const status = error instanceof AppError ? error.status : 0;
+        const transient = status === 0 || status === 403 || status === 429 || status >= 500;
+        if (!transient || attempt === attempts) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** (attempt - 1)));
+      }
+    }
+    throw lastError;
+  }
+
   private async githubGet<T>(path: string, token: string): Promise<T> {
+    return (await this.githubGetWithHeaders<T>(path, token)).body;
+  }
+
+  private async githubGetWithHeaders<T>(
+    path: string,
+    token: string,
+  ): Promise<{ body: T; headers: Headers }> {
     const response = await this.fetcher(`https://api.github.com${path}`, {
       headers: {
         authorization: `Bearer ${token}`,
@@ -1048,7 +1123,7 @@ export class GitHubOakService {
       throw new AppError("github_request_failed", response.status, "github_request_failed");
     }
 
-    return response.json();
+    return { body: await response.json(), headers: response.headers };
   }
 
   private async exchangeGithubOAuthCode(code: string, redirectUri: string): Promise<string> {
