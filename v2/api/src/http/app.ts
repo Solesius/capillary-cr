@@ -2,6 +2,7 @@
 // Copyright 2026 Khalil Warren — capillary
 // app.ts — the Express application: middleware order, API, SPA hosting.
 
+import { join, resolve } from "node:path";
 import cookieParser from "cookie-parser";
 import express from "express";
 import type { NextFunction, Request, Response } from "express";
@@ -92,8 +93,10 @@ function githubLoginGate(required: boolean) {
 }
 
 /** SPA hosting: real files from the build; GET deep links fall back to index.html. */
-function spa(root: string) {
-  const index = `${root.replace(/\/+$/, "")}/index.html`;
+function spa(webDistRoot: string) {
+  // sendFile needs an absolute path; operators may set CAPILLARY_WEB_DIST relative.
+  const root = resolve(webDistRoot);
+  const index = join(root, "index.html");
   const files = express.static(root, { index: "index.html", redirect: false });
   return [
     files,

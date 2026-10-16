@@ -6,7 +6,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import express from "express";
 import { assert, assertEquals, test } from "./support/harness.ts";
 import { AppError } from "../src/domain/errors.ts";
@@ -234,6 +234,21 @@ test("app: SPA serves files and falls back to index.html for deep links", async 
       const api = await fetch(`${base}/api/nope`);
       assertEquals(api.status, 404);
       await api.body?.cancel();
+    });
+  } finally {
+    await rm(root, { recursive: true });
+  }
+});
+
+test("app: SPA fallback works when the web dist root is relative", async () => {
+  const root = await mkdtemp(join(tmpdir(), "capillary_spa_rel_"));
+  await writeFile(join(root, "index.html"), "<!doctype html><title>rel</title>");
+  try {
+    const webDistRoot = relative(process.cwd(), root);
+    await serve(createApp({ allowedOrigins: [ORIGIN], requireGithubLogin: false, webDistRoot }), async (base) => {
+      const deep = await fetch(`${base}/review/123`);
+      assertEquals(deep.status, 200);
+      assert((await deep.text()).includes("<title>rel</title>"));
     });
   } finally {
     await rm(root, { recursive: true });
