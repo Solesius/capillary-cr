@@ -246,6 +246,14 @@ export class CapillaryStore {
     this.repositories().find((repo) => repo.id === this.selectedRepositoryId()) ?? null
   );
 
+  /** The selected repository's code host, by its id (`gitlab-…` is GitLab). */
+  readonly hostLabel = computed(() =>
+    this.selectedRepositoryId()?.startsWith("gitlab-") ? "GitLab" : "GitHub"
+  );
+
+  /** "merge request" on GitLab, "pull request" on GitHub. */
+  readonly changeNoun = computed(() => this.hostLabel() === "GitLab" ? "merge request" : "pull request");
+
   readonly selectedPullRequest = computed(() =>
     this.pullRequests().find((pr) => pr.id === this.selectedPullRequestId()) ?? null
   );

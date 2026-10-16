@@ -6,6 +6,9 @@ import { CdpDriverService } from "../services/cdp_driver_service.ts";
 import { ClickClackCoordinationService } from "../services/click_clack_coordination_service.ts";
 import { DiffDagService } from "../services/diff_dag_service.ts";
 import { GitHubOakService } from "../services/github_service.ts";
+import { GitLabService } from "../services/gitlab_service.ts";
+import { CodeHostRouter } from "../services/code_host.ts";
+import { CommitStatusPublisher } from "../services/team/gitlab.ts";
 import { GraphMathService } from "../services/graph_math_service.ts";
 import { LlmProviderService } from "../services/llm_provider_service.ts";
 import { CdpRetvAgentService } from "../services/cdp_retv_agent_service.ts";
@@ -69,12 +72,36 @@ const tcsrctService = new TcsrctReviewService(repository);
 const artifactService = new ArtifactService(repository);
 const clickClackService = new ClickClackCoordinationService(repository);
 const githubService = new GitHubOakService(repository);
+// GitLab: a full code host beside GitHub, token from server env only. Merge
+// requests and diffs land in the same catalog the review pipeline reads.
+const gitlabTimeoutMs = Number(process.env["GITLAB_REQUEST_TIMEOUT_MS"]);
+const gitlabService = new GitLabService({
+  baseUrl: process.env["GITLAB_BASE_URL"],
+  token: process.env["CAPILLARY_GITLAB_TOKEN"],
+  timeoutMs: Number.isFinite(gitlabTimeoutMs) && gitlabTimeoutMs > 0 ? gitlabTimeoutMs : undefined,
+}, repository);
+// The pipeline, posting routes, CLI and MCP talk to this; it serves each call
+// from the host the repository id names (`gitlab-<id>` or GitHub's numeric id).
+const codeHost = new CodeHostRouter(githubService, gitlabService);
 
 // Connect a GitHub identity at boot from an env token when present. A PAT
 // (classic with repo scope, or fine-grained scoped to the org) surfaces org
 // and private repos that device flow against the built-in OAuth app cannot —
 // so a containerized deploy with CAPILLARY_GITHUB_TOKEN set just works, no
 // UI login step.
+// The probe is not awaited: a slow or unreachable GitLab must not delay boot.
+if (gitlabService.configured()) {
+  void gitlabService.getIdentity().then(
+    (identity) => console.log(`GitLab identity connected from environment token: ${identity.login}`),
+    (error: unknown) =>
+      console.warn(
+        `CAPILLARY_GITLAB_TOKEN set but GitLab connection failed (${
+          error instanceof Error ? error.message : String(error)
+        }); check the token and GITLAB_BASE_URL.`,
+      ),
+  );
+}
+
 if (process.env["CAPILLARY_GITHUB_TOKEN"]?.trim() || process.env["GITHUB_TOKEN"]?.trim()) {
   try {
     const identity = await githubService.connectGithub("valid");
@@ -91,7 +118,7 @@ const reviewService = new AgenticReviewService(
   repository,
   clickClackService,
   diffDagService,
-  githubService,
+  codeHost,
   tcsrctService,
   artifactService,
   llmProviderService,
@@ -160,6 +187,19 @@ const checkPublisher = new CheckPublisher({
   },
 });
 checkPublisher.start(teamBus);
+// GitLab's merge-box status: the same verdict, as a commit status on the MR head.
+new CommitStatusPublisher({
+  gitlab: gitlabService,
+  enabled: process.env["CAPILLARY_CHECKS"] !== "0",
+  deepLink: (runId) => runDeepLink(capPublicUrl, "review", runId),
+  headSha: async (repositoryId, pullRequestId) => {
+    try {
+      return (await repository.getPullRequest(repositoryId, pullRequestId)).headSha ?? null;
+    } catch {
+      return null;
+    }
+  },
+}).start(teamBus);
 
 // Jira (finding -> ticket): configured entirely from server env.
 const jiraService = new JiraService(jiraConfigFromEnv({
@@ -172,6 +212,8 @@ const jiraService = new JiraService(jiraConfigFromEnv({
 export const deps = {
   repository,
   githubService,
+  gitlabService,
+  codeHost,
   reviewService,
   reviewSessionHub,
   artifactService,

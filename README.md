@@ -129,6 +129,20 @@ make dev
 
 Prefer this over browser login: it reaches org/private repos and never exposes the token to the client. OAuth device/web login is available as an alternative (set `GITHUB_OAUTH_CLIENT_ID` from your own OAuth App), but for org repos an admin must grant that app under the org's third-party access policy — a scoped PAT sidesteps that.
 
+### GitLab
+
+GitLab is a full code host alongside GitHub — gitlab.com or self-hosted. Its projects appear in the same repository picker (marked `GitLab ·`), and everything works on merge requests the way it does on pull requests: reviews and "check changes" follow-ups, inline findings as diff discussions, committable suggestions ("Apply suggestion"), the summary note, issue dispatch, the agent CLI and MCP. Connect it from the server environment:
+
+```bash
+# in .env
+CAPILLARY_GITLAB_TOKEN=glpat-...                 # personal, project or group access token
+GITLAB_BASE_URL=https://gitlab.example.com       # optional; blank = https://gitlab.com
+```
+
+Token scope: `api` to post findings, suggestions, notes, issues and commit statuses; `read_api` is enough if you only run reviews and never post. A GitLab token satisfies the login gate on its own, so GitHub-free deployments work with `CAPILLARY_REQUIRE_GITHUB_LOGIN=1`.
+
+Merge-box status and auto-review mirror the GitHub App: a finished review sets a `Capillary review` commit status on the MR head (`CAPILLARY_CHECKS=0` disables), and a project webhook (Merge request events, URL `https://<capillary>/api/gitlab/webhook`, secret token = `GITLAB_WEBHOOK_SECRET`) queues a review when an MR is opened, reopened or marked ready, if `CAPILLARY_AUTO_REVIEW_ON_OPEN=1`.
+
 ---
 
 ## Docker deploy (single instance)
@@ -178,6 +192,7 @@ Run a full review from a terminal, CI job, or another agent — no server needed
 ```bash
 cd api
 GITHUB_TOKEN=ghp_... npm run review -- --repo owner/name --pr 123
+CAPILLARY_GITLAB_TOKEN=glpat-... npm run review -- --source gitlab --repo group/project --mr 42
 ```
 
 Live gate narration streams to stderr; the report lands on stdout (`--json` for the full run record). Exit codes are stable for automation: `0` approve/comment, `1` request_changes, `2` error. The model provider resolves exactly as the server does — Codex/Claude CLI logins, ws bridges, or provider keys.
@@ -192,7 +207,7 @@ Capillary exposes a stdio MCP server for agent-to-agent use:
 cd api && npm run mcp
 ```
 
-Tools cover GitHub identity, repository and PR listing, review run lifecycle, artifact retrieval, and CDP session management. Register it with any MCP client as a stdio server (Node 24+):
+Tools cover GitHub identity, repository and PR/MR listing across GitHub and GitLab, review run lifecycle, artifact retrieval, and CDP session management. Register it with any MCP client as a stdio server (Node 24+):
 
 ```json
 { "command": "node", "args": ["/path/to/capillary-cr/api/src/mcp/server.ts"], "env": { "GITHUB_TOKEN": "ghp_..." } }

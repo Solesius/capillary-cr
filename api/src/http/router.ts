@@ -9,11 +9,14 @@
 import { STATUS_CODES } from "node:http";
 import type { NextFunction, Request, Response } from "express";
 import { AppError } from "../domain/errors.ts";
-import type { PostedArtifact, ReviewAgentRunRecord } from "../domain/entities.ts";
+import type { GitHubIdentity, PostedArtifact, ReviewAgentRunRecord } from "../domain/entities.ts";
 import { buildPrSummaryComment } from "../services/review_agent_service.ts";
 import { teamBus } from "../services/team/event_bus.ts";
+import type { GitLabService } from "../services/gitlab_service.ts";
 import { buildAppManifest, isPubliclyReachableUrl } from "../services/team/github_app.ts";
-import { parseInboundCommand, verifySlackSignature } from "../services/team/inbound.ts";
+import { mergeRequestToReview, verifyGitlabWebhookToken } from "../services/team/gitlab.ts";
+import { sourceOf } from "../services/code_host.ts";
+import { parseInboundCommand, pickRepository, verifySlackSignature } from "../services/team/inbound.ts";
 import { MEMBER_COOKIE } from "../services/team/members.ts";
 import { recordPostedArtifact } from "../services/team/posted_artifacts.ts";
 import { deps } from "./deps.ts";
@@ -36,7 +39,7 @@ import { del, get, origin, param, patch, post, query, type Route } from "./routi
 
 /**
  * Persist shared posted-state on the run record and announce the publication
- * on the team bus. Best-effort: the GitHub post already succeeded, so a
+ * on the team bus. Best-effort: the code host post already succeeded, so a
  * persistence hiccup must not fail the request that reports it.
  */
 async function publishPostedArtifact(
@@ -174,14 +177,14 @@ const github: Route[] = [
   // name (search) — one query, no catalog walk. Registered before the
   // parameterized repository routes.
   get("/api/github/repositories/lookup", async (req) =>
-    json(await deps.githubService.lookupRepositories(query(req).get("name") || ""))),
+    json(await deps.codeHost.lookupRepositories(query(req).get("name") || ""))),
 
   get("/api/github/repositories", async (req) =>
-    json(await deps.githubService.listRepositories(query(req).get("refresh") === "1"))),
+    json(await deps.codeHost.listRepositories(query(req).get("refresh") === "1"))),
 
   get("/api/github/repositories/:repositoryId/pull-requests", async (req) =>
     json(
-      await deps.githubService.listPullRequests(
+      await deps.codeHost.listPullRequests(
         param(req, "repositoryId"),
         query(req).get("state") === "closed" ? "closed" : "open",
       ),
@@ -189,7 +192,7 @@ const github: Route[] = [
 
   get("/api/github/repositories/:repositoryId/pull-requests/:pullRequestId", async (req) =>
     json(
-      await deps.githubService.getPullRequest(param(req, "repositoryId"), param(req, "pullRequestId")),
+      await deps.codeHost.getPullRequest(param(req, "repositoryId"), param(req, "pullRequestId")),
     )),
 
   // Read-only single-file content at the PR's head, for the file explorer. The
@@ -204,7 +207,7 @@ const github: Route[] = [
     const side = query(req).get("side") === "base" ? "base" : "head";
     const pull = await deps.repository.getPullRequest(repositoryId, param(req, "pullRequestId"));
     const ref = side === "base" ? pull.targetBranch : (pull.headSha || pull.sourceBranch);
-    const content = await deps.githubService.getRepoFileContent(repositoryId, ref, path);
+    const content = await deps.codeHost.getRepoFileContent(repositoryId, ref, path);
     return content === null
       ? failure(404, "file_content_unavailable", { path, side })
       : json({ path, side, content });
@@ -212,11 +215,44 @@ const github: Route[] = [
 
   get("/api/github/repositories/:repositoryId/pull-requests/:pullRequestId/diff", async (req) =>
     json(
-      await deps.githubService.getPullRequestDiff(
+      await deps.codeHost.getPullRequestDiff(
         param(req, "repositoryId"),
         param(req, "pullRequestId"),
       ),
     )),
+];
+
+// --- code hosts ---------------------------------------------------------------
+// GitLab repositories are served by the /api/github/repositories routes above
+// (ids `gitlab-<project id>`); these report which hosts are connected. Tokens
+// come from server env only — no route accepts a GitLab token over the API.
+
+export interface SourceStatusDeps {
+  githubIdentity: () => Promise<GitHubIdentity | null>;
+  gitlab: Pick<GitLabService, "configured" | "getIdentity">;
+}
+
+// Built from its dependencies so tests can inject a fake GitLab.
+export const sourceRoutes = (sources: SourceStatusDeps): Route[] => [
+  get("/api/sources", async () => {
+    // One guarded GitLab call: trouble there degrades only GitLab's entry.
+    const github = await sources.githubIdentity();
+    const gitlab = sources.gitlab.configured() ? await sources.gitlab.getIdentity().catch(() => null) : null;
+    const gitlabConnected = gitlab !== null;
+    return json({
+      sources: [
+        { source: "github", connected: Boolean(github?.connected), login: github?.login ?? null },
+        {
+          source: "gitlab",
+          configured: sources.gitlab.configured(),
+          connected: gitlabConnected,
+          login: gitlab?.login ?? null,
+        },
+      ],
+    });
+  }),
+
+  get("/api/gitlab/identity", async () => json(await sources.gitlab.getIdentity())),
 ];
 
 // --- review runs & durable sessions ------------------------------------------
@@ -348,7 +384,7 @@ const reviews: Route[] = [
     )),
 ];
 
-// --- posting findings to GitHub / Jira (human-initiated, one per click) -------
+// --- posting findings to the code host / Jira (human-initiated, one per click) -
 
 const findingNotFound = (message: string) => json({ message }, 404);
 
@@ -357,11 +393,11 @@ const posting: Route[] = [
     const record = await deps.reviewService.getReviewAgentRun(param(req, "runId"));
     if (!record) return findingNotFound("review_run_not_found");
     const member = memberSession(req);
-    const result = await deps.githubService.postPullRequestComment(
+    const result = await deps.codeHost.postPullRequestComment(
       record.repositoryId,
       record.pullRequestId,
       buildPrSummaryComment(record),
-      { asToken: memberToken(member.sessionId) },
+      { asToken: memberToken(member.sessionId), onBehalfOf: memberLogin(member.sessionId) },
     );
     await publishPostedArtifact(record, {
       kind: "summary",
@@ -371,15 +407,15 @@ const posting: Route[] = [
     return withCookie(json({ posted: true, url: result.htmlUrl }, 201), member.cookie);
   }, { body: "none" }),
 
-  // Post one finding's committable suggestion to the PR as a GitHub
-  // ```suggestion block. Never batched, never automatic.
+  // Post one finding's committable suggestion to the PR or MR as a suggestion
+  // block the host can apply. Never batched, never automatic.
   post("/api/review/runs/:runId/findings/:findingId/suggestion", async (req) => {
     const record = await deps.reviewService.getReviewAgentRun(param(req, "runId"));
     if (!record) return findingNotFound("review_run_not_found");
     const finding = record.findings.find((item) => item.id === param(req, "findingId"));
     if (!finding || !finding.suggestion) return findingNotFound("suggestion_not_found");
     const member = memberSession(req);
-    const result = await deps.githubService.postPullRequestSuggestion(
+    const result = await deps.codeHost.postPullRequestSuggestion(
       record.repositoryId,
       record.pullRequestId,
       {
@@ -389,7 +425,7 @@ const posting: Route[] = [
         code: finding.suggestion.code,
         note: `**${finding.title}** — ${finding.finding}`,
       },
-      { asToken: memberToken(member.sessionId) },
+      { asToken: memberToken(member.sessionId), onBehalfOf: memberLogin(member.sessionId) },
     );
     await publishPostedArtifact(record, {
       kind: "suggestion",
@@ -410,7 +446,7 @@ const posting: Route[] = [
     const severity = finding.severity.toUpperCase();
     const fix = finding.suggestedFix ? `\n\n**Suggested fix:** ${finding.suggestedFix}` : "";
     const member = memberSession(req);
-    const result = await deps.githubService.postPullRequestInlineComment(
+    const result = await deps.codeHost.postPullRequestInlineComment(
       record.repositoryId,
       record.pullRequestId,
       {
@@ -418,7 +454,7 @@ const posting: Route[] = [
         line: finding.line,
         body: `**[${severity}] ${finding.title}**\n\n${finding.finding}${fix}`,
       },
-      { asToken: memberToken(member.sessionId) },
+      { asToken: memberToken(member.sessionId), onBehalfOf: memberLogin(member.sessionId) },
     );
     await publishPostedArtifact(record, {
       kind: "inline",
@@ -451,7 +487,7 @@ const posting: Route[] = [
       "",
       `<sub>Dispatched from [Capillary](https://github.com/Solesius/capillary-cr)</sub>`,
     ].join("\n");
-    const issue = await deps.githubService.createRepositoryIssue(record.repositoryId, {
+    const issue = await deps.codeHost.createRepositoryIssue(record.repositoryId, {
       title: `[capillary] ${finding.title}`,
       body,
       labels: ["capillary"],
@@ -460,7 +496,7 @@ const posting: Route[] = [
       // REST knows the coding agent as "Copilot" (Bot) — "copilot-swe-agent"
       // is its GraphQL actor login and REST silently drops it as unknown.
       assignees: ["Copilot"],
-    }, { asToken: memberToken(member.sessionId) });
+    }, { asToken: memberToken(member.sessionId), onBehalfOf: memberLogin(member.sessionId) });
     await publishPostedArtifact(record, {
       kind: "dispatch",
       findingId: finding.id,
@@ -714,6 +750,25 @@ const team: Route[] = [
     return json({ received: true }, 202);
   }, { body: "raw" }),
 
+  // Inbound GitLab merge-request webhook: MR opened / reopened / marked ready ->
+  // auto-queue a review when the operator opted in. Verified by the shared
+  // secret GitLab sends as X-Gitlab-Token (GITLAB_WEBHOOK_SECRET).
+  post("/api/gitlab/webhook", (req) => {
+    if (!verifyGitlabWebhookToken(process.env["GITLAB_WEBHOOK_SECRET"]?.trim(), req.get("x-gitlab-token") ?? null)) {
+      return failure(401, "invalid_webhook_token");
+    }
+    const target = req.get("x-gitlab-event") === "Merge Request Hook" &&
+        process.env["CAPILLARY_AUTO_REVIEW_ON_OPEN"] === "1"
+      ? mergeRequestToReview((req.body as Buffer).toString("utf8"))
+      : null;
+    if (target) {
+      void deps.reviewSessionHub.start(target).catch((error) => {
+        console.warn("auto-review on MR open failed to start:", error);
+      });
+    }
+    return json({ received: true }, 202);
+  }, { body: "raw" }),
+
   post("/api/integrations/slack/command", async (req) => {
     const signingSecret = process.env["CAPILLARY_SLACK_SIGNING_SECRET"]?.trim();
     if (!signingSecret) return failure(409, "slack_signing_secret_not_configured");
@@ -823,14 +878,23 @@ async function slackCommand(textArg: string): Promise<{ response_type: string; t
   }
   if (command.kind === "review") {
     try {
-      const repos = await deps.githubService.lookupRepositories(command.ownerRepo);
-      const repo = repos.find((item) => item.fullName.toLowerCase() === command.ownerRepo.toLowerCase());
-      if (!repo) {
+      const repos = await deps.codeHost.lookupRepositories(command.ownerRepo);
+      const picked = pickRepository(repos, command.ownerRepo, command.source);
+      if (picked.kind === "none") {
         return {
           response_type: "ephemeral",
           text: `Repository ${command.ownerRepo} not found or not accessible.`,
         };
       }
+      if (picked.kind === "ambiguous") {
+        const hosts = picked.matches.map((match) => sourceOf(match.id)).join(", ");
+        return {
+          response_type: "ephemeral",
+          text: `Repository ${command.ownerRepo} exists on more than one host (${hosts}). ` +
+            `Prefix it with github: or gitlab:, for example /capillary review gitlab:${command.ownerRepo}#${command.prNumber}.`,
+        };
+      }
+      const repo = picked.repo;
       const session = await deps.reviewSessionHub.start({
         pullRequestId: command.prNumber,
         repositoryId: repo.id,
@@ -849,12 +913,12 @@ async function slackCommand(textArg: string): Promise<{ response_type: string; t
   }
   return {
     response_type: "ephemeral",
-    text: "Usage: /capillary review owner/repo#123 · /capillary status",
+    text: "Usage: /capillary review [github:|gitlab:]owner/repo#123 · /capillary status",
   };
 }
 
 /** The complete API route table, in registration order. */
-export const apiRoutes: readonly Route[] = [...github, ...reviews, ...posting, ...cdp, ...team];
+export const apiRoutes: readonly Route[] = [...github, ...sourceRoutes({ githubIdentity: () => deps.repository.getIdentity(), gitlab: deps.gitlabService }), ...reviews, ...posting, ...cdp, ...team];
 
 // --- errors ------------------------------------------------------------------
 

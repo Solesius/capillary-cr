@@ -45,11 +45,13 @@ flowchart LR
       REPO <-. read-through / write-through .-> CELER
     end
     GH[(GitHub REST)]
+    GL[(GitLab REST v4)]
     LLM[[LLM providers]]
     CDP[[Chrome / CDP]]
 
     NG -- same-origin /api/* --> API
     API -- OAuth + repo/PR/diff --> GH
+    API -- projects/MRs/diffs, notes, discussions, statuses --> GL
     API -- planner turns --> LLM
     API -- functional-test driving --> CDP
     CELER -. named volume .-> VOL[(capillary-data)]
@@ -114,6 +116,32 @@ Handled by `GitHubOakService` ([api/src/services/github_service.ts](api/src/serv
   token / path traversal / oversized / network error).
 - **Secret handling**: the connected token lives in memory only and is **never**
   persisted to the durable store, never echoed, never logged.
+
+---
+
+GitLab is a second code host on equal footing. Both hosts implement one
+`CodeHost` contract ([api/src/services/code_host.ts](api/src/services/code_host.ts)),
+and `CodeHostRouter` serves every call from the host the repository id names:
+GitHub ids are GitHub's numeric ids, GitLab ids are `gitlab-<project id>`, so
+they never collide and no caller needs to know which host it has. The review
+pipeline, posting routes, agent CLI and MCP all run on the router; the
+`/api/github/repositories/...` routes serve GitLab repositories too, and the
+repository list merges both hosts (one failing does not hide the other).
+
+`GitLabService` ([api/src/services/gitlab_service.ts](api/src/services/gitlab_service.ts))
+uses REST v4 with `CAPILLARY_GITLAB_TOKEN` (env only, never persisted or echoed)
+against `GITLAB_BASE_URL` (default `gitlab.com`, https required for remote hosts).
+Merge requests and their diffs are written to the shared catalog, as GitHub's
+are, because the pipeline reads them back from there. Mapping: inline findings
+become MR diff discussions whose text position carries `old_line` + `new_line`
+for context lines and `new_line` for added ones (derived from the hunk);
+suggestions use GitLab's `suggestion:-N+0` syntax; the summary is an MR note;
+dispatch creates a project issue; "check changes" uses the repository compare
+API. Team mode: a finished review sets a commit status on the MR head
+([team/gitlab.ts](api/src/services/team/gitlab.ts)), and `POST /api/gitlab/webhook`
+(verified by `X-Gitlab-Token` = `GITLAB_WEBHOOK_SECRET`) queues a review on MR
+open / reopen / ready. A connected GitLab token satisfies the login gate.
+`GET /api/sources` reports which hosts are connected.
 
 ---
 
@@ -402,6 +430,9 @@ load-bearing ones:
 | `CAPILLARY_SERVE_WEB` / `CAPILLARY_WEB_DIST` | Serve the built SPA |
 | `CAPILLARY_STORAGE_DIR` | Enable durable `celer-mem` storage |
 | `GITHUB_OAUTH_CLIENT_ID` / `_SECRET` / `_REDIRECT_URI` / `_SCOPES` | GitHub login |
+| `CAPILLARY_GITLAB_TOKEN` / `GITLAB_BASE_URL` | GitLab code host (token: `api` scope to post, `read_api` to review only) |
+| `GITLAB_WEBHOOK_SECRET` | Verifies `POST /api/gitlab/webhook` (MR opened → auto-review) |
+| `GITLAB_REQUEST_TIMEOUT_MS` | Per-request timeout for GitLab calls (default 15000) |
 | `CAPILLARY_LLM_API_KEY` + provider-specific keys | Model credentials (env only) |
 | `CDP_BASE_URL` / `CHROME_PATH` | Functional-test browser endpoint |
 | `CLAUDE_CODE_URL` / `CODEX_APP_SERVER_URL` | Host CLI bridges (§6) |

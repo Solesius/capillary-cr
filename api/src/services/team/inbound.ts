@@ -5,13 +5,18 @@
 // signed-secret verified (Slack signing secret v0 scheme), two commands:
 //
 //   /capillary review owner/repo#123   -> start a review session
+//   /capillary review gitlab:g/p#7     -> same, on a named code host
 //   /capillary status                  -> live session summary
 //
 // No socket mode, no hosted bot: Slack POSTs the form here directly.
 
+import { sourceOf } from "../code_host.ts";
+
+export type RepositorySource = "github" | "gitlab";
+
 /** Parse the slash-command text into a typed command. */
 export type InboundCommand =
-  | { kind: "review"; ownerRepo: string; prNumber: string }
+  | { kind: "review"; ownerRepo: string; prNumber: string; source?: RepositorySource }
   | { kind: "status" }
   | { kind: "unknown"; text: string };
 
@@ -21,12 +26,47 @@ export function parseInboundCommand(text: string): InboundCommand {
     return { kind: "status" };
   }
   const review = trimmed.match(
-    /^review\s+([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\s*#(\d+)$/i,
+    // GitLab paths may nest subgroups (group/sub/project); GitHub is owner/name.
+    /^review\s+(?:(github|gitlab):)?([A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+)\s*#(\d+)$/i,
   );
   if (review) {
-    return { kind: "review", ownerRepo: review[1], prNumber: review[2] };
+    const source = review[1]?.toLowerCase() as RepositorySource | undefined;
+    return {
+      kind: "review",
+      ownerRepo: review[2],
+      prNumber: review[3],
+      ...(source ? { source } : {}),
+    };
   }
   return { kind: "unknown", text: trimmed };
+}
+
+export type RepositoryPick<T> =
+  | { kind: "found"; repo: T }
+  | { kind: "none" }
+  | { kind: "ambiguous"; matches: T[] };
+
+/**
+ * Choose the repository a Slack command names. An exact full-name match is
+ * required. A `github:` or `gitlab:` prefix narrows the match to that host.
+ * Several matches after narrowing are ambiguous, and the caller asks for a prefix.
+ */
+export function pickRepository<T extends { id: string; fullName: string }>(
+  repos: readonly T[],
+  ownerRepo: string,
+  source?: RepositorySource,
+): RepositoryPick<T> {
+  const wanted = ownerRepo.toLowerCase();
+  const matches = repos.filter((repo) =>
+    repo.fullName.toLowerCase() === wanted && (!source || sourceOf(repo.id) === source)
+  );
+  if (matches.length === 0) {
+    return { kind: "none" };
+  }
+  if (matches.length > 1) {
+    return { kind: "ambiguous", matches };
+  }
+  return { kind: "found", repo: matches[0] };
 }
 
 /**

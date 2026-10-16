@@ -12,7 +12,7 @@ import { windowRepositories } from "../state/rules";
   template: `
     <section>
       <header class="cap-panel-title">
-        <span>GitHub</span>
+        <span>Repositories</span>
         @if (store.githubConnected()) {
           <span class="cap-status-pill cap-status-pill--ok">
             <span class="cap-status-dot"></span>ready
@@ -42,7 +42,8 @@ import { windowRepositories } from "../state/rules";
                 Prefer <code>CAPILLARY_GITHUB_TOKEN</code> in the server environment — it never
                 travels through the browser and reaches org/private repos. Pasting a token here
                 keeps it only in memory, but the env token is the recommended path for anything
-                beyond a quick local trial.
+                beyond a quick local trial. GitLab connects from the server only: set
+                <code>CAPILLARY_GITLAB_TOKEN</code> (and <code>GITLAB_BASE_URL</code> if self-hosted).
               </span>
             </div>
 
@@ -89,7 +90,7 @@ import { windowRepositories } from "../state/rules";
                      to the first option. [selected] re-marks the right one on
                      every render, so the current selection survives tab switches. -->
                 <option [value]="repo.id" [selected]="repo.id === store.selectedRepositoryId()">{{
-                  repo.fullName
+                  repo.source === 'gitlab' ? 'GitLab · ' + repo.fullName : repo.fullName
                 }}</option>
               }
               @if (visibleRepositories().hiddenCount > 0) {
@@ -104,10 +105,10 @@ import { windowRepositories } from "../state/rules";
                 type="button"
                 [disabled]="!repoQuery().trim() || store.repoLookupBusy()"
                 (click)="lookupExact()">
-                {{ store.repoLookupBusy() ? 'Searching…' : 'Find on GitHub ↵' }}
+                {{ store.repoLookupBusy() ? 'Searching…' : 'Find repository ↵' }}
               </button>
               <span class="cap-muted" style="font-size: 0.72rem;">
-                exact owner/name loads one repo directly — no list needed
+                exact owner/name (GitLab: group/project) loads one repo directly — no list needed
               </span>
             </div>
             @if (store.repoLookupMessage()) {
@@ -117,7 +118,7 @@ import { windowRepositories } from "../state/rules";
 
           @if (store.selectedRepository()) {
             <div class="cap-repo-meta">
-              <span class="cap-muted">{{ store.pullRequests().length }} {{ store.prStateFilter() }} pull request{{ store.pullRequests().length !== 1 ? 's' : '' }}</span>
+              <span class="cap-muted">{{ store.pullRequests().length }} {{ store.prStateFilter() }} {{ store.changeNoun() }}{{ store.pullRequests().length !== 1 ? 's' : '' }}</span>
               @if (store.selectedRepository()?.language) {
                 <span class="cap-chip cap-chip--lang">{{ store.selectedRepository()?.language }}</span>
               }

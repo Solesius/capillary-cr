@@ -66,6 +66,13 @@ services:
       # OAuth app cannot. Classic PAT (repo scope) or fine-grained (org owner,
       # Contents+Metadata read, Pull requests read/write for suggestions).
       CAPILLARY_GITHUB_TOKEN: "${CAPILLARY_GITHUB_TOKEN:-}"
+      # GitLab code host: access token (`api` scope to post, `read_api` to only
+      # review), self-hosted base URL (blank = https://gitlab.com), and the
+      # project-webhook secret for MR-opened auto-review.
+      CAPILLARY_GITLAB_TOKEN: "${CAPILLARY_GITLAB_TOKEN:-}"
+      GITLAB_BASE_URL: "${GITLAB_BASE_URL:-}"
+      GITLAB_REQUEST_TIMEOUT_MS: "${GITLAB_REQUEST_TIMEOUT_MS:-}"
+      GITLAB_WEBHOOK_SECRET: "${GITLAB_WEBHOOK_SECRET:-}"
       GITHUB_OAUTH_CLIENT_ID: "${GITHUB_OAUTH_CLIENT_ID:-}"
       GITHUB_OAUTH_CLIENT_SECRET: "${GITHUB_OAUTH_CLIENT_SECRET:-}"
       GITHUB_OAUTH_REDIRECT_URI: "${GITHUB_OAUTH_REDIRECT_URI:-}"

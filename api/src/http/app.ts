@@ -79,12 +79,16 @@ function cors(allowedOrigins: string[]) {
   };
 }
 
-/** Optional GitHub-login gate over /api/*; the login flow itself is exempt. */
+/**
+ * Optional login gate over /api/*; the GitHub login flow itself is exempt. A
+ * connected GitHub identity or an authenticated GitLab token both satisfy it,
+ * so a GitLab-only deployment works with the gate on.
+ */
 function githubLoginGate(required: boolean) {
   return async (req: Request, _res: Response, next: NextFunction) => {
     if (required && req.path.startsWith("/api/") && !isGithubLoginExemptPath(req.path)) {
       const identity = await deps.repository.getIdentity();
-      if (!identity?.connected) {
+      if (!identity?.connected && !(await deps.gitlabService.isConnected())) {
         throw unauthorized("github_login_required");
       }
     }

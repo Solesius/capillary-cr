@@ -15,7 +15,7 @@ import {
   jiraConfigFromEnv,
   JiraService,
 } from "../src/services/team/jira.ts";
-import { parseInboundCommand, verifySlackSignature } from "../src/services/team/inbound.ts";
+import { parseInboundCommand, pickRepository, verifySlackSignature } from "../src/services/team/inbound.ts";
 import { repoFilterMatches } from "../src/services/team/connections.ts";
 import { type ReviewFinishedEvent, TeamEventBus } from "../src/services/team/event_bus.ts";
 import { type ReviewFinding } from "../src/domain/entities.ts";
@@ -268,6 +268,47 @@ test("inbound command parser handles review/status/garbage", () => {
   assertEquals(parseInboundCommand("  STATUS "), { kind: "status" });
   assertEquals(parseInboundCommand("do a flip").kind, "unknown");
   assertEquals(parseInboundCommand("review nonsense").kind, "unknown");
+});
+
+test("inbound command takes an optional github: or gitlab: host prefix", () => {
+  assertEquals(parseInboundCommand("review gitlab:group/app#7"), {
+    kind: "review",
+    ownerRepo: "group/app",
+    prNumber: "7",
+    source: "gitlab",
+  });
+  assertEquals(parseInboundCommand("review GitHub:Solesius/capillary-cr#47"), {
+    kind: "review",
+    ownerRepo: "Solesius/capillary-cr",
+    prNumber: "47",
+    source: "github",
+  });
+  assertEquals(parseInboundCommand("review gitea:group/app#7").kind, "unknown");
+  // GitLab subgroups nest: group/sub/project.
+  assertEquals(parseInboundCommand("review gitlab:group/sub/app#12"), {
+    kind: "review",
+    ownerRepo: "group/sub/app",
+    prNumber: "12",
+    source: "gitlab",
+  });
+  assertEquals(parseInboundCommand("review group/#7").kind, "unknown");
+});
+
+test("pick repository matches exact full names and asks for a prefix when hosts collide", () => {
+  const github = { id: "1207713294", fullName: "Solesius/app" };
+  const gitlab = { id: "gitlab-42", fullName: "solesius/app" };
+  const other = { id: "99", fullName: "Solesius/other" };
+  const repos = [github, gitlab, other];
+
+  assertEquals(pickRepository(repos, "Solesius/app"), {
+    kind: "ambiguous",
+    matches: [github, gitlab],
+  });
+  assertEquals(pickRepository(repos, "solesius/app", "gitlab"), { kind: "found", repo: gitlab });
+  assertEquals(pickRepository(repos, "Solesius/app", "github"), { kind: "found", repo: github });
+  assertEquals(pickRepository(repos, "Solesius/missing"), { kind: "none" });
+  assertEquals(pickRepository([gitlab], "Solesius/app"), { kind: "found", repo: gitlab });
+  assertEquals(pickRepository([github], "Solesius/app", "gitlab"), { kind: "none" });
 });
 
 test("slack signature verifies v0 MAC and rejects stale or forged requests", async () => {

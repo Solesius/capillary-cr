@@ -37,7 +37,7 @@ import { AppError } from "../domain/errors.ts";
 import { enforceDefensiveInput } from "../lib/validation.ts";
 import { type ReviewRunEvent, TCSRTC_GATES, type TcsrtcGate, toTcsrtcGate } from "../domain/review_phase.ts";
 import { type ReviewRepository } from "../repositories/review_repository.ts";
-import { GitHubOakService } from "./github_service.ts";
+import type { CodeHost } from "./code_host.ts";
 import { TcsrctReviewService } from "./tcsrct_review_service.ts";
 import { providerUsesGithubToken } from "./providers/provider_registry.ts";
 import {
@@ -238,15 +238,15 @@ export interface ReviewAgentPassOutput {
  */
 export class ReviewAgentService {
   private readonly repository: ReviewRepository;
-  private readonly githubService: GitHubOakService;
+  private readonly codeHost: CodeHost;
   private readonly tcsrct: TcsrctReviewService;
   constructor(
     repository: ReviewRepository,
-    githubService: GitHubOakService,
+    codeHost: CodeHost,
     tcsrct: TcsrctReviewService,
   ) {
     this.repository = repository;
-    this.githubService = githubService;
+    this.codeHost = codeHost;
     this.tcsrct = tcsrct;
   }
 
@@ -595,10 +595,10 @@ export class ReviewAgentService {
         "This run predates head-sha anchoring; re-run a full review once.",
       );
     }
-    // Ask GitHub, not the in-memory PR cache: the whole point is the CURRENT
+    // Ask the code host, not the in-memory PR cache: the whole point is the CURRENT
     // head, and the cache may be cold after a restart (live-found bug —
     // pull_request_not_found on a rebooted instance).
-    const pull = await this.githubService.getPullRequest(
+    const pull = await this.codeHost.getPullRequest(
       prior.repositoryId,
       prior.pullRequestId,
     );
@@ -606,7 +606,7 @@ export class ReviewAgentService {
     if (!headSha || headSha === prior.reviewedHeadSha) {
       throw new AppError("no_new_commits", 409, "The PR head has not moved since this review.");
     }
-    const delta = await this.githubService.compareCommits(
+    const delta = await this.codeHost.compareCommits(
       prior.repositoryId,
       prior.reviewedHeadSha,
       headSha,
@@ -1153,7 +1153,7 @@ export class ReviewAgentService {
       return cached;
     }
 
-    const fetched = await this.githubService.getRepoFileContent(
+    const fetched = await this.codeHost.getRepoFileContent(
       input.repositoryId,
       capture.headRef,
       path,
@@ -1194,7 +1194,7 @@ export class ReviewAgentService {
       : [];
     const lineRaw = Number(args.line);
     const confidenceRaw = Number(args.confidence);
-    // A finding is only actionable if it anchors to a line GitHub will accept as
+    // A finding is only actionable if it anchors to a line the code host will accept as
     // an inline comment — i.e. an added/context line in this file's diff. Resolve
     // it against the real patch: trust the model's line only when it is a genuine
     // commentable line, otherwise anchor by the finding text, otherwise fall back
@@ -1276,7 +1276,7 @@ export class ReviewAgentService {
 
 /**
  * Compact PR-comment body for a completed review: verdict, summary, counts,
- * and the model that drove it. GitHub supplies the timestamp on the comment.
+ * and the model that drove it. The code host stamps the comment's timestamp.
  */
 export function buildPrSummaryComment(record: ReviewAgentRunRecord): string {
   const lines: string[] = [];
@@ -1321,7 +1321,7 @@ function patchForPath(capture: ReviewCapture, filePath: string): string {
 // it is genuinely commentable, else the line whose content best matches the
 // finding text, else the file's first changed line. Deletion ('-') lines never
 // advance the new-file counter and are not right-side comment targets. Returning
-// a real diff line is what lets every finding be posted without GitHub rejecting
+// a real diff line is what lets every finding be posted without the code host rejecting
 // it — the difference between the tool working and "praying" the model is exact.
 // Exported for direct unit testing — pure function, no service state.
 export function postableDiffLine(
