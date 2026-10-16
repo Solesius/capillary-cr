@@ -1,0 +1,7 @@
+# RetV CDP functional goals for local dev endpoint
+# One goal per line.
+
+Open http://127.0.0.1:4200, switch to Run page, click Findings tab, and assert the page contains Findings.
+Open http://127.0.0.1:4200, switch to Run page, click Checklist tab, and assert checklist content is visible.
+Open http://127.0.0.1:4200, switch to Run page, click Events tab, and assert Events content is visible.
+Open http://127.0.0.1:4200, switch to Run page, click Overview tab, and extract the main body text as evidence.
