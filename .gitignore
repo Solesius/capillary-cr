@@ -25,10 +25,12 @@ web/.angular/
 **/target/
 **/build/
 api/native/.deps/
+v2/api/native/.deps/
 *.so
 
 # Runtime data — never commit
 api/.data/
+v2/api/.data/
 data/
 
 # SML specs — not public
