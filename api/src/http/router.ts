@@ -671,6 +671,9 @@ const team: Route[] = [
       });
     }
     const organization = query(req).get("org")?.trim();
+    if (organization && !/^[A-Za-z0-9-]{1,39}$/.test(organization)) {
+      return failure(400, "invalid_organization");
+    }
     return json({
       manifest: buildAppManifest(url),
       createUrl: organization
@@ -746,7 +749,10 @@ const team: Route[] = [
         }),
         201,
       );
-    } catch {
+    } catch (error) {
+      // Only the allow-list refusal is a 400; anything else is a real failure
+      // and reaches errorMiddleware (logged, 500) instead of being mislabelled.
+      if (!(error instanceof Error && error.message === "webhook_host_not_allowed")) throw error;
       return failure(400, "webhook_host_not_allowed", {
         message: "Webhook URL must be https on an allowed webhook host " +
           "(hooks.slack.com; *.webhook.office.com / *.logic.azure.com for Teams). " +

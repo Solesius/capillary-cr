@@ -20,9 +20,10 @@ const app = createApp({
 const server = app.listen(port, () => {
   console.log(`Capillary API listening on :${port}`);
 });
-// Review and RetV runs stream over SSE for minutes; don't let Node's request
-// timeout cut them. Headers must still arrive promptly.
-server.requestTimeout = 0;
+// requestTimeout bounds *receiving* a request (headers + body), never the
+// response, so long SSE review/RetV streams are unaffected while a client
+// trickling a body is cut off with a 408. Five minutes covers a 25 MB webhook.
+server.requestTimeout = 300_000;
 server.headersTimeout = 60_000;
 
 function readBooleanEnv(name: string, fallback: boolean): boolean {

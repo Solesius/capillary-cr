@@ -71,6 +71,9 @@ These edges were tightened, each checked by `compat/parity.py`:
 | Unsatisfiable `Range` | 416 with the whole file | 416, `Content-Range: bytes */N`, no file |
 | Non-GET to a SPA path | index.html | 404 JSON |
 | Unexpected errors | silent 500 | 500, logged with the stack |
+| Request body trickled in over 5 min | held open indefinitely | `408` (`requestTimeout`; responses/SSE are never cut) |
+| `?org=` on the GitHub App manifest not an org name | interpolated into the URL | `400 invalid_organization` |
+| Team connection create fails for a non-allow-list reason | `400 webhook_host_not_allowed` | `500`, logged |
 
 Cosmetic header differences (charset casing, ETag format, `public` in
 Cache-Control, cookie attribute order, hop-by-hop headers) are not tracked.
@@ -88,7 +91,7 @@ both directions; it defaults to `ghcr.io/solesius/capillary-cr:1.2.1` against `:
   read by both images: byte-identical API snapshots; a Node write read back
   by the Deno image. The source volume is never written.
 
-Unit tests: 258 pass (14 of them cover the HTTP layer), 2 opt-in skips
+Unit tests: 259 pass (15 of them cover the HTTP layer), 2 opt-in skips
 (`CAPILLARY_EMBEDDING_TESTS=1` runs the real MiniLM test; the codex test needs
 a codex binary). The celer FFI tests run against the real library.
 
