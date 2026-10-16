@@ -88,7 +88,7 @@ both directions; it defaults to `ghcr.io/solesius/capillary-cr:1.2.1` against `:
   read by both images: byte-identical API snapshots; a Node write read back
   by the Deno image. The source volume is never written.
 
-Unit tests: 255 pass (13 of them cover the HTTP layer), 2 opt-in skips
+Unit tests: 258 pass (14 of them cover the HTTP layer), 2 opt-in skips
 (`CAPILLARY_EMBEDDING_TESTS=1` runs the real MiniLM test; the codex test needs
 a codex binary). The celer FFI tests run against the real library.
 

@@ -53,6 +53,19 @@ cd web && npm test                 # web unit tests
 - Add or update tests alongside behavior changes; keep the suite green before
   opening a PR. CI runs the API and web suites on every pull request.
 
+## Capillary reviews itself
+
+Every PR is reviewed by Capillary before it is marked ready. Open it as a
+**draft**, then run the agent CLI from your branch against it:
+
+```bash
+cd api
+GITHUB_TOKEN=$(gh auth token) npm run review -- --repo Solesius/capillary-cr --pr <n>
+```
+
+Fix real findings (with a test), note false positives in the PR, re-run until
+the verdict is clean, and only then mark the PR ready for review.
+
 ## Code conventions
 
 - TypeScript throughout; match the existing style (no drive-by reformatting).
