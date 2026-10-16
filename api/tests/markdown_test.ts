@@ -55,6 +55,10 @@ test("markdown: a fence closes only on a bare run; four-space indent is not a fe
   assertEquals(markdownProse("    ```\n<p>"), "    ```\n`<p>`");
 });
 
+test("markdown: an inline triple-backtick span at line start is not a fence", () => {
+  assertEquals(markdownProse("```<p>``` is a tag\nthen <title>"), "```<p>``` is a tag\nthen `<title>`");
+});
+
 test("markdown: the review summary comment quotes tags in the model summary", () => {
   const record = {
     verdict: "request_changes",

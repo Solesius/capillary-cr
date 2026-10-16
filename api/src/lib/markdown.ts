@@ -15,7 +15,9 @@
 
 // CommonMark fences: at most three spaces of indent. A closer is a run of the
 // same character, at least as long as the opener, followed only by whitespace.
-const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
+// A backtick fence's info string cannot contain a backtick: "```<p>``` …" at
+// the start of a line is an inline code span, not a fence.
+const FENCE_OPEN = /^ {0,3}(?:(`{3,})(?!.*`)|(~{3,}))/;
 const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})\s*$/;
 // A real tag name, then attributes or the end: `<title>`, `</div>`, `<br/>`,
 // `<a href="x">`. Autolinks (`<https://…>`, `<user@host>`) do not match.
@@ -70,7 +72,7 @@ export function markdownProse(text: string): string {
     }
     const opener = FENCE_OPEN.exec(line);
     if (opener) {
-      fence = opener[1];
+      fence = opener[1] ?? opener[2];
       return line;
     }
     return quoteTagsInLine(line);
