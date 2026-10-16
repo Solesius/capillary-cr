@@ -26,7 +26,8 @@ export function parseInboundCommand(text: string): InboundCommand {
     return { kind: "status" };
   }
   const review = trimmed.match(
-    /^review\s+(?:(github|gitlab):)?([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\s*#(\d+)$/i,
+    // GitLab paths may nest subgroups (group/sub/project); GitHub is owner/name.
+    /^review\s+(?:(github|gitlab):)?([A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+)\s*#(\d+)$/i,
   );
   if (review) {
     const source = review[1]?.toLowerCase() as RepositorySource | undefined;

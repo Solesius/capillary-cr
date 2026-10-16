@@ -284,6 +284,14 @@ test("inbound command takes an optional github: or gitlab: host prefix", () => {
     source: "github",
   });
   assertEquals(parseInboundCommand("review gitea:group/app#7").kind, "unknown");
+  // GitLab subgroups nest: group/sub/project.
+  assertEquals(parseInboundCommand("review gitlab:group/sub/app#12"), {
+    kind: "review",
+    ownerRepo: "group/sub/app",
+    prNumber: "12",
+    source: "gitlab",
+  });
+  assertEquals(parseInboundCommand("review group/#7").kind, "unknown");
 });
 
 test("pick repository matches exact full names and asks for a prefix when hosts collide", () => {

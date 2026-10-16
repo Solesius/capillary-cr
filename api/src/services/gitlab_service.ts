@@ -716,7 +716,12 @@ export class GitLabService implements OptionalCodeHost {
   async #parseJson<T>(response: Response): Promise<T> {
     try {
       return await response.json() as T;
-    } catch {
+    } catch (error) {
+      // The request timeout also covers reading the body: a stall there is an
+      // unreachable host, not a malformed (e.g. SSO HTML) response.
+      if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+        throw new AppError(`gitlab_unreachable: ${error.message}`, 502, "gitlab_unreachable");
+      }
       throw new AppError("gitlab_bad_response", 502, "gitlab_bad_response");
     }
   }

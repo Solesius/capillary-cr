@@ -461,3 +461,22 @@ test("should_keep_the_network_cause_in_the_unreachable_message_without_the_token
   assert(error.message.includes("self-signed certificate"), error.message);
   assert(!error.message.includes("glpat-secret-value"), "the token must never appear in an error");
 });
+
+test("should_report_a_stalled_response_body_as_unreachable_not_bad_response", async () => {
+  // Headers arrive, then the body never finishes; the request timeout fires mid-read.
+  const stalled = ((_input: string | URL | Request, init?: RequestInit) =>
+    Promise.resolve(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("[{"));
+            init?.signal?.addEventListener("abort", () => controller.error(init.signal?.reason));
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    )) as typeof fetch;
+  const service = new GitLabService({ token: "glpat-test", timeoutMs: 50 }, null, stalled);
+  const error = await assertRejects(() => service.listRepositories(), AppError);
+  assertEquals(error.code, "gitlab_unreachable");
+});
