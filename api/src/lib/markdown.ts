@@ -13,10 +13,23 @@
 // Line-oriented by design: inline code spans that cross a line break are not
 // recognised (each line is scanned on its own), which errs toward quoting.
 
-const FENCE = /^(\s*)(`{3,}|~{3,})/;
+// CommonMark fences: at most three spaces of indent. A closer is a run of the
+// same character, at least as long as the opener, followed only by whitespace.
+const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
+const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})\s*$/;
 // A real tag name, then attributes or the end: `<title>`, `</div>`, `<br/>`,
 // `<a href="x">`. Autolinks (`<https://…>`, `<user@host>`) do not match.
 const TAG = /<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>\n]*)?\/?>/g;
+
+/** Index of the next backtick run of exactly `length` at or after `from`, or -1. */
+function closingRun(line: string, from: number, length: number): number {
+  const runs = /`+/g;
+  runs.lastIndex = from;
+  for (let match = runs.exec(line); match; match = runs.exec(line)) {
+    if (match[0].length === length) return match.index;
+  }
+  return -1;
+}
 
 /** Quote tag-shaped tokens in one line, skipping existing inline code spans. */
 function quoteTagsInLine(line: string): string {
@@ -30,7 +43,7 @@ function quoteTagsInLine(line: string): string {
     if (tick === -1) break;
     // An inline code span: a run of N backticks closed by the next run of exactly N.
     const run = /^`+/.exec(line.slice(tick))![0];
-    const close = line.indexOf(run, tick + run.length);
+    const close = closingRun(line, tick + run.length, run.length);
     if (close === -1) {
       // An unmatched backtick run is literal text; keep protecting what follows.
       out += run;
@@ -50,13 +63,14 @@ function quoteTagsInLine(line: string): string {
 export function markdownProse(text: string): string {
   let fence: string | null = null;
   return text.split("\n").map((line) => {
-    const opener = FENCE.exec(line);
     if (fence) {
-      if (opener && opener[2][0] === fence[0] && opener[2].length >= fence.length) fence = null;
+      const closer = FENCE_CLOSE.exec(line);
+      if (closer && closer[1][0] === fence[0] && closer[1].length >= fence.length) fence = null;
       return line;
     }
+    const opener = FENCE_OPEN.exec(line);
     if (opener) {
-      fence = opener[2];
+      fence = opener[1];
       return line;
     }
     return quoteTagsInLine(line);
