@@ -10,8 +10,10 @@
 // which both hosts render literally. Fenced blocks and existing code spans are
 // left untouched, so suggestion code is never altered.
 //
-// Line-oriented by design: inline code spans that cross a line break are not
-// recognised (each line is scanned on its own), which errs toward quoting.
+// Known limits, all of which err toward quoting (cosmetic, never unsafe):
+// inline code spans that cross a line break are not recognised; fences nested
+// in list items (indented four or more spaces) are read as prose; and
+// tag-shaped text that is not a tag, such as `x<y and z>w`, is quoted.
 
 // CommonMark fences: at most three spaces of indent. A closer is a run of the
 // same character, at least as long as the opener, followed only by whitespace.
