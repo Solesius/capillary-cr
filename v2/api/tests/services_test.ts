@@ -763,6 +763,36 @@ test("should_mark_run_failed_when_a_synchronous_review_phase_throws", async () =
   assertEquals(run.currentPhase, "failed");
 });
 
+test("should_log_not_crash_when_an_async_review_cannot_be_marked_failed", async () => {
+  const { repository, githubService, diffDagService, reviewService } = buildFixture();
+  await githubService.connectGithub("valid", "ghp_test_token");
+  await githubService.listRepositories();
+  await githubService.listPullRequests("1207713294");
+  diffDagService.buildDiffDag = () => Promise.reject(new Error("dag_exploded"));
+  const appendReviewEvent = repository.appendReviewEvent.bind(repository);
+  repository.appendReviewEvent = (runId, event) =>
+    event.startsWith("phase:failed:")
+      ? Promise.reject(new Error("store_down"))
+      : appendReviewEvent(runId, event);
+
+  const logged: unknown[][] = [];
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => unhandled.push(reason);
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => logged.push(args);
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    await reviewService.beginReviewAsync("8", "1207713294");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  } finally {
+    console.error = originalError;
+    process.off("unhandledRejection", onUnhandled);
+  }
+
+  assertEquals(unhandled.length, 0);
+  assert(logged.some((args) => args[0] === "review run could not be marked failed"));
+});
+
 test("should_persist_review_agent_record_with_report_when_review_completes", async () => {
   const { repository, githubService, reviewService } = buildFixture();
   await githubService.connectGithub("valid", "ghp_test_token");

@@ -114,7 +114,10 @@ export class AgenticReviewService {
 
     queueMicrotask(() => {
       this.executeReviewLoop(runId, pullRequestId, resolvedRepositoryId, NOOP_EMIT)
-        .catch((error) => this.failRun(runId, error));
+        .catch((error) => this.failRun(runId, error))
+        // failRun writes to storage; if that fails too (e.g. the original error
+        // was a storage fault) log it rather than crash on an unhandled rejection.
+        .catch((error) => console.error("review run could not be marked failed", runId, error));
     });
 
     return this.repository.getReviewRun(runId);
