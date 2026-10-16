@@ -19,6 +19,7 @@ import { sourceOf } from "../services/code_host.ts";
 import { parseInboundCommand, pickRepository, verifySlackSignature } from "../services/team/inbound.ts";
 import { MEMBER_COOKIE } from "../services/team/members.ts";
 import { recordPostedArtifact } from "../services/team/posted_artifacts.ts";
+import { markdownProse } from "../lib/markdown.ts";
 import { deps } from "./deps.ts";
 import {
   bytes,
@@ -423,7 +424,7 @@ const posting: Route[] = [
         startLine: finding.suggestion.startLine,
         endLine: finding.suggestion.endLine,
         code: finding.suggestion.code,
-        note: `**${finding.title}** — ${finding.finding}`,
+        note: `**${markdownProse(finding.title)}** — ${markdownProse(finding.finding)}`,
       },
       { asToken: memberToken(member.sessionId), onBehalfOf: memberLogin(member.sessionId) },
     );
@@ -444,7 +445,7 @@ const posting: Route[] = [
     const finding = record.findings.find((item) => item.id === param(req, "findingId"));
     if (!finding || !finding.line) return findingNotFound("finding_not_commentable");
     const severity = finding.severity.toUpperCase();
-    const fix = finding.suggestedFix ? `\n\n**Suggested fix:** ${finding.suggestedFix}` : "";
+    const fix = finding.suggestedFix ? `\n\n**Suggested fix:** ${markdownProse(finding.suggestedFix)}` : "";
     const member = memberSession(req);
     const result = await deps.codeHost.postPullRequestInlineComment(
       record.repositoryId,
@@ -452,7 +453,7 @@ const posting: Route[] = [
       {
         path: finding.filePath,
         line: finding.line,
-        body: `**[${severity}] ${finding.title}**\n\n${finding.finding}${fix}`,
+        body: `**[${severity}] ${markdownProse(finding.title)}**\n\n${markdownProse(finding.finding)}${fix}`,
       },
       { asToken: memberToken(member.sessionId), onBehalfOf: memberLogin(member.sessionId) },
     );
@@ -472,17 +473,17 @@ const posting: Route[] = [
     const member = memberSession(req);
     const runLink = runLinkFor(record.runId);
     const body = [
-      `@copilot please fix the following finding from a Capillary review of PR #${record.pullRequestId} ("${record.title}").`,
+      `@copilot please fix the following finding from a Capillary review of PR #${record.pullRequestId} ("${markdownProse(record.title)}").`,
       "",
-      `**[${finding.severity.toUpperCase()}] ${finding.title}**`,
+      `**[${finding.severity.toUpperCase()}] ${markdownProse(finding.title)}**`,
       "",
-      finding.finding,
+      markdownProse(finding.finding),
       "",
       "File: `" + finding.filePath + (finding.line ? `:${finding.line}` : "") + "`",
       ...(finding.evidence.length
-        ? ["", "Evidence:", ...finding.evidence.slice(0, 5).map((e) => `- ${e}`)]
+        ? ["", "Evidence:", ...finding.evidence.slice(0, 5).map((e) => `- ${markdownProse(e)}`)]
         : []),
-      ...(finding.suggestedFix ? ["", `Suggested fix: ${finding.suggestedFix}`] : []),
+      ...(finding.suggestedFix ? ["", `Suggested fix: ${markdownProse(finding.suggestedFix)}`] : []),
       ...(runLink ? ["", `Full run: ${runLink}`] : []),
       "",
       `<sub>Dispatched from [Capillary](https://github.com/Solesius/capillary-cr)</sub>`,
