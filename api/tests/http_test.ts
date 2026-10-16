@@ -12,6 +12,7 @@ import { assert, assertEquals, test } from "./support/harness.ts";
 import { AppError } from "../src/domain/errors.ts";
 import { createApp } from "../src/http/app.ts";
 import { bytes, disposition, events, failure, json, markdown, withCookie } from "../src/http/reply.ts";
+import { deps } from "../src/http/deps.ts";
 import { errorMiddleware } from "../src/http/router.ts";
 import { del, get, mount, param, post, query, type Route } from "../src/http/routing.ts";
 
@@ -274,5 +275,69 @@ test("app: the GitHub App manifest rejects an org that would reshape its URL", a
   } finally {
     if (previous === undefined) delete process.env["CAPILLARY_PUBLIC_URL"];
     else process.env["CAPILLARY_PUBLIC_URL"] = previous;
+  }
+});
+
+test("app: findings are posted with HTML-like tags quoted, on every posting route", async () => {
+  const record = {
+    runId: "run_md",
+    repositoryId: "1207713294",
+    pullRequestId: "8",
+    title: "Fix the <head> metadata",
+    findings: [{
+      id: "finding_md",
+      severity: "low",
+      title: "Typo in <title>",
+      finding: "The <title> was changed to 'Graprh'.",
+      suggestedFix: "Restore the <title> text.",
+      filePath: "web/index.html",
+      line: 6,
+      evidence: ["<title>Knowledge Graprh</title> on line 6"],
+      suggestion: { startLine: 6, endLine: 6, code: "    <title>Knowledge Graph</title>" },
+    }],
+    postedArtifacts: [],
+  };
+  const sent: Record<string, unknown> = {};
+  const original = {
+    getRun: deps.reviewService.getReviewAgentRun,
+    inline: deps.githubService.postPullRequestInlineComment,
+    suggestion: deps.githubService.postPullRequestSuggestion,
+    issue: deps.githubService.createRepositoryIssue,
+  };
+  const ok = { htmlUrl: "https://example.test/x" };
+  Object.assign(deps.reviewService, { getReviewAgentRun: () => Promise.resolve(record) });
+  Object.assign(deps.githubService, {
+    postPullRequestInlineComment: (_r: string, _p: string, input: unknown) => ((sent.inline = input), Promise.resolve(ok)),
+    postPullRequestSuggestion: (_r: string, _p: string, input: unknown) => ((sent.suggestion = input), Promise.resolve(ok)),
+    createRepositoryIssue: (_r: string, input: unknown) => ((sent.issue = input), Promise.resolve({ ...ok, number: 1, assigned: false })),
+  });
+  try {
+    await serve(createApp({ allowedOrigins: [ORIGIN], requireGithubLogin: false, webDistRoot: null }), async (base) => {
+      for (const route of ["comment", "suggestion", "dispatch"]) {
+        const res = await fetch(`${base}/api/review/runs/run_md/findings/finding_md/${route}`, { method: "POST" });
+        assertEquals(res.status, 201, route);
+        await res.body?.cancel();
+      }
+    });
+  } finally {
+    Object.assign(deps.reviewService, { getReviewAgentRun: original.getRun });
+    Object.assign(deps.githubService, {
+      postPullRequestInlineComment: original.inline,
+      postPullRequestSuggestion: original.suggestion,
+      createRepositoryIssue: original.issue,
+    });
+  }
+
+  const inline = sent.inline as { body: string };
+  assert(inline.body.includes("Typo in `<title>`") && inline.body.includes("The `<title>` was changed"));
+  assert(inline.body.includes("Restore the `<title>` text."));
+  const suggestion = sent.suggestion as { note: string; code: string };
+  assert(suggestion.note.includes("The `<title>` was changed"));
+  // Suggestion code is posted exactly as written.
+  assertEquals(suggestion.code, "    <title>Knowledge Graph</title>");
+  const issue = sent.issue as { body: string };
+  assert(issue.body.includes("Fix the `<head>` metadata") && issue.body.includes("- `<title>`Knowledge Graprh`</title>`"));
+  for (const body of [inline.body, suggestion.note, issue.body]) {
+    assertEquals(/(^|[^`])<title>/.test(body), false);
   }
 });

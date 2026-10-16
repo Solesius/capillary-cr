@@ -20,6 +20,7 @@
 // tests, or no provider configured) it keeps the deterministic baseline
 // findings and emits a deterministic report — no network required.
 
+import { markdownProse } from "../lib/markdown.ts";
 import {
   type DiffFile,
   type ReviewAgentRunRecord,
@@ -1283,7 +1284,7 @@ export function buildPrSummaryComment(record: ReviewAgentRunRecord): string {
   lines.push(`### Capillary Code Review — **${record.verdict}**`);
   lines.push("");
   if (record.summary.trim().length > 0) {
-    lines.push(record.summary.trim());
+    lines.push(markdownProse(record.summary.trim()));
     lines.push("");
   }
   lines.push(
