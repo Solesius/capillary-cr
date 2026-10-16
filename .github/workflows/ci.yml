@@ -23,6 +23,8 @@ jobs:
         working-directory: api
     steps:
       - name: Native toolchain
+        # Runs before checkout, so the job's api/ working directory does not exist yet.
+        working-directory: /
         run: |
           apt-get update
           apt-get install -y --no-install-recommends g++ git pkg-config libsqlite3-dev librocksdb-dev ca-certificates
