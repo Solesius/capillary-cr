@@ -103,8 +103,8 @@ import { FileExplorerComponent } from "../explorer/file-explorer.component";
               <span class="cap-muted">Overview, graph, findings</span>
             </button>
             <button class="cap-launch-card" type="button" (click)="openPageFromFunctionMenu('github')">
-              <strong>GitHub</strong>
-              <span class="cap-muted">Repositories and pull requests</span>
+              <strong>Repositories</strong>
+              <span class="cap-muted">GitHub and GitLab pull and merge requests</span>
             </button>
             <button class="cap-launch-card" type="button" (click)="openPageFromFunctionMenu('agent')">
               <strong>Agent Lab</strong>
@@ -150,7 +150,7 @@ import { FileExplorerComponent } from "../explorer/file-explorer.component";
       <div class="cap-shell-body">
         <nav class="cap-page-tabs" aria-label="Workspace pages">
           <button class="cap-page-tab" type="button" [class.active]="activePage() === 'run'" (click)="setPage('run')">Run</button>
-          <button class="cap-page-tab" type="button" [class.active]="activePage() === 'github'" (click)="setPage('github')">GitHub</button>
+          <button class="cap-page-tab" type="button" [class.active]="activePage() === 'github'" (click)="setPage('github')">Repositories</button>
           <button class="cap-page-tab" type="button" [class.active]="activePage() === 'agent'" (click)="setPage('agent')">QA Agent</button>
           <button class="cap-page-tab" type="button" [class.active]="activePage() === 'setup'" (click)="setPage('setup')">Setup</button>
           <button
@@ -187,18 +187,18 @@ import { FileExplorerComponent } from "../explorer/file-explorer.component";
 
             @if (!store.githubConnected()) {
               <div class="cap-target-rail cap-target-rail--warn">
-                <span>Connect GitHub to begin a review.</span>
-                <button class="cap-button cap-button-ghost cap-button-sm" type="button" (click)="setPage('github')">Go to GitHub →</button>
+                <span>Connect GitHub or GitLab to begin a review.</span>
+                <button class="cap-button cap-button-ghost cap-button-sm" type="button" (click)="setPage('github')">Go to repositories →</button>
               </div>
             } @else if (!store.selectedRepositoryId()) {
               <div class="cap-target-rail cap-target-rail--warn">
-                <span>Select a repository and pull request.</span>
-                <button class="cap-button cap-button-ghost cap-button-sm" type="button" (click)="setPage('github')">Go to GitHub →</button>
+                <span>Select a repository and a pull or merge request.</span>
+                <button class="cap-button cap-button-ghost cap-button-sm" type="button" (click)="setPage('github')">Go to repositories →</button>
               </div>
             } @else if (!store.selectedPullRequestId()) {
               <div class="cap-target-rail cap-target-rail--warn">
-                <span>{{ store.selectedRepository()?.fullName }} — select a pull request to review.</span>
-                <button class="cap-button cap-button-ghost cap-button-sm" type="button" (click)="setPage('github')">Pick a PR →</button>
+                <span>{{ store.selectedRepository()?.fullName }} — select a {{ store.changeNoun() }} to review.</span>
+                <button class="cap-button cap-button-ghost cap-button-sm" type="button" (click)="setPage('github')">Pick a {{ store.hostLabel() === 'GitLab' ? 'MR' : 'PR' }} →</button>
               </div>
             } @else {
               <div class="cap-target-rail cap-target-rail--ready">

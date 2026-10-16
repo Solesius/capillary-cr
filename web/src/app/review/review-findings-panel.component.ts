@@ -81,7 +81,7 @@ import { CapillaryStore } from "../state/capillary.store";
             @if (finding.line) {
               <div class="cap-finding-actions">
                 @if (store.commentState()[finding.id] === 'posted') {
-                  <a class="cap-button cap-button-ghost cap-button-sm" [href]="store.commentUrl()[finding.id]" target="_blank" rel="noopener">Commented ✓ — view on GitHub</a>
+                  <a class="cap-button cap-button-ghost cap-button-sm" [href]="store.commentUrl()[finding.id]" target="_blank" rel="noopener">Commented ✓ — view on {{ store.hostLabel() }}</a>
                 } @else {
                   <button
                     class="cap-button cap-button-sm"
@@ -96,14 +96,14 @@ import { CapillaryStore } from "../state/capillary.store";
             }
             <div class="cap-finding-actions">
               @if (store.dispatchState()[finding.id] === 'done' || store.dispatchState()[finding.id] === 'done_unassigned') {
-                <a class="cap-button cap-button-ghost cap-button-sm" [href]="store.dispatchUrl()[finding.id]" target="_blank" rel="noopener" [title]="store.dispatchState()[finding.id] === 'done_unassigned' ? 'GitHub refused the coding-agent assignment (token shape or Copilot seat) — open the issue and assign Copilot yourself' : ''">{{
+                <a class="cap-button cap-button-ghost cap-button-sm" [href]="store.dispatchUrl()[finding.id]" target="_blank" rel="noopener" [title]="store.dispatchState()[finding.id] === 'done_unassigned' ? store.hostLabel() + ' refused the coding-agent assignment — open the issue and assign it yourself' : ''">{{
                   store.dispatchState()[finding.id] === 'done_unassigned' ? 'Issue filed — assign Copilot yourself' : 'Dispatched ✓ — view issue'
                 }}</a>
               } @else {
                 <button
                   class="cap-button cap-button-ghost cap-button-sm"
                   type="button"
-                  title="File a GitHub issue assigned to the Copilot coding agent with this finding's full context"
+                  title="File a {{ store.hostLabel() }} issue for the coding agent with this finding's full context"
                   [class.busy]="store.dispatchState()[finding.id] === 'working'"
                   [disabled]="store.dispatchState()[finding.id] === 'working'"
                   (click)="dispatchFix(finding.id)">
@@ -134,7 +134,7 @@ import { CapillaryStore } from "../state/capillary.store";
                 <pre class="cap-suggestion-code"><code>{{ sug.code }}</code></pre>
                 <div class="cap-suggestion-actions">
                   @if (store.suggestionState()[finding.id] === 'posted') {
-                    <a class="cap-button cap-button-ghost cap-button-sm" [href]="store.suggestionUrl()[finding.id]" target="_blank" rel="noopener">Posted ✓ — view on GitHub</a>
+                    <a class="cap-button cap-button-ghost cap-button-sm" [href]="store.suggestionUrl()[finding.id]" target="_blank" rel="noopener">Posted ✓ — view on {{ store.hostLabel() }}</a>
                   } @else {
                     <button
                       class="cap-button cap-button-sm"

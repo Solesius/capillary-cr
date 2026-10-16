@@ -9,6 +9,7 @@ import {
 } from "../domain/entities.ts";
 import { AppError, unauthorized } from "../domain/errors.ts";
 import { enforceDefensiveInput, enforceTextBody } from "../lib/validation.ts";
+import { type CodeHost, deriveRiskHint } from "./code_host.ts";
 import { type ReviewRepository } from "../repositories/review_repository.ts";
 
 interface GitHubUserDto {
@@ -188,7 +189,7 @@ async function describeGithubError(response: Response, fallback: string): Promis
   }
 }
 
-export class GitHubOakService {
+export class GitHubOakService implements CodeHost {
   readonly #pendingOAuthStates = new Map<string, PendingGithubOAuthState>();
   readonly #pendingDeviceSessions = new Map<string, PendingGithubDeviceSession>();
   readonly #oauthStateTtlMs = 10 * 60 * 1000;
@@ -1331,20 +1332,7 @@ export class GitHubOakService {
   }
 
   private deriveRiskHint(additions: number, deletions: number, changedFiles: number): RiskHint {
-    const magnitude = additions + deletions + changedFiles * 8;
-    if (magnitude >= 900) {
-      return "critical";
-    }
-    if (magnitude >= 350) {
-      return "high";
-    }
-    if (magnitude >= 160) {
-      return "medium";
-    }
-    if (magnitude > 0) {
-      return "low";
-    }
-    return "unknown";
+    return deriveRiskHint(additions, deletions, changedFiles);
   }
 
   private async requireAuthenticatedIdentity(): Promise<void> {

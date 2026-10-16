@@ -5,10 +5,12 @@
 // job, or another agent. No server required — the pipeline runs in-process.
 //
 //   GITHUB_TOKEN=ghp_... npm run review -- --repo owner/name --pr 123
+//   CAPILLARY_GITLAB_TOKEN=glpat-... npm run review -- --source gitlab --repo group/project --mr 42
 //
 // Flags:
-//   --repo <owner/name>   repository (required)
-//   --pr <number>         pull request number (required)
+//   --source <host>       github (default) or gitlab
+//   --repo <owner/name>   repository (required); GitLab: group/subgroup/project
+//   --pr <number>         pull request number (required); --mr is an alias
 //   --max-cycles <n>      cap agent cycles (default: scales with PR size)
 //   --json                emit the full run record as JSON on stdout
 //   --quiet               suppress live narration on stderr
@@ -18,7 +20,8 @@
 //   stderr — live gate narration (unless --quiet)
 //   exit 0 — approve | comment;  exit 1 — request_changes;  exit 2 — error
 //
-// Auth: GITHUB_TOKEN (or CAPILLARY_GITHUB_TOKEN) env var. The model provider
+// Auth: GITHUB_TOKEN (or CAPILLARY_GITHUB_TOKEN) for GitHub; CAPILLARY_GITLAB_TOKEN
+// (and GITLAB_BASE_URL for self-hosted) for GitLab. The model provider
 // resolves exactly as the server does: Codex/Claude CLI logins, ws bridges
 // via CODEX_APP_SERVER_URL / CLAUDE_CODE_URL, or provider API keys.
 
@@ -37,6 +40,8 @@ const args = parseArgs({
   options: {
     repo: { type: "string" },
     pr: { type: "string" },
+    mr: { type: "string" },
+    source: { type: "string" },
     "max-cycles": { type: "string" },
     json: { type: "boolean" },
     quiet: { type: "boolean" },
@@ -46,21 +51,29 @@ const args = parseArgs({
 
 if (args.help) {
   console.error(
-    "usage: GITHUB_TOKEN=... npm run review -- --repo owner/name --pr 123 [--max-cycles n] [--json] [--quiet]",
+    "usage: GITHUB_TOKEN=... npm run review -- --repo owner/name --pr 123 [--max-cycles n] [--json] [--quiet]\n" +
+      "       CAPILLARY_GITLAB_TOKEN=... npm run review -- --source gitlab --repo group/project --mr 42 [...]",
   );
   process.exit(0);
 }
 
+const source = String(args.source || "github").trim().toLowerCase();
+if (source !== "github" && source !== "gitlab") {
+  fail(`--source must be github or gitlab, not ${source}`);
+}
 const repoFullName = String(args.repo || "").trim();
-const prNumber = String(args.pr || "").trim();
+const prNumber = String(args.pr || args.mr || "").trim();
 if (!repoFullName.includes("/") || !prNumber) {
   fail("required: --repo owner/name and --pr <number> (see --help)");
 }
 
 const token = process.env["GITHUB_TOKEN"]?.trim() ||
   process.env["CAPILLARY_GITHUB_TOKEN"]?.trim();
-if (!token) {
+if (source === "github" && !token) {
   fail("GITHUB_TOKEN env var is required");
+}
+if (source === "gitlab" && !deps.gitlabService.configured()) {
+  fail("CAPILLARY_GITLAB_TOKEN env var is required for --source gitlab");
 }
 
 const narrate = (line: string) => {
@@ -70,8 +83,13 @@ const narrate = (line: string) => {
 };
 
 try {
-  await deps.githubService.connectGithub("valid", token);
-  const repositories = await deps.githubService.listRepositories();
+  // GitLab resolves the exact project path in one call; GitHub walks the catalog.
+  if (source === "github") {
+    await deps.githubService.connectGithub("valid", token);
+  }
+  const repositories = source === "gitlab"
+    ? await deps.gitlabService.lookupRepositories(repoFullName)
+    : await deps.githubService.listRepositories();
   const repository = repositories.find(
     (candidate) => candidate.fullName.toLowerCase() === repoFullName.toLowerCase(),
   );
@@ -79,9 +97,9 @@ try {
     fail(`repository ${repoFullName} not visible to this token`);
   }
 
-  const pulls = await deps.githubService.listPullRequests(repository.id, "open");
+  const pulls = await deps.codeHost.listPullRequests(repository.id, "open");
   const pull = pulls.find((candidate) => String(candidate.number) === prNumber) ??
-    (await deps.githubService.listPullRequests(repository.id, "closed"))
+    (await deps.codeHost.listPullRequests(repository.id, "closed"))
       .find((candidate) => String(candidate.number) === prNumber);
   if (!pull) {
     fail(`PR #${prNumber} not found in ${repoFullName}`);

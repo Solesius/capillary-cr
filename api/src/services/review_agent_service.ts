@@ -37,7 +37,7 @@ import { AppError } from "../domain/errors.ts";
 import { enforceDefensiveInput } from "../lib/validation.ts";
 import { type ReviewRunEvent, TCSRTC_GATES, type TcsrtcGate, toTcsrtcGate } from "../domain/review_phase.ts";
 import { type ReviewRepository } from "../repositories/review_repository.ts";
-import { GitHubOakService } from "./github_service.ts";
+import type { CodeHost } from "./code_host.ts";
 import { TcsrctReviewService } from "./tcsrct_review_service.ts";
 import { providerUsesGithubToken } from "./providers/provider_registry.ts";
 import {
@@ -238,15 +238,15 @@ export interface ReviewAgentPassOutput {
  */
 export class ReviewAgentService {
   private readonly repository: ReviewRepository;
-  private readonly githubService: GitHubOakService;
+  private readonly codeHost: CodeHost;
   private readonly tcsrct: TcsrctReviewService;
   constructor(
     repository: ReviewRepository,
-    githubService: GitHubOakService,
+    codeHost: CodeHost,
     tcsrct: TcsrctReviewService,
   ) {
     this.repository = repository;
-    this.githubService = githubService;
+    this.codeHost = codeHost;
     this.tcsrct = tcsrct;
   }
 
@@ -598,7 +598,7 @@ export class ReviewAgentService {
     // Ask GitHub, not the in-memory PR cache: the whole point is the CURRENT
     // head, and the cache may be cold after a restart (live-found bug —
     // pull_request_not_found on a rebooted instance).
-    const pull = await this.githubService.getPullRequest(
+    const pull = await this.codeHost.getPullRequest(
       prior.repositoryId,
       prior.pullRequestId,
     );
@@ -606,7 +606,7 @@ export class ReviewAgentService {
     if (!headSha || headSha === prior.reviewedHeadSha) {
       throw new AppError("no_new_commits", 409, "The PR head has not moved since this review.");
     }
-    const delta = await this.githubService.compareCommits(
+    const delta = await this.codeHost.compareCommits(
       prior.repositoryId,
       prior.reviewedHeadSha,
       headSha,
@@ -1153,7 +1153,7 @@ export class ReviewAgentService {
       return cached;
     }
 
-    const fetched = await this.githubService.getRepoFileContent(
+    const fetched = await this.codeHost.getRepoFileContent(
       input.repositoryId,
       capture.headRef,
       path,

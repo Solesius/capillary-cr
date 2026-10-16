@@ -47,8 +47,13 @@ export interface GitHubIdentity {
   connected: boolean;
 }
 
+/** Code host a repository lives on. Absent on stored records means GitHub. */
+export type SourceKind = "github" | "gitlab";
+
 export interface GitHubRepository {
   id: string;
+  /** Which code host serves this repository (GitLab ids carry a `gitlab-` prefix). */
+  source?: SourceKind;
   owner: string;
   name: string;
   fullName: string;

@@ -3,7 +3,10 @@
 export type RiskHint = "unknown" | "low" | "medium" | "high" | "critical";
 
 export interface GitHubRepository {
+  /** GitHub's numeric id, or `gitlab-<project id>` for GitLab. */
   id: string;
+  /** Which code host serves the repository (absent means GitHub). */
+  source?: "github" | "gitlab";
   fullName: string;
   /** Bare repository name (no owner) — matches the API's full shape. */
   name?: string;

@@ -18,7 +18,7 @@ import { type ReviewRepository } from "../repositories/review_repository.ts";
 import { ArtifactService } from "./artifact_service.ts";
 import { ClickClackCoordinationService } from "./click_clack_coordination_service.ts";
 import { DiffDagService } from "./diff_dag_service.ts";
-import { GitHubOakService } from "./github_service.ts";
+import type { CodeHost } from "./code_host.ts";
 import { LlmProviderService } from "./llm_provider_service.ts";
 import { TcsrctReviewService } from "./tcsrct_review_service.ts";
 import { ReviewAgentService } from "./review_agent_service.ts";
@@ -60,7 +60,7 @@ export class AgenticReviewService {
   private readonly repository: ReviewRepository;
   private readonly clickClack: ClickClackCoordinationService;
   private readonly diffDagService: DiffDagService;
-  private readonly githubService: GitHubOakService;
+  private readonly codeHost: CodeHost;
   private readonly tcsrct: TcsrctReviewService;
   private readonly artifacts: ArtifactService;
   private readonly llmProvider?: LlmProviderService;
@@ -68,7 +68,7 @@ export class AgenticReviewService {
     repository: ReviewRepository,
     clickClack: ClickClackCoordinationService,
     diffDagService: DiffDagService,
-    githubService: GitHubOakService,
+    codeHost: CodeHost,
     tcsrct: TcsrctReviewService,
     artifacts: ArtifactService,
     llmProvider?: LlmProviderService,
@@ -76,13 +76,13 @@ export class AgenticReviewService {
     this.repository = repository;
     this.clickClack = clickClack;
     this.diffDagService = diffDagService;
-    this.githubService = githubService;
+    this.codeHost = codeHost;
     this.tcsrct = tcsrct;
     this.artifacts = artifacts;
     this.llmProvider = llmProvider;
     // The TCSRTC review agent is constructed from services already held here,
     // so wiring it in requires no constructor/DI signature changes.
-    this.reviewAgent = new ReviewAgentService(repository, githubService, tcsrct);
+    this.reviewAgent = new ReviewAgentService(repository, codeHost, tcsrct);
   }
 
   private readonly reviewAgent: ReviewAgentService;
@@ -195,8 +195,8 @@ export class AgenticReviewService {
       throw new AppError("repository_id_required", 400, "repository_id_required");
     }
 
-    await this.githubService.getPullRequest(resolvedRepositoryId, pullRequestId);
-    await this.githubService.getPullRequestDiff(resolvedRepositoryId, pullRequestId);
+    await this.codeHost.getPullRequest(resolvedRepositoryId, pullRequestId);
+    await this.codeHost.getPullRequestDiff(resolvedRepositoryId, pullRequestId);
 
     const run: ReviewRun = {
       id: createId("run"),

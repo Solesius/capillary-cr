@@ -41,7 +41,7 @@ server.setRequestHandler(ListToolsRequestSchema, () => ({
     },
     {
       name: "github_list_repositories",
-      description: "List repositories available to the authenticated identity.",
+      description: "List repositories available to the authenticated identity, across GitHub and GitLab (GitLab ids are gitlab-<project id>).",
       inputSchema: {
         type: "object",
         properties: {},
@@ -49,7 +49,7 @@ server.setRequestHandler(ListToolsRequestSchema, () => ({
     },
     {
       name: "github_list_pull_requests",
-      description: "List pull requests for a repository, filtered by open or closed state.",
+      description: "List pull requests (GitLab: merge requests) for a repository, filtered by open or closed state.",
       inputSchema: {
         type: "object",
         properties: {
@@ -61,7 +61,7 @@ server.setRequestHandler(ListToolsRequestSchema, () => ({
     },
     {
       name: "github_get_pull_request_diff",
-      description: "Fetch file-level diff metadata for a pull request.",
+      description: "Fetch file-level diff metadata for a pull request or merge request.",
       inputSchema: {
         type: "object",
         properties: {
@@ -73,7 +73,7 @@ server.setRequestHandler(ListToolsRequestSchema, () => ({
     },
     {
       name: "review_begin_run",
-      description: "Start a full Capillary review run for a pull request.",
+      description: "Start a full Capillary review run for a pull request or merge request.",
       inputSchema: {
         type: "object",
         properties: {
@@ -203,17 +203,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           ),
         );
       case "github_list_repositories":
-        return jsonResult(await deps.githubService.listRepositories());
+        return jsonResult(await deps.codeHost.listRepositories());
       case "github_list_pull_requests":
         return jsonResult(
-          await deps.githubService.listPullRequests(
+          await deps.codeHost.listPullRequests(
             requiredString(args.repositoryId, "repositoryId"),
             asState(args.state),
           ),
         );
       case "github_get_pull_request_diff":
         return jsonResult(
-          await deps.githubService.getPullRequestDiff(
+          await deps.codeHost.getPullRequestDiff(
             requiredString(args.repositoryId, "repositoryId"),
             requiredString(args.pullRequestId, "pullRequestId"),
           ),
