@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { ReviewFinding } from "./entities.ts";
+import { type ReviewFinding } from "./entities.ts";
 
 /**
  * Canonical, strongly-typed phases of the agentic RETV review loop.

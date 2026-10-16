@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
 import {
-  DiffDag,
-  DiffFile,
-  ModuleEdge,
-  ModuleNode,
-  ProgramShapeSample,
-  RiskSurface,
+  type DiffDag,
+  type DiffFile,
+  type ModuleEdge,
+  type ModuleNode,
+  type ProgramShapeSample,
+  type RiskSurface,
 } from "../domain/entities.ts";
 import { AppError } from "../domain/errors.ts";
 import { enforceDefensiveInput } from "../lib/validation.ts";
-import { ReviewRepository } from "../repositories/review_repository.ts";
+import { type ReviewRepository } from "../repositories/review_repository.ts";
 import { GraphMathService, TORUS_RADIUS_MAJOR, TORUS_RADIUS_MINOR } from "./graph_math_service.ts";
 import {
   cosineSimilarity,
-  FileEmbeddingProvider,
+  type FileEmbeddingProvider,
   MiniLmEmbeddingService,
 } from "./embedding_service.ts";
 
@@ -26,7 +26,7 @@ const SEMANTIC_EDGE_MIN_SIMILARITY = 0.45;
 const SEMANTIC_EDGE_TOP_K = 3;
 
 function defaultEmbeddingProvider(): FileEmbeddingProvider | null {
-  return Deno.env.get("CAPILLARY_EMBEDDINGS") === "0" ? null : new MiniLmEmbeddingService();
+  return process.env["CAPILLARY_EMBEDDINGS"] === "0" ? null : new MiniLmEmbeddingService();
 }
 
 const TOKEN_RE = /[A-Za-z_][A-Za-z0-9_]*/g;
@@ -70,11 +70,18 @@ const COMMON_TOKENS = new Set([
 ]);
 
 export class DiffDagService {
+  private readonly repository: ReviewRepository;
+  private readonly math: GraphMathService;
+  private readonly embeddings: FileEmbeddingProvider | null;
   constructor(
-    private readonly repository: ReviewRepository,
-    private readonly math: GraphMathService,
-    private readonly embeddings: FileEmbeddingProvider | null = defaultEmbeddingProvider(),
-  ) {}
+    repository: ReviewRepository,
+    math: GraphMathService,
+    embeddings: FileEmbeddingProvider | null = defaultEmbeddingProvider(),
+  ) {
+    this.repository = repository;
+    this.math = math;
+    this.embeddings = embeddings;
+  }
 
   /**
    * Add `semantic` edges between changed files whose diffs are close in

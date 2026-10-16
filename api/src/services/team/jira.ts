@@ -6,7 +6,7 @@
 // entirely from server env (JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN,
 // JIRA_PROJECT_KEY); the API token never travels to a client.
 
-import { ReviewFinding } from "../../domain/entities.ts";
+import { type ReviewFinding } from "../../domain/entities.ts";
 
 export interface JiraConfig {
   baseUrl: string;

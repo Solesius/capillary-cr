@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { ProviderStreamCallback } from "./provider_core.ts";
+import { type ProviderStreamCallback } from "./provider_core.ts";
 
 export const TOKEN_CHAR_RATIO = 4;
 export const JSON_CONTENT_TYPE = "application/json";

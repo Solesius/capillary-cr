@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { assert, assertEquals } from "jsr:@std/assert";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test, assert, assertEquals } from "./support/harness.ts";
 import { CelerStore } from "../src/services/storage/celer_mem.ts";
 
 // These tests exercise the real native library. They self-skip when the shared
-// object has not been built or FFI is not permitted, so the default
-// `deno test --allow-env` suite stays green. Run the full storage suite with:
-//   deno test --allow-env --allow-ffi --allow-read --allow-write
+// object has not been built (native/build.sh), so the suite stays green on a
+// machine without the native toolchain.
 const NATIVE_AVAILABLE = CelerStore.canLoad();
 
 async function withStore(fn: (store: CelerStore, dir: string) => Promise<void>): Promise<void> {
-  const dir = await Deno.makeTempDir({ prefix: "celer_mem_test_" });
+  const dir = await mkdtemp(join(tmpdir(), "celer_mem_test_"));
   const store = await CelerStore.open({
     path: dir,
     schema: [{ scope: "review", table: "runs" }, { scope: "review", table: "findings" }],
@@ -19,11 +21,11 @@ async function withStore(fn: (store: CelerStore, dir: string) => Promise<void>):
     await fn(store, dir);
   } finally {
     await store.close();
-    await Deno.remove(dir, { recursive: true });
+    await rm(dir, { recursive: true });
   }
 }
 
-Deno.test({
+test({
   name: "should_round_trip_put_and_get_through_celer_ffi",
   ignore: !NATIVE_AVAILABLE,
   async fn() {
@@ -38,7 +40,7 @@ Deno.test({
   },
 });
 
-Deno.test({
+test({
   name: "should_prefix_scan_keys_through_celer_ffi",
   ignore: !NATIVE_AVAILABLE,
   async fn() {
@@ -60,7 +62,7 @@ Deno.test({
   },
 });
 
-Deno.test({
+test({
   name: "should_apply_atomic_batch_and_delete_through_celer_ffi",
   ignore: !NATIVE_AVAILABLE,
   async fn() {
@@ -84,7 +86,7 @@ Deno.test({
   },
 });
 
-Deno.test({
+test({
   name: "should_preserve_binary_values_through_celer_ffi",
   ignore: !NATIVE_AVAILABLE,
   async fn() {

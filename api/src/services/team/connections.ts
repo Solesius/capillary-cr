@@ -12,7 +12,7 @@
 // the API tokens capillary refuses to persist — and it is never returned to
 // the UI unmasked.
 
-import { TeamEvent } from "./event_bus.ts";
+import { type TeamEvent } from "./event_bus.ts";
 
 export type ChannelApp = "slack" | "teams";
 export type NotifyDetail = "summary" | "findings";

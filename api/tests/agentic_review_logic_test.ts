@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { assertEquals } from "jsr:@std/assert";
+import { test, assertEquals } from "./support/harness.ts";
 import {
   accumulatePassRisk,
   computeReviewProgress,
@@ -19,21 +19,21 @@ function stateOf(partial: Partial<ReviewLoopState>): ReviewLoopState {
   };
 }
 
-Deno.test("should_select_highest_risk_uncovered_pass_first", () => {
+test("should_select_highest_risk_uncovered_pass_first", () => {
   const next = selectNextReviewPass(stateOf({
     passRisk: { Trace: 0.2, Runtime: 0.9, Tests: 0.5 },
   }));
   assertEquals(next, "Runtime");
 });
 
-Deno.test("should_break_risk_ties_on_canonical_tcsrct_order", () => {
+test("should_break_risk_ties_on_canonical_tcsrct_order", () => {
   const next = selectNextReviewPass(stateOf({
     passRisk: { State: 0.5, Runtime: 0.5 },
   }));
   assertEquals(next, "State");
 });
 
-Deno.test("should_skip_already_covered_passes_when_selecting_next", () => {
+test("should_skip_already_covered_passes_when_selecting_next", () => {
   const next = selectNextReviewPass(stateOf({
     coveredPasses: ["Runtime"],
     passRisk: { Runtime: 0.9, Trace: 0.4 },
@@ -41,19 +41,19 @@ Deno.test("should_skip_already_covered_passes_when_selecting_next", () => {
   assertEquals(next, "Trace");
 });
 
-Deno.test("should_return_null_when_every_pass_is_covered", () => {
+test("should_return_null_when_every_pass_is_covered", () => {
   const next = selectNextReviewPass(stateOf({
     coveredPasses: [...REVIEW_PASSES],
   }));
   assertEquals(next, null);
 });
 
-Deno.test("should_report_goal_achieved_only_when_all_passes_covered", () => {
+test("should_report_goal_achieved_only_when_all_passes_covered", () => {
   assertEquals(isReviewGoalAchieved(["Trace", "Contracts"]), false);
   assertEquals(isReviewGoalAchieved([...REVIEW_PASSES]), true);
 });
 
-Deno.test("should_compute_monotonic_percent_from_covered_passes", () => {
+test("should_compute_monotonic_percent_from_covered_passes", () => {
   const progress = computeReviewProgress(stateOf({
     coveredPasses: ["Trace", "Contracts", "State"],
     findingCount: 7,
@@ -65,7 +65,7 @@ Deno.test("should_compute_monotonic_percent_from_covered_passes", () => {
   assertEquals(progress.goalAchieved, false);
 });
 
-Deno.test("should_mark_progress_goal_achieved_at_full_coverage", () => {
+test("should_mark_progress_goal_achieved_at_full_coverage", () => {
   const progress = computeReviewProgress(stateOf({
     coveredPasses: [...REVIEW_PASSES],
   }));
@@ -74,7 +74,7 @@ Deno.test("should_mark_progress_goal_achieved_at_full_coverage", () => {
   assertEquals(progress.nextPass, null);
 });
 
-Deno.test("should_accumulate_pass_risk_weighted_by_severity_and_confidence", () => {
+test("should_accumulate_pass_risk_weighted_by_severity_and_confidence", () => {
   const risk = accumulatePassRisk([
     { passName: "Runtime", severity: "blocker", confidence: 1 },
     { passName: "Runtime", severity: "low", confidence: 0.5 },
@@ -86,13 +86,13 @@ Deno.test("should_accumulate_pass_risk_weighted_by_severity_and_confidence", () 
   assertEquals(Object.prototype.hasOwnProperty.call(risk, "Unknown"), false);
 });
 
-Deno.test("should_explain_pass_selection_with_risk_signal", () => {
+test("should_explain_pass_selection_with_risk_signal", () => {
   const reason = explainPassSelection("Runtime", stateOf({ passRisk: { Runtime: 0.9 } }));
   assertEquals(reason.includes("Runtime"), true);
   assertEquals(reason.includes("residual risk"), true);
 });
 
-Deno.test("should_normalize_suffixed_and_unknown_phases", () => {
+test("should_normalize_suffixed_and_unknown_phases", () => {
   assertEquals(toReviewPhase("tcsrct:pass=Runtime"), "tcsrct");
   assertEquals(toReviewPhase("totally_made_up"), "idle");
   assertEquals(toReviewPhase(undefined), "idle");

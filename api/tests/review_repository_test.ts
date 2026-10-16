@@ -6,21 +6,21 @@
 // write and parses on read — exactly as the real celer-backed store does — so
 // these exercise the true read-through / write-through / eviction / degradation
 // behavior without needing the native library. Runs everywhere.
-import { assert, assertEquals, assertRejects } from "jsr:@std/assert";
+import { test, assert, assertEquals, assertRejects } from "./support/harness.ts";
 import { CelerReviewRepository } from "../src/repositories/review_repository.ts";
-import { ReviewArtifactStore } from "../src/services/storage/celer_review_store.ts";
+import { type ReviewArtifactStore } from "../src/services/storage/celer_review_store.ts";
 import {
-  DiffFile,
-  GitHubIdentity,
-  GitHubRepository,
-  GraphSnapshot,
-  PullRequest,
-  RetvCdpRunRecord,
-  ReviewAgentRunRecord,
-  ReviewChecklistItem,
-  ReviewFinding,
-  ReviewPacket,
-  ReviewRun,
+  type DiffFile,
+  type GitHubIdentity,
+  type GitHubRepository,
+  type GraphSnapshot,
+  type PullRequest,
+  type RetvCdpRunRecord,
+  type ReviewAgentRunRecord,
+  type ReviewChecklistItem,
+  type ReviewFinding,
+  type ReviewPacket,
+  type ReviewRun,
 } from "../src/domain/entities.ts";
 
 // --- a faithful in-memory ReviewArtifactStore (serializes like celer) --------
@@ -297,7 +297,7 @@ const IDENTITY: GitHubIdentity = { id: "u1", login: "octocat", connected: true }
 
 // --- in-memory mode (no durable store) --------------------------------------
 
-Deno.test("in-memory: review run create / get / update round-trips", async () => {
+test("in-memory: review run create / get / update round-trips", async () => {
   const repo = new CelerReviewRepository();
   await repo.createReviewRun(makeRun("run-1"));
   assertEquals((await repo.getReviewRun("run-1")).status, "reviewing");
@@ -309,7 +309,7 @@ Deno.test("in-memory: review run create / get / update round-trips", async () =>
   assertEquals((await repo.getReviewRun("run-1")).findingCount, 2);
 });
 
-Deno.test("in-memory: missing run / packet / graph / diff reject as not-found", async () => {
+test("in-memory: missing run / packet / graph / diff reject as not-found", async () => {
   const repo = new CelerReviewRepository();
   await assertRejects(() => repo.getReviewRun("nope"));
   await assertRejects(() => repo.getReviewPacket("nope"));
@@ -318,7 +318,7 @@ Deno.test("in-memory: missing run / packet / graph / diff reject as not-found", 
   await assertRejects(() => repo.listReviewEvents("nope"));
 });
 
-Deno.test("in-memory: events append in order; empty for a run with none", async () => {
+test("in-memory: events append in order; empty for a run with none", async () => {
   const repo = new CelerReviewRepository();
   await repo.createReviewRun(makeRun("run-1"));
   assertEquals(await repo.listReviewEvents("run-1"), []);
@@ -327,7 +327,7 @@ Deno.test("in-memory: events append in order; empty for a run with none", async 
   assertEquals(await repo.listReviewEvents("run-1"), ["phase:observe", "phase:plan"]);
 });
 
-Deno.test("in-memory: findings / checklist save+get; empty defaults to []", async () => {
+test("in-memory: findings / checklist save+get; empty defaults to []", async () => {
   const repo = new CelerReviewRepository();
   assertEquals(await repo.getFindings("run-1"), []);
   assertEquals(await repo.getChecklist("run-1"), []);
@@ -343,7 +343,7 @@ Deno.test("in-memory: findings / checklist save+get; empty defaults to []", asyn
   assertEquals((await repo.getChecklist("run-1")).length, 1);
 });
 
-Deno.test("returned findings are a defensive copy — mutating them cannot corrupt the cache", async () => {
+test("returned findings are a defensive copy — mutating them cannot corrupt the cache", async () => {
   const repo = new CelerReviewRepository();
   const source = [makeFinding("f1", "run-1")];
   await repo.saveFindings("run-1", source);
@@ -354,7 +354,7 @@ Deno.test("returned findings are a defensive copy — mutating them cannot corru
   assertEquals((await repo.getFindings("run-1")).length, 1);
 });
 
-Deno.test("in-memory: graph save/get and findGraphByPullRequest", async () => {
+test("in-memory: graph save/get and findGraphByPullRequest", async () => {
   const repo = new CelerReviewRepository();
   await repo.saveGraphSnapshot("dag-1", makeGraph("dag-1", "pr-9"));
   assertEquals((await repo.getGraphSnapshot("dag-1")).dag.id, "dag-1");
@@ -362,14 +362,14 @@ Deno.test("in-memory: graph save/get and findGraphByPullRequest", async () => {
   assertEquals(await repo.findGraphByPullRequest("pr-absent"), null);
 });
 
-Deno.test("in-memory: diff save/get keyed by repo:pr", async () => {
+test("in-memory: diff save/get keyed by repo:pr", async () => {
   const repo = new CelerReviewRepository();
   await repo.savePullRequestDiff("repo-1", "pr-1", [makeDiff("a.ts"), makeDiff("b.ts")]);
   assertEquals((await repo.getPullRequestDiff("repo-1", "pr-1")).length, 2);
   await assertRejects(() => repo.getPullRequestDiff("repo-1", "pr-other"));
 });
 
-Deno.test("in-memory: retv + review-agent runs list newest-first", async () => {
+test("in-memory: retv + review-agent runs list newest-first", async () => {
   const repo = new CelerReviewRepository();
   await repo.saveRetvRun(makeRetvRun("older", "2026-01-01T00:00:00.000Z", true));
   await repo.saveRetvRun(makeRetvRun("newer", "2026-02-01T00:00:00.000Z", false));
@@ -382,7 +382,7 @@ Deno.test("in-memory: retv + review-agent runs list newest-first", async () => {
   assertEquals((await repo.listReviewAgentRuns()).map((r) => r.runId), ["a-newer", "a-older"]);
 });
 
-Deno.test("in-memory: identity, token, runtime LLM config are stored and returned", async () => {
+test("in-memory: identity, token, runtime LLM config are stored and returned", async () => {
   const repo = new CelerReviewRepository();
   assertEquals(await repo.getIdentity(), null);
   await repo.setIdentity(IDENTITY);
@@ -398,7 +398,7 @@ Deno.test("in-memory: identity, token, runtime LLM config are stored and returne
   assertEquals((await repo.getRuntimeLlmConfig())?.providerKind, "claude_code");
 });
 
-Deno.test("in-memory: repo/PR catalog list, filter, upsert, and lookup", async () => {
+test("in-memory: repo/PR catalog list, filter, upsert, and lookup", async () => {
   const repo = new CelerReviewRepository();
   await repo.replaceRepositories([makeRepo("r1"), makeRepo("r2")]);
   assertEquals((await repo.listRepositories()).length, 2);
@@ -417,7 +417,7 @@ Deno.test("in-memory: repo/PR catalog list, filter, upsert, and lookup", async (
 
 // --- durable mode (fake celer store attached) -------------------------------
 
-Deno.test("durable: writes persist through to the store (write-through)", async () => {
+test("durable: writes persist through to the store (write-through)", async () => {
   const store = new FakeStore();
   const repo = new CelerReviewRepository();
   repo.attachDurableStore(store);
@@ -427,7 +427,7 @@ Deno.test("durable: writes persist through to the store (write-through)", async 
   assert(store.findings.has("run-1"));
 });
 
-Deno.test("durable: a cold repository faults records back in from the store", async () => {
+test("durable: a cold repository faults records back in from the store", async () => {
   const store = new FakeStore();
   const writer = new CelerReviewRepository();
   writer.attachDurableStore(store);
@@ -448,7 +448,7 @@ Deno.test("durable: a cold repository faults records back in from the store", as
   assertEquals((await reader.getPullRequestDiff("repo-1", "pr-1")).length, 1);
 });
 
-Deno.test("durable: a cache hit shields the store from repeat reads", async () => {
+test("durable: a cache hit shields the store from repeat reads", async () => {
   const store = new FakeStore();
   await store.saveRun(makeRun("run-1"));
   const repo = new CelerReviewRepository();
@@ -461,7 +461,7 @@ Deno.test("durable: a cache hit shields the store from repeat reads", async () =
   assertEquals(store.reads, afterFirst); // cache served the repeats
 });
 
-Deno.test("durable: LRU eviction is transparent — an evicted run reloads from the store", async () => {
+test("durable: LRU eviction is transparent — an evicted run reloads from the store", async () => {
   const store = new FakeStore();
   const repo = new CelerReviewRepository({ runs: 2 }); // tiny cap for the test
   repo.attachDurableStore(store);
@@ -474,7 +474,7 @@ Deno.test("durable: LRU eviction is transparent — an evicted run reloads from 
   assertEquals((await repo.getReviewRun("run-3")).findingCount, 3);
 });
 
-Deno.test("durable: lists and finds scan the store, not the partial cache", async () => {
+test("durable: lists and finds scan the store, not the partial cache", async () => {
   const store = new FakeStore();
   const repo = new CelerReviewRepository({ retvRuns: 1, graphs: 1 });
   repo.attachDurableStore(store);
@@ -488,7 +488,7 @@ Deno.test("durable: lists and finds scan the store, not the partial cache", asyn
   assertEquals((await repo.findGraphByPullRequest("pr-a"))?.dag.id, "dag-a");
 });
 
-Deno.test("durable: serialization is faithful — traced and untraced retv runs round-trip", async () => {
+test("durable: serialization is faithful — traced and untraced retv runs round-trip", async () => {
   const store = new FakeStore();
   const writer = new CelerReviewRepository();
   writer.attachDurableStore(store);
@@ -503,7 +503,7 @@ Deno.test("durable: serialization is faithful — traced and untraced retv runs 
   assertEquals(light?.trace, undefined);
 });
 
-Deno.test("degradation: a silently-failed persistence keeps the session alive but is not durable", async () => {
+test("degradation: a silently-failed persistence keeps the session alive but is not durable", async () => {
   const store = new FakeStore();
   store.dropWrites = true; // simulate celer write failures swallowed by onError
   const repo = new CelerReviewRepository();
@@ -519,7 +519,7 @@ Deno.test("degradation: a silently-failed persistence keeps the session alive bu
   await assertRejects(() => cold.getReviewRun("run-1"));
 });
 
-Deno.test("secrets are never handed to the durable store", async () => {
+test("secrets are never handed to the durable store", async () => {
   const store = new FakeStore();
   const repo = new CelerReviewRepository();
   repo.attachDurableStore(store);
@@ -538,7 +538,7 @@ Deno.test("secrets are never handed to the durable store", async () => {
   assert(!serialized.includes("sk-secret"));
 });
 
-Deno.test("boot sweep finalizes runs stranded in 'cancelling' (#38)", async () => {
+test("boot sweep finalizes runs stranded in 'cancelling' (#38)", async () => {
   const store = new FakeStore();
   // A run whose stop was requested, then the process died mid-landing.
   await store.saveRun(

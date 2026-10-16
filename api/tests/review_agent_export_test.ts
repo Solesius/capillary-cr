@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { assert, assertEquals } from "jsr:@std/assert";
+import { test, assert, assertEquals } from "./support/harness.ts";
 import { CelerReviewRepository } from "../src/repositories/review_repository.ts";
 import { GitHubOakService } from "../src/services/github_service.ts";
 import { TcsrctReviewService } from "../src/services/tcsrct_review_service.ts";
 import { ReviewAgentService } from "../src/services/review_agent_service.ts";
-import { ReviewAgentRunRecord } from "../src/domain/entities.ts";
+import { type ReviewAgentRunRecord } from "../src/domain/entities.ts";
 
 function makeRecord(
   runId: string,
@@ -57,7 +57,7 @@ function makeService(repository: CelerReviewRepository): ReviewAgentService {
   return new ReviewAgentService(repository, github, tcsrct);
 }
 
-Deno.test("should_list_review_agent_runs_most_recent_first_and_omit_trace", async () => {
+test("should_list_review_agent_runs_most_recent_first_and_omit_trace", async () => {
   const repo = new CelerReviewRepository();
   await repo.saveReviewAgentRun(makeRecord("older", true, "2024-01-01T00:00:00.000Z"));
   await repo.saveReviewAgentRun(makeRecord("newer", false, "2024-02-01T00:00:00.000Z"));
@@ -74,7 +74,7 @@ Deno.test("should_list_review_agent_runs_most_recent_first_and_omit_trace", asyn
   assertEquals(await repo.getReviewAgentRun("missing"), null);
 });
 
-Deno.test("should_not_export_untraced_or_missing_review_runs", async () => {
+test("should_not_export_untraced_or_missing_review_runs", async () => {
   const repo = new CelerReviewRepository();
   await repo.saveReviewAgentRun(makeRecord("plain", false, "2024-01-01T00:00:00.000Z"));
   const service = makeService(repo);
@@ -83,7 +83,7 @@ Deno.test("should_not_export_untraced_or_missing_review_runs", async () => {
   assertEquals(await service.buildReviewExport("missing"), null);
 });
 
-Deno.test("should_export_traced_review_run_as_valid_zip_bundle", async () => {
+test("should_export_traced_review_run_as_valid_zip_bundle", async () => {
   const repo = new CelerReviewRepository();
   await repo.saveReviewAgentRun(makeRecord("traced", true, "2024-01-01T00:00:00.000Z"));
   const service = makeService(repo);

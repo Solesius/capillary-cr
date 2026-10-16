@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { assert, assertEquals } from "jsr:@std/assert";
+import { test, assert, assertEquals } from "./support/harness.ts";
 import { createZipArchive } from "../src/services/storage/zip_writer.ts";
 import { CelerReviewRepository } from "../src/repositories/review_repository.ts";
-import { RetvCdpRunRecord } from "../src/domain/entities.ts";
+import { type RetvCdpRunRecord } from "../src/domain/entities.ts";
 
 function makeRecord(runId: string, traceEnabled: boolean, finishedAt: string): RetvCdpRunRecord {
   return {
@@ -29,7 +29,7 @@ function makeRecord(runId: string, traceEnabled: boolean, finishedAt: string): R
   };
 }
 
-Deno.test("should_build_a_valid_zip_archive_with_store_entries", () => {
+test("should_build_a_valid_zip_archive_with_store_entries", () => {
   const encoder = new TextEncoder();
   const bytes = createZipArchive([
     { name: "report.md", data: encoder.encode("# hello") },
@@ -54,7 +54,7 @@ Deno.test("should_build_a_valid_zip_archive_with_store_entries", () => {
   assert(text.includes("# hello"));
 });
 
-Deno.test("should_list_retv_runs_most_recent_first_and_omit_trace", async () => {
+test("should_list_retv_runs_most_recent_first_and_omit_trace", async () => {
   const repo = new CelerReviewRepository();
   await repo.saveRetvRun(makeRecord("older", true, "2024-01-01T00:00:00.000Z"));
   await repo.saveRetvRun(makeRecord("newer", false, "2024-02-01T00:00:00.000Z"));

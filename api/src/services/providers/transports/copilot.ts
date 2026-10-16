@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { errorResult, ProviderOps } from "../provider_core.ts";
+import { errorResult, type ProviderOps } from "../provider_core.ts";
 import {
   authMissing,
   buildGithubModelsBody,
@@ -8,7 +8,7 @@ import {
   CONTENT_TYPE_JSON_HEADER,
   createBufferedProviderOps,
   endpoint,
-  FetchLike,
+  type FetchLike,
   GITHUB_ACCEPT_HEADER,
   GITHUB_API_VERSION_HEADER,
   GITHUB_MODELS_INFERENCE_CHAT_COMPLETIONS_PATH,

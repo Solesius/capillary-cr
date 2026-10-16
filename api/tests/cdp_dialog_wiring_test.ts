@@ -6,7 +6,8 @@
 // real CdpConnection, setSessionDialogPolicy, onSessionDialog fan-out, and
 // the code-enforced single-responder contract on onSessionCdpEvent. Runs
 // against a fake CDP endpoint (HTTP /json/* + WebSocket) — no browser.
-import { assert, assertEquals, assertThrows } from "jsr:@std/assert";
+import { test, assert, assertEquals, assertThrows } from "./support/harness.ts";
+import { serve, upgradeWebSocket, UpgradedWebSocket } from "../src/lib/serve.ts";
 import { AppError } from "../src/domain/errors.ts";
 import { CdpDriverService } from "../src/services/cdp_driver_service.ts";
 
@@ -22,11 +23,11 @@ interface FakeCdp {
   close(): Promise<void>;
 }
 
-function startFakeCdp(): FakeCdp {
+async function startFakeCdp(): Promise<FakeCdp> {
   const commands: FakeCdpCommand[] = [];
-  let socket: WebSocket | null = null;
+  let socket: UpgradedWebSocket | null = null;
 
-  const server = Deno.serve({ port: 0, hostname: "127.0.0.1", onListen: () => {} }, (req) => {
+  const server = serve({ port: 0, hostname: "127.0.0.1" }, (req) => {
     const url = new URL(req.url);
     if (url.pathname === "/json/version") {
       return Response.json({ Browser: "FakeChrome/1.0" });
@@ -42,7 +43,7 @@ function startFakeCdp(): FakeCdp {
       return new Response("Target is closing");
     }
     if (url.pathname.startsWith("/devtools/")) {
-      const upgraded = Deno.upgradeWebSocket(req);
+      const upgraded = upgradeWebSocket(req);
       upgraded.socket.onmessage = (event) => {
         const message = JSON.parse(String(event.data));
         commands.push({ method: message.method, params: message.params ?? {} });
@@ -54,11 +55,12 @@ function startFakeCdp(): FakeCdp {
     return new Response("not found", { status: 404 });
   });
 
+  await server.listening;
   return {
     baseUrl: `http://127.0.0.1:${server.addr.port}`,
     commands,
     pushEvent(method, params) {
-      if (!socket || socket.readyState !== WebSocket.OPEN) {
+      if (!socket || socket.readyState !== UpgradedWebSocket.OPEN) {
         throw new Error("fake cdp: no live socket to push events on");
       }
       socket.send(JSON.stringify({ method, params }));
@@ -88,12 +90,12 @@ function dialogAnswers(fake: FakeCdp): FakeCdpCommand[] {
   return fake.commands.filter((command) => command.method === "Page.handleJavaScriptDialog");
 }
 
-Deno.test({
+test({
   name: "session wiring answers a confirm per policy and notifies listeners",
   sanitizeResources: false,
   sanitizeOps: false,
   fn: async () => {
-    const fake = startFakeCdp();
+    const fake = await startFakeCdp();
     const driver = new CdpDriverService({ baseUrl: fake.baseUrl });
     try {
       const session = await driver.createSession("about:blank");
@@ -144,12 +146,12 @@ Deno.test({
   },
 });
 
-Deno.test({
+test({
   name: "unsubscribed dialog listeners stop receiving; the driver still answers",
   sanitizeResources: false,
   sanitizeOps: false,
   fn: async () => {
-    const fake = startFakeCdp();
+    const fake = await startFakeCdp();
     const driver = new CdpDriverService({ baseUrl: fake.baseUrl });
     try {
       const session = await driver.createSession("about:blank");
@@ -178,12 +180,12 @@ Deno.test({
   },
 });
 
-Deno.test({
+test({
   name: "onSessionCdpEvent delivers generic events but reserves dialog events",
   sanitizeResources: false,
   sanitizeOps: false,
   fn: async () => {
-    const fake = startFakeCdp();
+    const fake = await startFakeCdp();
     const driver = new CdpDriverService({ baseUrl: fake.baseUrl });
     try {
       const session = await driver.createSession("about:blank");

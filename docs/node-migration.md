@@ -1,27 +1,29 @@
-# Capillary v2 — Node runtime
+# Deno → Node migration
 
-v2 is the Capillary API ported from Deno to **Node 24 + Express 5**. The
-product does not change: same routes and response shapes, same on-disk data,
-and the same container contract. The web app is shared with v1 (`../web`).
+The Capillary API moved from Deno 2 + Oak to **Node 24 + Express 5** after
+1.2.1. The product does not change: same routes and response shapes, same
+on-disk data, and the same container contract. Upgrading an existing
+deployment is `docker compose pull && docker compose up -d`.
 
 ## What changed
 
-| Concern | v1 (Deno) | v2 (Node) |
+| Concern | Deno (≤ 1.2.1) | Node |
 | --- | --- | --- |
 | Runtime | Deno 2, TypeScript | Node 24, TypeScript run directly (type stripping) |
-| HTTP | Oak 17 | Express 5: a route table of pure handlers (`src/http/`) |
+| HTTP | Oak 17 | Express 5: a route table of pure handlers (`api/src/http/`) |
 | Native store | `Deno.dlopen` | koffi 3 (`.async` calls on worker threads) |
 | FFI shim | `native/celer_ffi.cpp` | **unchanged**, same `build.sh`, same celer-mem ref |
 | Processes | `Deno.Command` | `src/lib/proc.ts` (same shape, same sync not-found) |
 | Bridges/test servers | `Deno.serve` + `upgradeWebSocket` | `src/lib/serve.ts` on `node:http` + `ws` |
 | Embeddings | transformers 2.17.2 via CDN URL import | transformers 2.17.2 from npm (no runtime CDN) |
 | Tests | `deno test` | `node --test` via `tests/support/harness.ts` |
+| Tasks | `deno task …` | `npm run …` (same names) |
 | Permissions | `--allow-*` sandbox | none (Node's `--permission` is a possible follow-up) |
 
 ### HTTP layer
 
 ```
-src/http/
+api/src/http/
   app.ts      createApp(config): CORS/CSRF, healthz, login gate, API, SPA, errors
   router.ts   apiRoutes — the route table; every handler is (req) => Reply
   routing.ts  Route type, get/post/patch/del, per-route body modes, mount(), 405
@@ -39,26 +41,27 @@ malformed → 400), `lenient` (malformed → `{}`), `raw` (signed webhooks).
 
 ## Container compatibility (1:1)
 
-The image is a drop-in for `ghcr.io/solesius/capillary-cr`:
+The image is a drop-in for the Deno-era `ghcr.io/solesius/capillary-cr`:
 
 - same base distro (Debian 13) → same RocksDB 9.10 / SQLite ABI
 - same port `8080`, env surface, `/var/lib/capillary` and
   `/app/api/.data/review_captures` volume paths
-- same uid/gid **1993**, so volumes created by v1 stay writable
+- same uid/gid **1993**, so volumes created by Deno images stay writable
 - tini as PID 1 (also at `/tini`), reaping chromium from RetV runs
 - `DENO_V8_FLAGS` still honored (the entrypoint passes the flags to node);
   `NODE_OPTIONS` works as well
 - healthcheck semantics unchanged (`GET /healthz`)
-- `docker-compose.yml` here keeps the project name `capillary`, so it reuses
-  the existing `capillary_capillary-data` / `capillary_capillary-captures`
-  volumes
+- `docker-compose.yml` keeps the project name `capillary`, so it reuses the
+  existing `capillary_capillary-data` / `capillary_capillary-captures` volumes
+
+Rollback is safe: a 1.2.1 image reads data written by the Node image.
 
 ### Behavior changes (deliberate)
 
-Status codes, JSON bodies, SSE events, cookies, CORS and storage match v1.
+Status codes, JSON bodies, SSE events, cookies, CORS and storage match 1.2.1.
 These edges were tightened, each checked by `compat/parity.py`:
 
-| Case | v1 | v2 |
+| Case | Deno | Node |
 | --- | --- | --- |
 | Malformed JSON body | 500 `internal_server_error` | 400 `invalid_json` |
 | Empty body on a JSON route | 500 | treated as `{}` (normal validation applies) |
@@ -74,48 +77,28 @@ Cache-Control, cookie attribute order, hop-by-hop headers) are not tracked.
 
 ## Verification
 
-`v2/compat/run.sh` (or `make compat`) checks both directions:
+`compat/run.sh [deno-image] [node-image]` (or `make compat V1=… V2=…`) checks
+both directions; it defaults to `ghcr.io/solesius/capillary-cr:1.2.1` against `:latest`.
 
 - **Behavior parity**: 149 scripted requests (login gate on and off) covering
   all 59 routes, SSE, static assets, ranges, CORS/CSRF, 405/Allow, cookies,
-  malformed/empty bodies and error responses, against a v1 image built from
-  the same commit. It fails on any difference not listed as intended above.
-- **Storage**: a copy of a real v1 data volume (35 review runs, 14 RetV runs)
-  read by v1 and by v2: byte-identical API snapshots; a v2 write read back by
-  v1 after rollback.
+  malformed/empty bodies and error responses. It fails on any difference not
+  listed as intended above.
+- **Storage**: a *copy* of a real data volume (35 review runs, 14 RetV runs)
+  read by both images: byte-identical API snapshots; a Node write read back
+  by the Deno image. The source volume is never written.
 
-Unit tests: 255 pass (13 of them cover the HTTP layer), 2 opt-in skips (`CAPILLARY_EMBEDDING_TESTS=1` runs the
-real MiniLM test; the codex test needs a codex binary). The celer FFI tests
-run against the real library rather than self-skipping.
+Unit tests: 255 pass (13 of them cover the HTTP layer), 2 opt-in skips
+(`CAPILLARY_EMBEDDING_TESTS=1` runs the real MiniLM test; the codex test needs
+a codex binary). The celer FFI tests run against the real library.
 
-## Running
+## Developing without Node 24 on the host
 
-```bash
-# from the repository root
-docker build -f v2/Dockerfile -t ghcr.io/solesius/capillary-cr:latest .
-docker compose -f v2/docker-compose.yml up -d
-
-# beside an existing v1 stack (own project, own volumes, other port)
-CAPILLARY_PORT=8090 docker compose -f v2/docker-compose.yml -p capillary-v2 up -d
-```
-
-Local development (Node 24, plus g++, librocksdb-dev, libsqlite3-dev for the
-shim):
+`api/dev.Dockerfile` is a Node 24 + native-toolchain image:
 
 ```bash
-cd v2/api
-npm ci
-./native/build.sh       # libceler_ffi.so; optional, storage falls back to memory
-npm test
-npm run dev             # http://localhost:8080
+docker build -f api/dev.Dockerfile -t capillary-dev .
+docker run --rm -it -u "$(id -u):$(id -g)" -e HOME=/tmp \
+  -v "$PWD/api:/work/api" -w /work/api capillary-dev \
+  bash -c "npm ci && ./native/build.sh && npm test"
 ```
-
-Scripts: `npm run mcp`, `npm run review -- --repo o/n --pr 1`,
-`npm run cdp:retv -- …`, `npm run bench`; host bridges:
-`node scripts/codex_ws_bridge.ts`, `node scripts/claude_ws_bridge.ts`.
-
-## Cutover
-
-Publishing still builds the v1 `Dockerfile`. To ship v2, point
-`.github/workflows/publish-image.yml` at `file: v2/Dockerfile` and tag a
-release; existing deployments pick it up with `docker compose pull && up -d`.

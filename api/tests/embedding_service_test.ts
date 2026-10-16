@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { assertEquals } from "jsr:@std/assert";
+import { test, assertEquals } from "./support/harness.ts";
 import {
   cosineSimilarity,
-  FileEmbeddingProvider,
-  FileForEmbedding,
+  type FileEmbeddingProvider,
+  type FileForEmbedding,
   MiniLmEmbeddingService,
   semanticNeighbors,
 } from "../src/services/embedding_service.ts";
@@ -25,7 +25,7 @@ function fakeProvider(assignments: Record<string, number[]>): FileEmbeddingProvi
   };
 }
 
-Deno.test("should_rank_neighbors_by_cosine_with_floor_and_cap", async () => {
+test("should_rank_neighbors_by_cosine_with_floor_and_cap", async () => {
   const provider = fakeProvider({
     "auth_service.ts": [1, 0.9, 0],
     "auth_middleware.ts": [0.9, 1, 0],
@@ -49,12 +49,12 @@ Deno.test("should_rank_neighbors_by_cosine_with_floor_and_cap", async () => {
   assertEquals(neighbors.get("empty.ts")!.length, 0);
 });
 
-Deno.test("should_compute_unit_cosine_for_identical_vectors", () => {
+test("should_compute_unit_cosine_for_identical_vectors", () => {
   const v = Float32Array.from([0.6, 0.8]);
   assertEquals(Math.abs(cosineSimilarity(v, v) - 1) < 1e-6, true);
 });
 
-Deno.test("should_add_semantic_edges_between_meaning_neighbors_only", async () => {
+test("should_add_semantic_edges_between_meaning_neighbors_only", async () => {
   const { CelerReviewRepository } = await import("../src/repositories/review_repository.ts");
   const { DiffDagService } = await import("../src/services/diff_dag_service.ts");
   const { GraphMathService } = await import("../src/services/graph_math_service.ts");
@@ -131,10 +131,10 @@ Deno.test("should_add_semantic_edges_between_meaning_neighbors_only", async () =
 
 // Real-model integration test: downloads the quantized MiniLM on first run
 // (~30MB, cached afterwards), so it is opt-in. Run with:
-//   CAPILLARY_EMBEDDING_TESTS=1 deno test --allow-all tests/embedding_service_test.ts
-Deno.test({
+//   CAPILLARY_EMBEDDING_TESTS=1 node --test tests/embedding_service_test.ts
+test({
   name: "should_embed_real_files_with_minilm_and_cluster_by_meaning",
-  ignore: Deno.env.get("CAPILLARY_EMBEDDING_TESTS") !== "1",
+  ignore: process.env["CAPILLARY_EMBEDDING_TESTS"] !== "1",
   sanitizeResources: false,
   sanitizeOps: false,
   fn: async () => {

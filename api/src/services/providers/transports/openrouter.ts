@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { ProviderOps } from "../provider_core.ts";
+import { type ProviderOps } from "../provider_core.ts";
 import {
   authMissing,
   CONTENT_TYPE_JSON_HEADER,
   createBufferedProviderOps,
-  FetchLike,
+  type FetchLike,
   invalidRequest,
   sendOpenAiCompatibleRequest,
 } from "./common.ts";

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { assert, assertEquals } from "jsr:@std/assert";
+import { test, assert, assertEquals } from "./support/harness.ts";
 import {
   buildCheckChangesPrompt,
   buildCheckChangesReport,
@@ -8,7 +8,7 @@ import {
   guardFollowUpVerdict,
   parseCheckChangesReply,
 } from "../src/services/check_changes.ts";
-import { ReviewFinding } from "../src/domain/entities.ts";
+import { type ReviewFinding } from "../src/domain/entities.ts";
 
 function finding(id: string, title: string): ReviewFinding {
   return {
@@ -25,7 +25,7 @@ function finding(id: string, title: string): ReviewFinding {
   };
 }
 
-Deno.test("prompt carries prior findings and clamps the delta", () => {
+test("prompt carries prior findings and clamps the delta", () => {
   const prompt = buildCheckChangesPrompt(
     [finding("f1", "bad deref")],
     [
@@ -39,7 +39,7 @@ Deno.test("prompt carries prior findings and clamps the delta", () => {
   assert(prompt.length < 80_000);
 });
 
-Deno.test("parse: unknown ids drop, skipped priors come back unverifiable", () => {
+test("parse: unknown ids drop, skipped priors come back unverifiable", () => {
   const priors = [finding("f1", "one"), finding("f2", "two")];
   const parsed = parseCheckChangesReply({
     resolutions: [
@@ -67,7 +67,7 @@ Deno.test("parse: unknown ids drop, skipped priors come back unverifiable", () =
   assertEquals(parsed.newFindings.length, 1);
 });
 
-Deno.test("verdict guard: approve cannot coexist with unresolved or new findings", () => {
+test("verdict guard: approve cannot coexist with unresolved or new findings", () => {
   const base = {
     resolutions: [{ findingId: "f1", title: "t", status: "fixed" as const, evidence: "" }],
     newFindings: [],
@@ -99,7 +99,7 @@ Deno.test("verdict guard: approve cannot coexist with unresolved or new findings
   );
 });
 
-Deno.test("report renders the resolution table and new findings", () => {
+test("report renders the resolution table and new findings", () => {
   const report = buildCheckChangesReport({
     priorRunId: "run-prior",
     baseSha: "aaaaaaaaaaaa",
@@ -132,7 +132,7 @@ Deno.test("report renders the resolution table and new findings", () => {
   assert(report.includes("aaaaaaa…bbbbbbb"));
 });
 
-Deno.test("still-present priors carry into the follow-up with the new runId", () => {
+test("still-present priors carry into the follow-up with the new runId", () => {
   const priors = [finding("f1", "fixed one"), finding("f2", "lingering")];
   const { findings } = carryStillPresentFindings(priors, [
     { findingId: "f1", title: "fixed one", status: "fixed", evidence: "" },

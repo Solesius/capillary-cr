@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { assertEquals } from "jsr:@std/assert";
+import { test, assertEquals } from "./support/harness.ts";
 import { ReviewSessionHub } from "../src/services/review_session_hub.ts";
-import { ReviewRunEvent } from "../src/domain/review_phase.ts";
+import { type ReviewRunEvent } from "../src/domain/review_phase.ts";
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void;
@@ -35,7 +35,7 @@ const doneEvent = (runId: string): ReviewRunEvent => ({
   },
 });
 
-Deno.test("should_replay_history_then_tail_live_events_for_late_attachers", async () => {
+test("should_replay_history_then_tail_live_events_for_late_attachers", async () => {
   const gate = deferred();
   let emit!: (event: ReviewRunEvent) => void;
 
@@ -74,7 +74,7 @@ Deno.test("should_replay_history_then_tail_live_events_for_late_attachers", asyn
   assertEquals(replay, ["run_start", "phase", "phase", "log", "done"]);
 });
 
-Deno.test("should_run_multiple_concurrent_sessions_independently", async () => {
+test("should_run_multiple_concurrent_sessions_independently", async () => {
   const gates = new Map<string, { promise: Promise<void>; resolve: () => void }>();
   const emitters = new Map<string, (event: ReviewRunEvent) => void>();
   let counter = 0;
@@ -114,7 +114,7 @@ Deno.test("should_run_multiple_concurrent_sessions_independently", async () => {
   await gates.get(second.runId)!.promise;
 });
 
-Deno.test("should_return_null_when_attaching_to_unknown_session", () => {
+test("should_return_null_when_attaching_to_unknown_session", () => {
   const hub = new ReviewSessionHub(() => Promise.resolve());
   assertEquals(hub.attach("nope", () => {}), null);
   assertEquals(hub.has("nope"), false);

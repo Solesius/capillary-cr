@@ -6,8 +6,8 @@
 // Run this on the machine where Claude Code is installed and logged in, then
 // point a containerized Capillary API at it:
 //
-//   deno run --allow-net --allow-run --allow-env --allow-read --allow-write api/scripts/claude_ws_bridge.ts
-//   (write/read: the bridge mints a hermetic scratch cwd per spawn)
+//   node api/scripts/claude_ws_bridge.ts
+//   (the bridge mints a hermetic scratch cwd per spawn)
 //   # container env: CLAUDE_CODE_URL=ws://host.docker.internal:7898
 //
 // Protocol (one JSON object per text frame, see createClaudeWsSpawner):
@@ -24,36 +24,43 @@
 //                       network can reach it; firewall accordingly)
 //   CLAUDE_CODE_BIN     path to the claude binary (default "claude")
 
-const port = Number(Deno.env.get("CLAUDE_BRIDGE_PORT") || 7898);
+
+import { mkdtempSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Command, type ChildProcess } from "../src/lib/proc.ts";
+import { serve, upgradeWebSocket, type UpgradedWebSocket } from "../src/lib/serve.ts";
+
+const port = Number(process.env["CLAUDE_BRIDGE_PORT"] || 7898);
 
 // One empty scratch directory per bridge process — see spawn comment.
 let scratchDir: string | null = null;
 function scratchCwd(): string {
   if (!scratchDir) {
-    scratchDir = Deno.makeTempDirSync({ prefix: "capillary_claude_hermetic_" });
+    scratchDir = mkdtempSync(join(tmpdir(), "capillary_claude_hermetic_"));
   }
   return scratchDir;
 }
-const hostname = Deno.env.get("CLAUDE_BRIDGE_HOST") || "0.0.0.0";
+const hostname = process.env["CLAUDE_BRIDGE_HOST"] || "0.0.0.0";
 
-// Deno.Command does not search PATH for a bare program name when the child
-// env is replaced (clearEnv), so resolve an absolute path up front — same
-// logic as the in-process transport's resolveClaudeBin().
+// The child env is replaced (clearEnv), so resolve an absolute path up front
+// against the bridge's own PATH — same logic as the in-process transport's
+// resolveClaudeBin().
 function isExecutableFile(path: string): boolean {
   try {
-    return Deno.statSync(path).isFile;
+    return statSync(path).isFile();
   } catch {
     return false;
   }
 }
 
 function resolveClaudeBin(): string {
-  const configured = Deno.env.get("CLAUDE_CODE_BIN")?.trim() || "";
+  const configured = process.env["CLAUDE_CODE_BIN"]?.trim() || "";
   if (configured) {
     return configured;
   }
-  const home = Deno.env.get("HOME") || "";
-  const searchDirs = (Deno.env.get("PATH") || "").split(":");
+  const home = process.env["HOME"] || "";
+  const searchDirs = (process.env["PATH"] || "").split(":");
   if (home) {
     searchDirs.push(
       `${home}/.local/bin`,
@@ -125,7 +132,7 @@ function log(...parts: unknown[]): void {
   console.log(`[claude-ws-bridge ${new Date().toISOString()}]`, ...parts);
 }
 
-function sendEnvelope(socket: WebSocket, envelope: Record<string, unknown>): void {
+function sendEnvelope(socket: UpgradedWebSocket, envelope: Record<string, unknown>): void {
   if (socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(envelope));
   }
@@ -133,7 +140,7 @@ function sendEnvelope(socket: WebSocket, envelope: Record<string, unknown>): voi
 
 async function pipeStream(
   stream: ReadableStream<Uint8Array>,
-  socket: WebSocket,
+  socket: UpgradedWebSocket,
   name: "stdout" | "stderr",
 ): Promise<void> {
   const decoder = new TextDecoder();
@@ -145,16 +152,16 @@ async function pipeStream(
   }
 }
 
-function runInvocation(socket: WebSocket, args: string[], stdin: string): void {
+function runInvocation(socket: UpgradedWebSocket, args: string[], stdin: string): void {
   // Same auth posture as the in-process transport: the CLI must use its own
   // subscription OAuth login, never an ambient API key.
-  const env = Deno.env.toObject();
+  const env = ({ ...process.env } as Record<string, string>);
   delete env.ANTHROPIC_API_KEY;
   delete env.ANTHROPIC_AUTH_TOKEN;
 
-  let child: Deno.ChildProcess;
+  let child: ChildProcess;
   try {
-    child = new Deno.Command(claudeBin, {
+    child = new Command(claudeBin, {
       args,
       // Hermetic cwd: the bridge often runs from some repo checkout, and an
       // agentic CLI grounds itself in whatever directory it lands in — when
@@ -203,7 +210,7 @@ function runInvocation(socket: WebSocket, args: string[], stdin: string): void {
   });
 }
 
-function handleConnection(socket: WebSocket): void {
+function handleConnection(socket: UpgradedWebSocket): void {
   let started = false;
   socket.onmessage = (event) => {
     if (started || typeof event.data !== "string") {
@@ -232,11 +239,11 @@ function handleConnection(socket: WebSocket): void {
   };
 }
 
-Deno.serve({ port, hostname }, (request) => {
+serve({ port, hostname }, (request) => {
   if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
     return new Response("claude ws bridge — connect with a WebSocket client", { status: 426 });
   }
-  const { socket, response } = Deno.upgradeWebSocket(request);
+  const { socket, response } = upgradeWebSocket(request);
   socket.onopen = () => handleConnection(socket);
   return response;
 });

@@ -31,7 +31,7 @@ let durableStore: DurableReviewStore | null = null;
 // and the repository keeps only a bounded cache in front of it — memory stays
 // flat, boot is instant (no snapshot replay). Otherwise run purely in-memory
 // (graceful fallback).
-const storageDir = Deno.env.get("CAPILLARY_STORAGE_DIR");
+const storageDir = process.env["CAPILLARY_STORAGE_DIR"];
 if (storageDir) {
   // Persistence failures are swallowed to keep the request path alive, but we
   // record them so /healthz surfaces silent durability loss instead of it
@@ -75,7 +75,7 @@ const githubService = new GitHubOakService(repository);
 // and private repos that device flow against the built-in OAuth app cannot —
 // so a containerized deploy with CAPILLARY_GITHUB_TOKEN set just works, no
 // UI login step.
-if (Deno.env.get("CAPILLARY_GITHUB_TOKEN")?.trim() || Deno.env.get("GITHUB_TOKEN")?.trim()) {
+if (process.env["CAPILLARY_GITHUB_TOKEN"]?.trim() || process.env["GITHUB_TOKEN"]?.trim()) {
   try {
     const identity = await githubService.connectGithub("valid");
     console.log(`GitHub identity connected from environment token: ${identity.login}`);
@@ -107,20 +107,20 @@ const reviewSessionHub = new ReviewSessionHub((request, onEvent) =>
 // Team channel publishing: connections persist in the durable store when one
 // is attached (in-memory otherwise); env webhooks seed a default channel on
 // first boot. The publisher subscribes to the bus the agents emit on.
-const extraWebhookHosts = (Deno.env.get("CAPILLARY_WEBHOOK_HOST_ALLOWLIST") ?? "")
+const extraWebhookHosts = (process.env["CAPILLARY_WEBHOOK_HOST_ALLOWLIST"] ?? "")
   .split(",")
   .map((host) => host.trim())
   .filter((host) => host.length > 0);
 const teamConnections = new ConnectionStore(durableStore, {
-  defaultDetail: Deno.env.get("CAPILLARY_NOTIFY_DETAIL") === "findings" ? "findings" : "summary",
+  defaultDetail: process.env["CAPILLARY_NOTIFY_DETAIL"] === "findings" ? "findings" : "summary",
   extraWebhookHosts,
 });
 await teamConnections.init({
-  slackWebhookUrl: Deno.env.get("CAPILLARY_SLACK_WEBHOOK_URL") ?? undefined,
-  teamsWebhookUrl: Deno.env.get("CAPILLARY_TEAMS_WEBHOOK_URL") ?? undefined,
+  slackWebhookUrl: process.env["CAPILLARY_SLACK_WEBHOOK_URL"] ?? undefined,
+  teamsWebhookUrl: process.env["CAPILLARY_TEAMS_WEBHOOK_URL"] ?? undefined,
 });
 const channelPublisher = new ChannelPublisher(teamConnections, {
-  publicUrl: Deno.env.get("CAPILLARY_PUBLIC_URL") ?? undefined,
+  publicUrl: process.env["CAPILLARY_PUBLIC_URL"] ?? undefined,
   extraWebhookHosts,
 });
 channelPublisher.start(teamBus);
@@ -133,17 +133,17 @@ const teamMembers = new MemberSessionStore();
 // service identity for check runs and the PR-opened webhook.
 const githubApp = new GithubAppService(durableStore);
 await githubApp.init({
-  appId: Deno.env.get("GITHUB_APP_ID") ?? undefined,
-  privateKeyPem: Deno.env.get("GITHUB_APP_PRIVATE_KEY") ?? undefined,
-  webhookSecret: Deno.env.get("GITHUB_APP_WEBHOOK_SECRET") ?? undefined,
+  appId: process.env["GITHUB_APP_ID"] ?? undefined,
+  privateKeyPem: process.env["GITHUB_APP_PRIVATE_KEY"] ?? undefined,
+  webhookSecret: process.env["GITHUB_APP_WEBHOOK_SECRET"] ?? undefined,
 });
 if (githubApp.configured()) {
   console.log(`GitHub App configured (app id ${githubApp.status().appId})`);
 }
-const capPublicUrl = Deno.env.get("CAPILLARY_PUBLIC_URL") ?? undefined;
+const capPublicUrl = process.env["CAPILLARY_PUBLIC_URL"] ?? undefined;
 const checkPublisher = new CheckPublisher({
   app: githubApp,
-  enabled: Deno.env.get("CAPILLARY_CHECKS") !== "0",
+  enabled: process.env["CAPILLARY_CHECKS"] !== "0",
   deepLink: (runId) => runDeepLink(capPublicUrl, "review", runId),
   resolveTarget: async (repositoryId, pullRequestId) => {
     try {
@@ -163,10 +163,10 @@ checkPublisher.start(teamBus);
 
 // Jira (finding -> ticket): configured entirely from server env.
 const jiraService = new JiraService(jiraConfigFromEnv({
-  JIRA_BASE_URL: Deno.env.get("JIRA_BASE_URL") ?? undefined,
-  JIRA_EMAIL: Deno.env.get("JIRA_EMAIL") ?? undefined,
-  JIRA_API_TOKEN: Deno.env.get("JIRA_API_TOKEN") ?? undefined,
-  JIRA_PROJECT_KEY: Deno.env.get("JIRA_PROJECT_KEY") ?? undefined,
+  JIRA_BASE_URL: process.env["JIRA_BASE_URL"] ?? undefined,
+  JIRA_EMAIL: process.env["JIRA_EMAIL"] ?? undefined,
+  JIRA_API_TOKEN: process.env["JIRA_API_TOKEN"] ?? undefined,
+  JIRA_PROJECT_KEY: process.env["JIRA_PROJECT_KEY"] ?? undefined,
 }));
 
 export const deps = {
@@ -203,12 +203,12 @@ function registerDurableShutdown(store: DurableReviewStore): void {
     } catch (error) {
       console.warn("durable review storage close failed on shutdown:", error);
     } finally {
-      Deno.exit(0);
+      process.exit(0);
     }
   };
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     try {
-      Deno.addSignalListener(signal, () => void shutdown(signal));
+      process.once(signal, () => void shutdown(signal));
     } catch {
       // Signal listeners are unsupported on some platforms (e.g. Windows);
       // a graceful close is best-effort there and the WAL still recovers.

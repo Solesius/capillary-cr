@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { ReviewPacket, RiskSurface, TcsrctPass } from "../../domain/entities.ts";
+import { type ReviewPacket, type RiskSurface, type TcsrctPass } from "../../domain/entities.ts";
 
 export const RETV_PHASE_SEQUENCE = [
   "reason",

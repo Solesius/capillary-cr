@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { assert, assertEquals, assertRejects } from "jsr:@std/assert";
+import { test, assert, assertEquals, assertRejects } from "./support/harness.ts";
 import {
-  ChannelConnection,
+  type ChannelConnection,
   connectionMatches,
-  ConnectionPersistence,
+  type ConnectionPersistence,
   ConnectionStore,
   isAllowedWebhookUrl,
   maskWebhookUrl,
 } from "../src/services/team/connections.ts";
-import { retvRecordToEvent, TeamEvent } from "../src/services/team/event_bus.ts";
+import { retvRecordToEvent, type TeamEvent } from "../src/services/team/event_bus.ts";
 
 class FakePersistence implements ConnectionPersistence {
   saved = new Map<string, ChannelConnection>();
@@ -28,7 +28,7 @@ class FakePersistence implements ConnectionPersistence {
 
 const SLACK_URL = "https://hooks.slack.com/services/T000/B000/secret1234";
 
-Deno.test("ConnectionStore.create persists, defaults toggles, and masks the URL in views", async () => {
+test("ConnectionStore.create persists, defaults toggles, and masks the URL in views", async () => {
   const persistence = new FakePersistence();
   const store = new ConnectionStore(persistence);
   const view = await store.create({ app: "slack", label: "#code-reviews", webhookUrl: SLACK_URL });
@@ -44,7 +44,7 @@ Deno.test("ConnectionStore.create persists, defaults toggles, and masks the URL 
   assertEquals(persistence.saved.size, 1);
 });
 
-Deno.test("ConnectionStore.create rejects non-https and non-allowlisted webhook URLs", async () => {
+test("ConnectionStore.create rejects non-https and non-allowlisted webhook URLs", async () => {
   const store = new ConnectionStore(null);
   await assertRejects(() =>
     store.create({ app: "slack", label: "x", webhookUrl: "http://plain.example/hook" })
@@ -60,7 +60,7 @@ Deno.test("ConnectionStore.create rejects non-https and non-allowlisted webhook 
   );
 });
 
-Deno.test("isAllowedWebhookUrl enforces per-app hosts and env extension", () => {
+test("isAllowedWebhookUrl enforces per-app hosts and env extension", () => {
   assert(isAllowedWebhookUrl(SLACK_URL, "slack"));
   assert(!isAllowedWebhookUrl(SLACK_URL, "teams"));
   assert(
@@ -80,7 +80,7 @@ Deno.test("isAllowedWebhookUrl enforces per-app hosts and env extension", () => 
   );
 });
 
-Deno.test("ConnectionStore honors the extra webhook host allow-list", async () => {
+test("ConnectionStore honors the extra webhook host allow-list", async () => {
   const store = new ConnectionStore(null, { extraWebhookHosts: ["relay.corp.example"] });
   const created = await store.create({
     app: "slack",
@@ -90,7 +90,7 @@ Deno.test("ConnectionStore honors the extra webhook host allow-list", async () =
   assert(created.webhookUrlMasked.startsWith("https://relay.corp.example"));
 });
 
-Deno.test("ConnectionStore.init loads persisted rows and seeds env webhooks exactly once", async () => {
+test("ConnectionStore.init loads persisted rows and seeds env webhooks exactly once", async () => {
   const persistence = new FakePersistence();
   const first = new ConnectionStore(persistence);
   await first.init({ slackWebhookUrl: SLACK_URL });
@@ -103,7 +103,7 @@ Deno.test("ConnectionStore.init loads persisted rows and seeds env webhooks exac
   assertEquals(persistence.saved.size, 1);
 });
 
-Deno.test("ConnectionStore.update patches toggles and enabled; delete removes from persistence", async () => {
+test("ConnectionStore.update patches toggles and enabled; delete removes from persistence", async () => {
   const persistence = new FakePersistence();
   const store = new ConnectionStore(persistence);
   const created = await store.create({
@@ -127,7 +127,7 @@ Deno.test("ConnectionStore.update patches toggles and enabled; delete removes fr
   assertEquals(persistence.saved.size, 0);
 });
 
-Deno.test("connectionMatches routes by event toggle and respects enabled", () => {
+test("connectionMatches routes by event toggle and respects enabled", () => {
   const base: ChannelConnection = {
     id: "c1",
     app: "slack",
@@ -187,7 +187,7 @@ Deno.test("connectionMatches routes by event toggle and respects enabled", () =>
   assert(connectionMatches({ ...base, events: { ...base.events, retvCompleted: true } }, retv));
 });
 
-Deno.test("recordDelivery stamps lastPostedAt on success and lastError on failure", async () => {
+test("recordDelivery stamps lastPostedAt on success and lastError on failure", async () => {
   const store = new ConnectionStore(null);
   const created = await store.create({ app: "slack", label: "#x", webhookUrl: SLACK_URL });
 
@@ -199,7 +199,7 @@ Deno.test("recordDelivery stamps lastPostedAt on success and lastError on failur
   assert(store.list()[0].lastPostedAt);
 });
 
-Deno.test("maskWebhookUrl keeps only origin and tail", () => {
+test("maskWebhookUrl keeps only origin and tail", () => {
   const masked = maskWebhookUrl(SLACK_URL);
   assertEquals(masked, "https://hooks.slack.com/…1234");
   assertEquals(maskWebhookUrl("garbage-value"), "…alue");

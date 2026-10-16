@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { ReviewFinding } from "../domain/entities.ts";
+import { type ReviewFinding } from "../domain/entities.ts";
 import { AppError } from "../domain/errors.ts";
 import { toTcsrtcGate } from "../domain/review_phase.ts";
-import { ReviewRepository } from "../repositories/review_repository.ts";
+import { type ReviewRepository } from "../repositories/review_repository.ts";
 import {
   buildProviderFromKind,
   type ProviderKind,
@@ -75,10 +75,12 @@ function normalizeRuntimeProviderKind(raw: string): ProviderKind | "openai_compa
 export class LlmProviderService {
   readonly #defaultProvider;
 
+  private readonly repository: ReviewRepository;
   constructor(
-    private readonly repository: ReviewRepository,
+    repository: ReviewRepository,
     options: LlmProviderServiceOptions = {},
   ) {
+    this.repository = repository;
     const providerKind = options.kind || this.resolveProviderKindFromEnv();
     this.#defaultProvider = buildProviderFromKind(providerKind, {
       kind: providerKind,
@@ -231,7 +233,7 @@ export class LlmProviderService {
   }
 
   private resolveProviderKindFromEnv(): ProviderKind {
-    const raw = Deno.env.get("CAPILLARY_LLM_PROVIDER") || "github_copilot";
+    const raw = process.env["CAPILLARY_LLM_PROVIDER"] || "github_copilot";
     return normalizeProviderKind(raw) || "github_copilot";
   }
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { assert, assertEquals, assertRejects, assertThrows } from "jsr:@std/assert";
+import { test, assert, assertEquals, assertRejects, assertThrows } from "./support/harness.ts";
 import { CelerReviewRepository } from "../src/repositories/review_repository.ts";
 import { ArtifactService } from "../src/services/artifact_service.ts";
 import { BuildOrchestrationService } from "../src/services/build_orchestration_service.ts";
@@ -34,6 +34,7 @@ import type { CodexRpcChannel } from "../src/services/providers/transports/codex
 import { AgenticReviewService } from "../src/services/agentic_review_orchestrator_service.ts";
 import { resolveChromeExecutablePath } from "../src/services/cdp_driver_service.ts";
 import { TcsrctReviewService } from "../src/services/tcsrct_review_service.ts";
+import { Command } from "../src/lib/proc.ts";
 
 function createMockGitHubFetch(): typeof fetch {
   return (input: string | URL | Request): Promise<Response> => {
@@ -272,22 +273,22 @@ function createMockGitHubOAuthDeviceFetch(): typeof fetch {
   };
 }
 
-Deno.test("should_connect_github_when_oauth_state_is_valid", async () => {
+test("should_connect_github_when_oauth_state_is_valid", async () => {
   const { githubService } = buildFixture();
   const identity = await githubService.connectGithub("valid", "ghp_test_token");
   assertEquals(identity.connected, true);
 });
 
-Deno.test("should_start_device_oauth_when_secret_is_missing", async () => {
+test("should_start_device_oauth_when_secret_is_missing", async () => {
   const repository = new CelerReviewRepository();
   const githubService = new GitHubOakService(repository, createMockGitHubOAuthDeviceFetch());
 
-  const previousClientId = Deno.env.get("GITHUB_OAUTH_CLIENT_ID");
-  const previousClientSecret = Deno.env.get("GITHUB_OAUTH_CLIENT_SECRET");
+  const previousClientId = process.env["GITHUB_OAUTH_CLIENT_ID"];
+  const previousClientSecret = process.env["GITHUB_OAUTH_CLIENT_SECRET"];
 
   try {
-    Deno.env.set("GITHUB_OAUTH_CLIENT_ID", "test-client-id");
-    Deno.env.delete("GITHUB_OAUTH_CLIENT_SECRET");
+    process.env["GITHUB_OAUTH_CLIENT_ID"] = "test-client-id";
+    delete process.env["GITHUB_OAUTH_CLIENT_SECRET"];
 
     const start = await githubService.beginGithubOAuth(
       "http://localhost:8080",
@@ -301,29 +302,29 @@ Deno.test("should_start_device_oauth_when_secret_is_missing", async () => {
     assertEquals(start.userCode, "ABCD-EFGH");
   } finally {
     if (previousClientId === undefined) {
-      Deno.env.delete("GITHUB_OAUTH_CLIENT_ID");
+      delete process.env["GITHUB_OAUTH_CLIENT_ID"];
     } else {
-      Deno.env.set("GITHUB_OAUTH_CLIENT_ID", previousClientId);
+      process.env["GITHUB_OAUTH_CLIENT_ID"] = previousClientId;
     }
 
     if (previousClientSecret === undefined) {
-      Deno.env.delete("GITHUB_OAUTH_CLIENT_SECRET");
+      delete process.env["GITHUB_OAUTH_CLIENT_SECRET"];
     } else {
-      Deno.env.set("GITHUB_OAUTH_CLIENT_SECRET", previousClientSecret);
+      process.env["GITHUB_OAUTH_CLIENT_SECRET"] = previousClientSecret;
     }
   }
 });
 
-Deno.test("should_poll_device_oauth_session_until_connected", async () => {
+test("should_poll_device_oauth_session_until_connected", async () => {
   const repository = new CelerReviewRepository();
   const githubService = new GitHubOakService(repository, createMockGitHubOAuthDeviceFetch());
 
-  const previousClientId = Deno.env.get("GITHUB_OAUTH_CLIENT_ID");
-  const previousClientSecret = Deno.env.get("GITHUB_OAUTH_CLIENT_SECRET");
+  const previousClientId = process.env["GITHUB_OAUTH_CLIENT_ID"];
+  const previousClientSecret = process.env["GITHUB_OAUTH_CLIENT_SECRET"];
 
   try {
-    Deno.env.set("GITHUB_OAUTH_CLIENT_ID", "test-client-id");
-    Deno.env.delete("GITHUB_OAUTH_CLIENT_SECRET");
+    process.env["GITHUB_OAUTH_CLIENT_ID"] = "test-client-id";
+    delete process.env["GITHUB_OAUTH_CLIENT_SECRET"];
 
     const start = await githubService.beginGithubOAuth(
       "http://localhost:8080",
@@ -346,29 +347,29 @@ Deno.test("should_poll_device_oauth_session_until_connected", async () => {
     assertEquals(connected.identity.login, "Solesius");
   } finally {
     if (previousClientId === undefined) {
-      Deno.env.delete("GITHUB_OAUTH_CLIENT_ID");
+      delete process.env["GITHUB_OAUTH_CLIENT_ID"];
     } else {
-      Deno.env.set("GITHUB_OAUTH_CLIENT_ID", previousClientId);
+      process.env["GITHUB_OAUTH_CLIENT_ID"] = previousClientId;
     }
 
     if (previousClientSecret === undefined) {
-      Deno.env.delete("GITHUB_OAUTH_CLIENT_SECRET");
+      delete process.env["GITHUB_OAUTH_CLIENT_SECRET"];
     } else {
-      Deno.env.set("GITHUB_OAUTH_CLIENT_SECRET", previousClientSecret);
+      process.env["GITHUB_OAUTH_CLIENT_SECRET"] = previousClientSecret;
     }
   }
 });
 
-Deno.test("should_start_device_oauth_with_default_client_id_when_env_is_unset", async () => {
+test("should_start_device_oauth_with_default_client_id_when_env_is_unset", async () => {
   const repository = new CelerReviewRepository();
   const githubService = new GitHubOakService(repository, createMockGitHubOAuthDeviceFetch());
 
-  const previousClientId = Deno.env.get("GITHUB_OAUTH_CLIENT_ID");
-  const previousClientSecret = Deno.env.get("GITHUB_OAUTH_CLIENT_SECRET");
+  const previousClientId = process.env["GITHUB_OAUTH_CLIENT_ID"];
+  const previousClientSecret = process.env["GITHUB_OAUTH_CLIENT_SECRET"];
 
   try {
-    Deno.env.delete("GITHUB_OAUTH_CLIENT_ID");
-    Deno.env.delete("GITHUB_OAUTH_CLIENT_SECRET");
+    delete process.env["GITHUB_OAUTH_CLIENT_ID"];
+    delete process.env["GITHUB_OAUTH_CLIENT_SECRET"];
 
     const start = await githubService.beginGithubOAuth(
       "http://localhost:8080",
@@ -381,40 +382,40 @@ Deno.test("should_start_device_oauth_with_default_client_id_when_env_is_unset", 
     assertEquals(start.sessionId.length > 0, true);
   } finally {
     if (previousClientId === undefined) {
-      Deno.env.delete("GITHUB_OAUTH_CLIENT_ID");
+      delete process.env["GITHUB_OAUTH_CLIENT_ID"];
     } else {
-      Deno.env.set("GITHUB_OAUTH_CLIENT_ID", previousClientId);
+      process.env["GITHUB_OAUTH_CLIENT_ID"] = previousClientId;
     }
 
     if (previousClientSecret === undefined) {
-      Deno.env.delete("GITHUB_OAUTH_CLIENT_SECRET");
+      delete process.env["GITHUB_OAUTH_CLIENT_SECRET"];
     } else {
-      Deno.env.set("GITHUB_OAUTH_CLIENT_SECRET", previousClientSecret);
+      process.env["GITHUB_OAUTH_CLIENT_SECRET"] = previousClientSecret;
     }
   }
 });
 
-Deno.test("should_reject_github_connection_when_oauth_state_is_invalid", async () => {
+test("should_reject_github_connection_when_oauth_state_is_invalid", async () => {
   const { githubService } = buildFixture();
   await assertRejects(() => githubService.connectGithub("invalid"));
 });
 
-Deno.test("should_reject_github_connection_when_token_is_missing", async () => {
+test("should_reject_github_connection_when_token_is_missing", async () => {
   const { githubService } = buildFixture();
-  const previousToken = Deno.env.get("GITHUB_TOKEN");
+  const previousToken = process.env["GITHUB_TOKEN"];
   try {
-    Deno.env.delete("GITHUB_TOKEN");
+    delete process.env["GITHUB_TOKEN"];
     await assertRejects(() => githubService.connectGithub("valid"));
   } finally {
     if (previousToken === undefined) {
-      Deno.env.delete("GITHUB_TOKEN");
+      delete process.env["GITHUB_TOKEN"];
     } else {
-      Deno.env.set("GITHUB_TOKEN", previousToken);
+      process.env["GITHUB_TOKEN"] = previousToken;
     }
   }
 });
 
-Deno.test("should_floor_milestone_progress_with_clean_cycle_evidence", async () => {
+test("should_floor_milestone_progress_with_clean_cycle_evidence", async () => {
   const { reconcileCompletedMilestones } = await import(
     "../src/services/cdp_retv_agent_service.ts"
   );
@@ -458,7 +459,7 @@ Deno.test("should_floor_milestone_progress_with_clean_cycle_evidence", async () 
   );
 });
 
-Deno.test("should_treat_loopback_equivalent_hosts_as_one_origin_for_drift", async () => {
+test("should_treat_loopback_equivalent_hosts_as_one_origin_for_drift", async () => {
   const { canonicalOrigin, isDrift } = await import("../src/services/cdp_retv_agent_service.ts");
 
   // The loopback auto-rewrite moves the browser between these mid-run;
@@ -474,10 +475,10 @@ Deno.test("should_treat_loopback_equivalent_hosts_as_one_origin_for_drift", asyn
   assertEquals(isDrift("http://localhost:9999/", allowed), true);
 });
 
-Deno.test("should_let_env_bridge_url_supersede_persisted_stdio_base_url", () => {
-  const previous = Deno.env.get("CLAUDE_CODE_URL");
+test("should_let_env_bridge_url_supersede_persisted_stdio_base_url", () => {
+  const previous = process.env["CLAUDE_CODE_URL"];
   try {
-    Deno.env.set("CLAUDE_CODE_URL", "ws://host.docker.internal:7898");
+    process.env["CLAUDE_CODE_URL"] = "ws://host.docker.internal:7898";
     // Simulates runtime config rehydrated from the durable store before the
     // ws bridge existed: the stale stdio default must not win over the env.
     const provider = buildProviderFromKind("claude_code", { baseUrl: "stdio://claude-code" });
@@ -488,9 +489,9 @@ Deno.test("should_let_env_bridge_url_supersede_persisted_stdio_base_url", () => 
     assertEquals(explicit.baseUrl, "ws://10.0.0.5:7898");
   } finally {
     if (previous === undefined) {
-      Deno.env.delete("CLAUDE_CODE_URL");
+      delete process.env["CLAUDE_CODE_URL"];
     } else {
-      Deno.env.set("CLAUDE_CODE_URL", previous);
+      process.env["CLAUDE_CODE_URL"] = previous;
     }
   }
 
@@ -499,7 +500,7 @@ Deno.test("should_let_env_bridge_url_supersede_persisted_stdio_base_url", () => 
   assertEquals(vanilla.baseUrl, "stdio://claude-code");
 });
 
-Deno.test("should_paginate_past_100_visible_repositories", async () => {
+test("should_paginate_past_100_visible_repositories", async () => {
   const buildRepoDto = (id: number) => ({
     id,
     owner: { login: "acme-org" },
@@ -555,7 +556,7 @@ Deno.test("should_paginate_past_100_visible_repositories", async () => {
 // picker silently lost every repo past that on large org accounts. With a
 // Link header the walk must cover every page GitHub reports, tolerate one
 // transient failure per page, and dedupe repos that shift between pages.
-Deno.test("should_walk_every_page_past_3000_repositories_using_link_header", async () => {
+test("should_walk_every_page_past_3000_repositories_using_link_header", async () => {
   const totalPages = 42; // 4101 repos: 41 full pages + 1
   const perPage = 100;
   const total = (totalPages - 1) * perPage + 1;
@@ -627,7 +628,7 @@ Deno.test("should_walk_every_page_past_3000_repositories_using_link_header", asy
   assertEquals(repositories[repositories.length - 1].name, "repo-1");
 });
 
-Deno.test("should_parse_last_page_from_github_link_header", () => {
+test("should_parse_last_page_from_github_link_header", () => {
   assertEquals(
     parseLastPageFromLinkHeader(
       '<https://api.github.com/user/repos?per_page=100&page=2>; rel="next", <https://api.github.com/user/repos?per_page=100&page=12>; rel="last"',
@@ -641,32 +642,32 @@ Deno.test("should_parse_last_page_from_github_link_header", () => {
   );
 });
 
-Deno.test("should_list_repositories_when_identity_is_connected", async () => {
+test("should_list_repositories_when_identity_is_connected", async () => {
   const { githubService } = buildFixture();
   await githubService.connectGithub("valid", "ghp_test_token");
   const repositories = await githubService.listRepositories();
   assertEquals(repositories.length, 1);
 });
 
-Deno.test("should_reject_repository_list_when_identity_is_missing", async () => {
+test("should_reject_repository_list_when_identity_is_missing", async () => {
   const { githubService } = buildFixture();
   await assertRejects(() => githubService.listRepositories());
 });
 
-Deno.test("should_list_pull_requests_when_repository_access_is_valid", async () => {
+test("should_list_pull_requests_when_repository_access_is_valid", async () => {
   const { githubService } = buildFixture();
   await githubService.connectGithub("valid", "ghp_test_token");
   const pullRequests = await githubService.listPullRequests("1207713294");
   assertEquals(pullRequests.length, 1);
 });
 
-Deno.test("should_reject_pull_request_list_when_repository_id_is_invalid", async () => {
+test("should_reject_pull_request_list_when_repository_id_is_invalid", async () => {
   const { githubService } = buildFixture();
   await githubService.connectGithub("valid", "ghp_test_token");
   await assertRejects(() => githubService.listPullRequests("../bad"));
 });
 
-Deno.test("should_build_diff_dag_when_pull_request_diff_is_available", async () => {
+test("should_build_diff_dag_when_pull_request_diff_is_available", async () => {
   const { githubService, diffDagService } = buildFixture();
   await githubService.connectGithub("valid", "ghp_test_token");
   await githubService.listRepositories();
@@ -677,7 +678,7 @@ Deno.test("should_build_diff_dag_when_pull_request_diff_is_available", async () 
   assertEquals(dag.edgeCount > 0, true);
 });
 
-Deno.test("should_build_diff_dag_with_explicit_repository_when_pr_numbers_collide", async () => {
+test("should_build_diff_dag_with_explicit_repository_when_pr_numbers_collide", async () => {
   const { repository, githubService, diffDagService } = buildFixture();
   await githubService.connectGithub("valid", "ghp_test_token");
   await githubService.listRepositories();
@@ -708,7 +709,7 @@ Deno.test("should_build_diff_dag_with_explicit_repository_when_pr_numbers_collid
   assertEquals(dag.nodeCount > 0, true);
 });
 
-Deno.test("should_expand_dependency_wetting_when_neighbors_exist", async () => {
+test("should_expand_dependency_wetting_when_neighbors_exist", async () => {
   const { githubService, diffDagService } = buildFixture();
   await githubService.connectGithub("valid", "ghp_test_token");
   await githubService.listRepositories();
@@ -719,7 +720,7 @@ Deno.test("should_expand_dependency_wetting_when_neighbors_exist", async () => {
   assertEquals(wetted.saturation > 0, true);
 });
 
-Deno.test("should_compute_program_shape_when_diff_state_and_interop_exist", async () => {
+test("should_compute_program_shape_when_diff_state_and_interop_exist", async () => {
   const { githubService, diffDagService } = buildFixture();
   await githubService.connectGithub("valid", "ghp_test_token");
   await githubService.listRepositories();
@@ -731,7 +732,7 @@ Deno.test("should_compute_program_shape_when_diff_state_and_interop_exist", asyn
   assertEquals(samples.length > 0, true);
 });
 
-Deno.test("should_run_modified_tcsrct_when_review_packet_is_valid", async () => {
+test("should_run_modified_tcsrct_when_review_packet_is_valid", async () => {
   const { githubService, reviewService } = buildFixture();
   await githubService.connectGithub("valid", "ghp_test_token");
   await githubService.listRepositories();
@@ -741,7 +742,58 @@ Deno.test("should_run_modified_tcsrct_when_review_packet_is_valid", async () => 
   assertEquals(run.findingCount > 0, true);
 });
 
-Deno.test("should_persist_review_agent_record_with_report_when_review_completes", async () => {
+test("should_mark_run_failed_when_a_synchronous_review_phase_throws", async () => {
+  const { repository, githubService, diffDagService, reviewService } = buildFixture();
+  await githubService.connectGithub("valid", "ghp_test_token");
+  await githubService.listRepositories();
+  await githubService.listPullRequests("1207713294");
+  diffDagService.buildDiffDag = () => Promise.reject(new Error("dag_exploded"));
+  const failedRunIds: string[] = [];
+  const appendReviewEvent = repository.appendReviewEvent.bind(repository);
+  repository.appendReviewEvent = (runId, event) => {
+    if (event.startsWith("phase:failed:")) failedRunIds.push(runId);
+    return appendReviewEvent(runId, event);
+  };
+
+  await assertRejects(() => reviewService.beginReview("8", "1207713294"), Error, "dag_exploded");
+
+  assertEquals(failedRunIds.length, 1);
+  const run = await repository.getReviewRun(failedRunIds[0]);
+  assertEquals(run.status, "failed");
+  assertEquals(run.currentPhase, "failed");
+});
+
+test("should_log_not_crash_when_an_async_review_cannot_be_marked_failed", async () => {
+  const { repository, githubService, diffDagService, reviewService } = buildFixture();
+  await githubService.connectGithub("valid", "ghp_test_token");
+  await githubService.listRepositories();
+  await githubService.listPullRequests("1207713294");
+  diffDagService.buildDiffDag = () => Promise.reject(new Error("dag_exploded"));
+  const appendReviewEvent = repository.appendReviewEvent.bind(repository);
+  repository.appendReviewEvent = (runId, event) =>
+    event.startsWith("phase:failed:")
+      ? Promise.reject(new Error("store_down"))
+      : appendReviewEvent(runId, event);
+
+  const logged: unknown[][] = [];
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => unhandled.push(reason);
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => logged.push(args);
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    await reviewService.beginReviewAsync("8", "1207713294");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  } finally {
+    console.error = originalError;
+    process.off("unhandledRejection", onUnhandled);
+  }
+
+  assertEquals(unhandled.length, 0);
+  assert(logged.some((args) => args[0] === "review run could not be marked failed"));
+});
+
+test("should_persist_review_agent_record_with_report_when_review_completes", async () => {
   const { repository, githubService, reviewService } = buildFixture();
   await githubService.connectGithub("valid", "ghp_test_token");
   await githubService.listRepositories();
@@ -763,7 +815,7 @@ Deno.test("should_persist_review_agent_record_with_report_when_review_completes"
   assertEquals(await reviewService.buildReviewExport(run.id), null);
 });
 
-Deno.test("should_export_markdown_review_when_run_is_complete", async () => {
+test("should_export_markdown_review_when_run_is_complete", async () => {
   const { githubService, reviewService, artifactService } = buildFixture();
   await githubService.connectGithub("valid", "ghp_test_token");
   await githubService.listRepositories();
@@ -779,7 +831,7 @@ Deno.test("should_export_markdown_review_when_run_is_complete", async () => {
   assertEquals(/\([^\):]+:\d+\)/.test(markdown), true);
 });
 
-Deno.test("should_include_line_numbers_on_tcsrct_findings_when_patch_data_exists", async () => {
+test("should_include_line_numbers_on_tcsrct_findings_when_patch_data_exists", async () => {
   const { repository, githubService, reviewService } = buildFixture();
   await githubService.connectGithub("valid", "ghp_test_token");
   await githubService.listRepositories();
@@ -795,12 +847,12 @@ Deno.test("should_include_line_numbers_on_tcsrct_findings_when_patch_data_exists
   );
 });
 
-Deno.test("should_fail_make_dev_when_deno_is_missing", () => {
+test("should_fail_make_dev_when_deno_is_missing", () => {
   const { buildService } = buildFixture();
   assertThrows(() => buildService.makeDev(false, true));
 });
 
-Deno.test("should_auto_detect_chrome_before_using_chrome_path", async () => {
+test("should_auto_detect_chrome_before_using_chrome_path", async () => {
   const executable = await resolveChromeExecutablePath(
     (candidate) => Promise.resolve(candidate === "chromium"),
     "/custom/chrome",
@@ -809,7 +861,7 @@ Deno.test("should_auto_detect_chrome_before_using_chrome_path", async () => {
   assertEquals(executable, "chromium");
 });
 
-Deno.test("should_use_chrome_path_when_auto_detection_fails", async () => {
+test("should_use_chrome_path_when_auto_detection_fails", async () => {
   const executable = await resolveChromeExecutablePath(
     (candidate) => Promise.resolve(candidate === "/custom/chrome"),
     "/custom/chrome",
@@ -818,7 +870,7 @@ Deno.test("should_use_chrome_path_when_auto_detection_fails", async () => {
   assertEquals(executable, "/custom/chrome");
 });
 
-Deno.test("should_resolve_provider_ops_for_all_ihhi_provider_kinds", async () => {
+test("should_resolve_provider_ops_for_all_ihhi_provider_kinds", async () => {
   const kinds = listProviderKinds();
   assertEquals(kinds.length, 7);
 
@@ -846,7 +898,7 @@ Deno.test("should_resolve_provider_ops_for_all_ihhi_provider_kinds", async () =>
   }
 });
 
-Deno.test("should_build_retv_tcsrct_prompt_with_graph_first_tdd_guards", () => {
+test("should_build_retv_tcsrct_prompt_with_graph_first_tdd_guards", () => {
   const prompt = buildRetvTcsrctSystemPrompt({
     runId: "run_test",
     pullRequestId: "8",
@@ -868,7 +920,7 @@ Deno.test("should_build_retv_tcsrct_prompt_with_graph_first_tdd_guards", () => {
   assertEquals(prompt.includes("graph-first"), true);
 });
 
-Deno.test("should_generate_retv_evidence_when_reviewing_packet_with_model", async () => {
+test("should_generate_retv_evidence_when_reviewing_packet_with_model", async () => {
   const { repository, githubService, reviewService } = buildFixture();
   await githubService.connectGithub("valid", "ghp_test_token");
   await githubService.listRepositories();
@@ -892,7 +944,7 @@ Deno.test("should_generate_retv_evidence_when_reviewing_packet_with_model", asyn
   assertEquals(findings[0].evidence.some((line) => line.includes("tdd_gate=enabled")), true);
 });
 
-Deno.test("should_prefer_runtime_llm_config_when_reviewing_packet", async () => {
+test("should_prefer_runtime_llm_config_when_reviewing_packet", async () => {
   const { repository, githubService, reviewService } = buildFixture();
   await githubService.connectGithub("valid", "ghp_test_token");
   await githubService.listRepositories();
@@ -922,14 +974,14 @@ Deno.test("should_prefer_runtime_llm_config_when_reviewing_packet", async () => 
 // leak sanitizer, so the test only runs where the binary exists.
 const hasCodexAppServer = await (async () => {
   try {
-    const probe = await new Deno.Command("which", { args: ["codex-app-server"] }).output();
+    const probe = await new Command("which", { args: ["codex-app-server"] }).output();
     return probe.success;
   } catch {
     return false;
   }
 })();
 
-Deno.test({
+test({
   name: "should_route_codex_alias_runtime_config_through_review_flow",
   ignore: !hasCodexAppServer,
   fn: async () => {
@@ -964,7 +1016,7 @@ Deno.test({
   },
 });
 
-Deno.test("should_build_retv_loop_from_top_risk_surfaces", async () => {
+test("should_build_retv_loop_from_top_risk_surfaces", async () => {
   const { repository, githubService, reviewService } = buildFixture();
   await githubService.connectGithub("valid", "ghp_test_token");
   await githubService.listRepositories();
@@ -979,7 +1031,7 @@ Deno.test("should_build_retv_loop_from_top_risk_surfaces", async () => {
   assertEquals(["continue", "stop", "backtrack"].includes(loop[0].decision), true);
 });
 
-Deno.test("should_emit_well_formed_retv_phases_and_stop_reason", async () => {
+test("should_emit_well_formed_retv_phases_and_stop_reason", async () => {
   const { repository, githubService, reviewService } = buildFixture();
   await githubService.connectGithub("valid", "ghp_test_token");
   await githubService.listRepositories();
@@ -1010,7 +1062,7 @@ Deno.test("should_emit_well_formed_retv_phases_and_stop_reason", async () => {
   assertEquals(result.iterations[0].toolPlan[0].toolName.length > 0, true);
 });
 
-Deno.test("should_normalize_invalid_retv_policy_values", async () => {
+test("should_normalize_invalid_retv_policy_values", async () => {
   const { repository, githubService, reviewService } = buildFixture();
   await githubService.connectGithub("valid", "ghp_test_token");
   await githubService.listRepositories();
@@ -1030,7 +1082,7 @@ Deno.test("should_normalize_invalid_retv_policy_values", async () => {
   assertEquals(result.iterations.every((iteration) => iteration.phases.length === 6), true);
 });
 
-Deno.test("should_emit_no_surfaces_stop_condition_when_packet_has_no_risk_surfaces", async () => {
+test("should_emit_no_surfaces_stop_condition_when_packet_has_no_risk_surfaces", async () => {
   const { repository, githubService, reviewService } = buildFixture();
   await githubService.connectGithub("valid", "ghp_test_token");
   await githubService.listRepositories();
@@ -1049,7 +1101,7 @@ Deno.test("should_emit_no_surfaces_stop_condition_when_packet_has_no_risk_surfac
   assertEquals(result.stopReason, "no_surfaces");
 });
 
-Deno.test("should_shape_and_parse_openrouter_transport", async () => {
+test("should_shape_and_parse_openrouter_transport", async () => {
   let capturedBody = "";
   const ops = createOpenRouterProviderOps((_url, init) => {
     capturedBody = String(init?.body || "");
@@ -1082,7 +1134,7 @@ Deno.test("should_shape_and_parse_openrouter_transport", async () => {
   assertEquals(result.value?.content, "openrouter ok");
 });
 
-Deno.test("should_stream_openrouter_transport_with_buffered_events", async () => {
+test("should_stream_openrouter_transport_with_buffered_events", async () => {
   const events: string[] = [];
   const chunks: string[] = [];
 
@@ -1121,7 +1173,7 @@ Deno.test("should_stream_openrouter_transport_with_buffered_events", async () =>
   assertEquals(chunks.join(""), "openrouter stream");
 });
 
-Deno.test("should_reject_openrouter_transport_when_base_url_protocol_is_invalid", async () => {
+test("should_reject_openrouter_transport_when_base_url_protocol_is_invalid", async () => {
   let fetchCalls = 0;
 
   const ops = createOpenRouterProviderOps(() => {
@@ -1147,7 +1199,7 @@ Deno.test("should_reject_openrouter_transport_when_base_url_protocol_is_invalid"
   assertEquals(fetchCalls, 0);
 });
 
-Deno.test("should_shape_and_parse_gemini_transport", async () => {
+test("should_shape_and_parse_gemini_transport", async () => {
   let capturedUrl = "";
   let capturedBody = "";
   const ops = createGeminiProviderOps((url, init) => {
@@ -1193,7 +1245,7 @@ Deno.test("should_shape_and_parse_gemini_transport", async () => {
   assertEquals(result.value?.content.includes('"findings"'), true);
 });
 
-Deno.test("should_shape_and_parse_bedrock_transport", async () => {
+test("should_shape_and_parse_bedrock_transport", async () => {
   let capturedUrl = "";
   let capturedBody = "";
   let capturedAuth = "";
@@ -1244,7 +1296,7 @@ Deno.test("should_shape_and_parse_bedrock_transport", async () => {
   assertEquals(result.value?.content, "bedrock ok");
 });
 
-Deno.test("should_shape_and_parse_codex_transport_with_http_endpoint", async () => {
+test("should_shape_and_parse_codex_transport_with_http_endpoint", async () => {
   let capturedUrl = "";
   let capturedBody = "";
 
@@ -1281,7 +1333,7 @@ Deno.test("should_shape_and_parse_codex_transport_with_http_endpoint", async () 
   assertEquals(result.value?.content, "codex http ok");
 });
 
-Deno.test("should_reject_codex_http_transport_when_base_url_protocol_is_invalid", async () => {
+test("should_reject_codex_http_transport_when_base_url_protocol_is_invalid", async () => {
   let fetchCalls = 0;
 
   const ops = createCodexAppServerProviderOps(() => {
@@ -1351,7 +1403,7 @@ function createFakeCodexChannel(
   };
 }
 
-Deno.test("should_drive_codex_app_server_turn_over_stdio_channel", async () => {
+test("should_drive_codex_app_server_turn_over_stdio_channel", async () => {
   let capturedBaseUrl = "";
 
   const ops = createCodexAppServerProviderOps(undefined, (baseUrl) => {
@@ -1397,7 +1449,7 @@ function makeClaudeProcess(
   };
 }
 
-Deno.test("should_stream_claude_code_text_deltas_and_parse_result", async () => {
+test("should_stream_claude_code_text_deltas_and_parse_result", async () => {
   let captured: ClaudeCliInvocation | null = null;
   const ops = createClaudeCodeProviderOps((invocation) => {
     captured = invocation;
@@ -1475,7 +1527,7 @@ Deno.test("should_stream_claude_code_text_deltas_and_parse_result", async () => 
   );
 });
 
-Deno.test("should_emit_tools_flag_even_without_a_system_prompt", async () => {
+test("should_emit_tools_flag_even_without_a_system_prompt", async () => {
   let captured: ClaudeCliInvocation | null = null;
   const ops = createClaudeCodeProviderOps((invocation) => {
     captured = invocation;
@@ -1503,7 +1555,7 @@ Deno.test("should_emit_tools_flag_even_without_a_system_prompt", async () => {
   assertEquals(invocation?.args.includes("--append-system-prompt"), false);
 });
 
-Deno.test("should_retry_with_legacy_args_when_modern_flags_are_rejected", async () => {
+test("should_retry_with_legacy_args_when_modern_flags_are_rejected", async () => {
   // First spawn: an older CLI rejects --tools. Second spawn must carry the
   // legacy shape (--append-system-prompt, no --tools/--system-prompt) and its
   // success becomes the call's result.
@@ -1543,7 +1595,7 @@ Deno.test("should_retry_with_legacy_args_when_modern_flags_are_rejected", async 
   assertEquals(invocations[1].args.includes("--append-system-prompt"), true);
 });
 
-Deno.test("should_not_retry_legacy_args_on_unrelated_failures", async () => {
+test("should_not_retry_legacy_args_on_unrelated_failures", async () => {
   const invocations: ClaudeCliInvocation[] = [];
   const ops = createClaudeCodeProviderOps((invocation) => {
     invocations.push(invocation);
@@ -1559,7 +1611,7 @@ Deno.test("should_not_retry_legacy_args_on_unrelated_failures", async () => {
   assertEquals(invocations.length, 1);
 });
 
-Deno.test("should_classify_legacy_contract_errors_only", () => {
+test("should_classify_legacy_contract_errors_only", () => {
   assertEquals(isLegacyContractError("error: unknown option '--tools'"), true);
   assertEquals(isLegacyContractError("Unrecognized option: --system-prompt"), true);
   assertEquals(isLegacyContractError("claude_bridge_args_rejected"), true);
@@ -1568,7 +1620,7 @@ Deno.test("should_classify_legacy_contract_errors_only", () => {
   assertEquals(isLegacyContractError(""), false);
 });
 
-Deno.test("should_map_claude_code_result_error_to_provider_error", async () => {
+test("should_map_claude_code_result_error_to_provider_error", async () => {
   const ops = createClaudeCodeProviderOps(() =>
     makeClaudeProcess([
       JSON.stringify({
@@ -1589,7 +1641,7 @@ Deno.test("should_map_claude_code_result_error_to_provider_error", async () => {
   assertEquals(result.error?.kind, "rate_limit");
 });
 
-Deno.test("should_reject_non_cli_base_url_for_claude_code_without_spawning", async () => {
+test("should_reject_non_cli_base_url_for_claude_code_without_spawning", async () => {
   let spawned = false;
   const ops = createClaudeCodeProviderOps(() => {
     spawned = true;
@@ -1606,7 +1658,7 @@ Deno.test("should_reject_non_cli_base_url_for_claude_code_without_spawning", asy
   assertEquals(spawned, false);
 });
 
-Deno.test("should_request_low_reasoning_for_agent_context_and_full_reasoning_for_review", async () => {
+test("should_request_low_reasoning_for_agent_context_and_full_reasoning_for_review", async () => {
   const capturedThreadStarts: Array<Record<string, unknown>> = [];
 
   const makeChannel = (): CodexRpcChannel => {
@@ -1668,7 +1720,7 @@ Deno.test("should_request_low_reasoning_for_agent_context_and_full_reasoning_for
   assertEquals(capturedThreadStarts[1].config, undefined);
 });
 
-Deno.test("should_stream_codex_app_server_turn_deltas_over_send_stream", async () => {
+test("should_stream_codex_app_server_turn_deltas_over_send_stream", async () => {
   let messageHandler: (message: unknown) => void = () => {};
 
   const channel: CodexRpcChannel = {
@@ -1725,7 +1777,7 @@ Deno.test("should_stream_codex_app_server_turn_deltas_over_send_stream", async (
   assertEquals(completedCount, 1);
 });
 
-Deno.test("should_map_codex_app_server_failed_turn_to_error", async () => {
+test("should_map_codex_app_server_failed_turn_to_error", async () => {
   const ops = createCodexAppServerProviderOps(
     undefined,
     () =>
@@ -1752,7 +1804,7 @@ Deno.test("should_map_codex_app_server_failed_turn_to_error", async () => {
   assertEquals(result.error?.statusCode, 401);
 });
 
-Deno.test("should_reuse_codex_app_server_channel_across_multiple_turns", async () => {
+test("should_reuse_codex_app_server_channel_across_multiple_turns", async () => {
   let messageHandler: (message: unknown) => void = () => {};
   let channelFactoryCalls = 0;
   let initializeCalls = 0;
@@ -1817,7 +1869,7 @@ Deno.test("should_reuse_codex_app_server_channel_across_multiple_turns", async (
   assertEquals(turnStartCalls, 2);
 });
 
-Deno.test("should_create_distinct_codex_threads_for_distinct_run_contexts", async () => {
+test("should_create_distinct_codex_threads_for_distinct_run_contexts", async () => {
   let messageHandler: (message: unknown) => void = () => {};
   let threadStartCalls = 0;
 
@@ -1875,7 +1927,7 @@ Deno.test("should_create_distinct_codex_threads_for_distinct_run_contexts", asyn
   assertEquals(threadStartCalls, 2);
 });
 
-Deno.test("should_shape_and_parse_copilot_transport", async () => {
+test("should_shape_and_parse_copilot_transport", async () => {
   let capturedUrl = "";
   let capturedBody = "";
   let capturedVersion = "";
@@ -1916,7 +1968,7 @@ Deno.test("should_shape_and_parse_copilot_transport", async () => {
   assertEquals(result.value?.content, "copilot ok");
 });
 
-Deno.test("should_use_max_completion_tokens_for_gpt_5_models_on_copilot_transport", async () => {
+test("should_use_max_completion_tokens_for_gpt_5_models_on_copilot_transport", async () => {
   let capturedBody = "";
   const ops = createCopilotProviderOps((_url, init) => {
     capturedBody = String(init?.body || "");
@@ -1949,7 +2001,7 @@ Deno.test("should_use_max_completion_tokens_for_gpt_5_models_on_copilot_transpor
   assertEquals(capturedBody.includes('"max_tokens":42'), false);
 });
 
-Deno.test("should_retry_copilot_transport_with_token_exchange_on_auth_error", async () => {
+test("should_retry_copilot_transport_with_token_exchange_on_auth_error", async () => {
   let chatAttempts = 0;
   let exchangeAttempts = 0;
 
@@ -2010,7 +2062,7 @@ Deno.test("should_retry_copilot_transport_with_token_exchange_on_auth_error", as
   assertEquals(chatAttempts, 2);
 });
 
-Deno.test("should_fallback_to_copilot_api_when_github_models_is_rate_limited", async () => {
+test("should_fallback_to_copilot_api_when_github_models_is_rate_limited", async () => {
   let exchangeAttempts = 0;
   let githubModelsAttempts = 0;
   let copilotApiAttempts = 0;
@@ -2072,7 +2124,7 @@ Deno.test("should_fallback_to_copilot_api_when_github_models_is_rate_limited", a
   assertEquals(copilotApiAttempts, 1);
 });
 
-Deno.test("should_shape_and_parse_anthropic_transport", async () => {
+test("should_shape_and_parse_anthropic_transport", async () => {
   const ops = createAnthropicProviderOps(() => {
     return Promise.resolve(
       new Response(
@@ -2103,7 +2155,7 @@ Deno.test("should_shape_and_parse_anthropic_transport", async () => {
   assertEquals(result.value?.content, "anthropic ok");
 });
 
-Deno.test("should_count_cached_prompt_tokens_in_claude_code_input_usage", async () => {
+test("should_count_cached_prompt_tokens_in_claude_code_input_usage", async () => {
   // The claude CLI reports input_tokens as the UNCACHED slice only; the bulk
   // of capillary's repeated prompt lands in the cache fields. The transport
   // must sum all three — and must never fabricate input from the output text.
@@ -2136,7 +2188,7 @@ Deno.test("should_count_cached_prompt_tokens_in_claude_code_input_usage", async 
   assertEquals(result.value?.outputTokens, 350);
 });
 
-Deno.test("should_report_zero_input_not_output_estimate_when_claude_usage_is_absent", async () => {
+test("should_report_zero_input_not_output_estimate_when_claude_usage_is_absent", async () => {
   const ops = createClaudeCodeProviderOps(() =>
     makeClaudeProcess([
       JSON.stringify({ type: "system", subtype: "init", apiKeySource: "none" }),
@@ -2210,7 +2262,7 @@ function createCountingGitHubFetch(): { fetcher: typeof fetch; repoPageCalls: ()
   return { fetcher, repoPageCalls: () => repoPages };
 }
 
-Deno.test("should_serve_cached_catalog_without_rewalking_github", async () => {
+test("should_serve_cached_catalog_without_rewalking_github", async () => {
   const { fetcher, repoPageCalls } = createCountingGitHubFetch();
   const repository = new CelerReviewRepository();
   const githubService = new GitHubOakService(repository, fetcher);
@@ -2231,7 +2283,7 @@ Deno.test("should_serve_cached_catalog_without_rewalking_github", async () => {
   assertEquals(repoPageCalls() > walkCost, true);
 });
 
-Deno.test("should_resolve_repository_by_id_from_catalog_without_github", async () => {
+test("should_resolve_repository_by_id_from_catalog_without_github", async () => {
   const { fetcher, repoPageCalls } = createCountingGitHubFetch();
   const repository = new CelerReviewRepository();
   const githubService = new GitHubOakService(repository, fetcher);
@@ -2246,7 +2298,7 @@ Deno.test("should_resolve_repository_by_id_from_catalog_without_github", async (
   assertEquals(repoPageCalls(), walkCost);
 });
 
-Deno.test("should_lookup_exact_repository_by_owner_name_and_upsert_catalog", async () => {
+test("should_lookup_exact_repository_by_owner_name_and_upsert_catalog", async () => {
   let directHits = 0;
   const fetcher = ((input: string | URL | Request): Promise<Response> => {
     const url = typeof input === "string"
@@ -2307,7 +2359,7 @@ Deno.test("should_lookup_exact_repository_by_owner_name_and_upsert_catalog", asy
   assertEquals(await githubService.lookupRepositories("   "), []);
 });
 
-Deno.test("should_lookup_bare_name_via_search_api", async () => {
+test("should_lookup_bare_name_via_search_api", async () => {
   const fetcher = ((input: string | URL | Request): Promise<Response> => {
     const url = typeof input === "string"
       ? input

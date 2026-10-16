@@ -7,7 +7,7 @@
 // just subscribers. Emission is fire-and-forget and fully isolated: a slow or
 // throwing subscriber must never affect the run that emitted, or its peers.
 
-import { RetvCdpRunRecord, ReviewAgentRunRecord } from "../../domain/entities.ts";
+import { type RetvCdpRunRecord, type ReviewAgentRunRecord } from "../../domain/entities.ts";
 
 /** A code review finished (completed normally or stopped by a user). */
 export interface ReviewFinishedEvent {

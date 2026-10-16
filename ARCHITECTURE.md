@@ -16,7 +16,7 @@ posture. It is the map for consuming and operating Capillary.
 
 ## 1. System at a glance
 
-- **API** — Deno + Oak (TypeScript), single process, listens on `:8080`.
+- **API** — Node 24 + Express 5 (TypeScript), single process, listens on `:8080`.
 - **Web** — Angular 20 (standalone components, signals, `OnPush`). Built to
   static assets and served by the API in a single-instance deploy.
 - **Durable memory** — `celer-mem`, an embedded store reached over a small
@@ -38,7 +38,7 @@ flowchart LR
       NG[Angular SPA]
     end
     subgraph Host["Single-instance container"]
-      API[Deno + Oak API :8080]
+      API[Node + Express API :8080]
       REPO[(Bounded LRU cache\nCelerReviewRepository)]
       CELER[(celer-mem\nRocksDB via FFI\nsource of truth)]
       API --- REPO
@@ -156,7 +156,7 @@ far, then the live tail. Closing a tab, navigating away, or reloading never
 affects a run; the web app re-attaches to active sessions on load. Multiple
 sessions run concurrently; the UI warns before starting an additional one
 (each concurrent session drives its own model turns — token cost stacks).
-The agent CLI (`deno task review`, [review_cli.ts](api/scripts/review_cli.ts))
+The agent CLI (`npm run review`, [review_cli.ts](api/scripts/review_cli.ts))
 runs the same pipeline in-process with a stable stdout/stderr/exit-code
 contract for automation.
 
@@ -393,8 +393,8 @@ load-bearing ones:
 
 | Task | Command |
 | --- | --- |
-| API type-check | `cd api && deno check src/main.ts` |
-| API tests | `cd api && deno task test` |
+| API type-check | `cd api && npm run check` |
+| API tests | `cd api && npm test` |
 | Web build | `cd web && npm run -s build` |
 | Web unit tests | `cd web && npm test` |
 | Local container | `make docker-up` |

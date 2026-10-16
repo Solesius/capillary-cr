@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { ReviewRepository } from "../repositories/review_repository.ts";
+import { type ReviewRepository } from "../repositories/review_repository.ts";
 
 export class ClickClackCoordinationService {
-  constructor(private readonly repository: ReviewRepository) {}
+  private readonly repository: ReviewRepository;
+  constructor(repository: ReviewRepository) {
+    this.repository = repository;
+  }
 
   announceReviewRun(runId: string): boolean {
     this.repository.appendReviewEvent(runId, "click_clack:announced");

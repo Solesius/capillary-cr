@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 type PlannerProviderKind =
   | "github_copilot"
   | "openrouter"
@@ -78,7 +80,7 @@ function printUsage(): void {
     "Capillary RetV CDP pipeline runner",
     "",
     "Usage:",
-    "  deno run --allow-net --allow-env --allow-read scripts/cdp_retv_pipeline.ts [options]",
+    "  node scripts/cdp_retv_pipeline.ts [options]",
     "",
     "Required:",
     "  --goal \"<instruction>\"             Natural-language functional test instruction",
@@ -98,8 +100,8 @@ function printUsage(): void {
     "  --help                                Show this help",
     "",
     "Examples:",
-    "  deno task cdp:retv --provider gemini --goal \"Open Run page, click Findings tab, verify findings panel text is visible\"",
-    "  deno task cdp:retv --provider anthropic --goal-file ./scripts/goals/view-items.txt --reuse-session",
+    "  npm run cdp:retv -- --provider gemini --goal \"Open Run page, click Findings tab, verify findings panel text is visible\"",
+    "  npm run cdp:retv -- --provider anthropic --goal-file ./scripts/goals/view-items.txt --reuse-session",
   ].join("\n"));
 }
 
@@ -134,7 +136,7 @@ function normalizeGoalLines(raw: string): string[] {
 }
 
 async function readGoalsFromFile(path: string): Promise<string[]> {
-  const content = await Deno.readTextFile(path);
+  const content = await readFile(path, "utf8");
   return normalizeGoalLines(content);
 }
 
@@ -171,7 +173,7 @@ async function parseCliOptions(args: string[]): Promise<CliOptions> {
       case "--help":
       case "-h":
         printUsage();
-        Deno.exit(0);
+        process.exit(0);
         break;
       case "--api-base-url":
         options.apiBaseUrl = readValue(inlineValue);
@@ -309,7 +311,7 @@ function printRunSummary(run: RetvCdpRunResult): void {
 }
 
 async function main(): Promise<void> {
-  const options = await parseCliOptions(Deno.args);
+  const options = await parseCliOptions(process.argv.slice(2));
 
   const currentConfig = await getJson<RetvPlannerConfigView>(options.apiBaseUrl, "/api/cdp/retv/config");
   const providerKind = options.providerKind || currentConfig.providerKind;
@@ -379,11 +381,11 @@ async function main(): Promise<void> {
   }
 
   if (hadBlockingPlannerFinding) {
-    Deno.exit(2);
+    process.exit(2);
   }
 
   if (!allSucceeded) {
-    Deno.exit(1);
+    process.exit(1);
   }
 }
 

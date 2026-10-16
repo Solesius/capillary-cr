@@ -20,6 +20,9 @@
 // credentials persist in the durable store — a documented deliberate trade,
 // like channel webhook URLs, so the app survives restarts. Member tokens
 // remain memory-only, unchanged.
+import type { webcrypto } from "node:crypto";
+
+type CryptoKey = webcrypto.CryptoKey;
 
 export interface GithubAppCredentials {
   appId: string;

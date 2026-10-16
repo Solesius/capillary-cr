@@ -14,18 +14,18 @@
 // runtime LLM api key, identity) are intentionally never written to disk.
 
 import {
-  DiffFile,
-  GraphSnapshot,
-  RetvCdpRunRecord,
-  ReviewAgentRunRecord,
-  ReviewChecklistItem,
-  ReviewFinding,
-  ReviewPacket,
-  ReviewRun,
+  type DiffFile,
+  type GraphSnapshot,
+  type RetvCdpRunRecord,
+  type ReviewAgentRunRecord,
+  type ReviewChecklistItem,
+  type ReviewFinding,
+  type ReviewPacket,
+  type ReviewRun,
 } from "../../domain/entities.ts";
-import { ChannelConnection, ConnectionPersistence } from "../team/connections.ts";
-import { GithubAppCredentials, GithubAppPersistence } from "../team/github_app.ts";
-import { CelerStore, CelerTableDescriptor } from "./celer_mem.ts";
+import { type ChannelConnection, type ConnectionPersistence } from "../team/connections.ts";
+import { type GithubAppCredentials, type GithubAppPersistence } from "../team/github_app.ts";
+import { CelerStore, type CelerTableDescriptor } from "./celer_mem.ts";
 
 const SCOPE = "review";
 

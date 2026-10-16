@@ -5,7 +5,7 @@
 // reviewing its own Stop feature: "zero test coverage" on exactly the kind of
 // boundary logic that regresses silently). Pins the raceCancellation
 // primitive's semantics and the orchestrator's cancel state transition.
-import { assert, assertEquals, assertRejects } from "jsr:@std/assert";
+import { test, assert, assertEquals, assertRejects } from "./support/harness.ts";
 import { CANCELLED, raceCancellation } from "../src/services/review_agent_service.ts";
 import { AgenticReviewService } from "../src/services/agentic_review_orchestrator_service.ts";
 import { CelerReviewRepository } from "../src/repositories/review_repository.ts";
@@ -15,20 +15,20 @@ import { GitHubOakService } from "../src/services/github_service.ts";
 import { GraphMathService } from "../src/services/graph_math_service.ts";
 import { TcsrctReviewService } from "../src/services/tcsrct_review_service.ts";
 import { ArtifactService } from "../src/services/artifact_service.ts";
-import { ReviewRun } from "../src/domain/entities.ts";
+import { type ReviewRun } from "../src/domain/entities.ts";
 
 // --- raceCancellation: the primitive that makes Stop land mid-model-turn ----
 
-Deno.test("raceCancellation returns the work's value when never cancelled", async () => {
+test("raceCancellation returns the work's value when never cancelled", async () => {
   const result = await raceCancellation(Promise.resolve(42), () => false);
   assertEquals(result, 42);
 });
 
-Deno.test("raceCancellation without a signal is a plain passthrough", async () => {
+test("raceCancellation without a signal is a plain passthrough", async () => {
   assertEquals(await raceCancellation(Promise.resolve("ok")), "ok");
 });
 
-Deno.test("raceCancellation propagates the work's rejection when not cancelled", async () => {
+test("raceCancellation propagates the work's rejection when not cancelled", async () => {
   await assertRejects(
     () => raceCancellation(Promise.reject(new Error("provider_down")), () => false),
     Error,
@@ -36,7 +36,7 @@ Deno.test("raceCancellation propagates the work's rejection when not cancelled",
   );
 });
 
-Deno.test("raceCancellation yields CANCELLED promptly while the work hangs", async () => {
+test("raceCancellation yields CANCELLED promptly while the work hangs", async () => {
   // A never-resolving "model call": the stop must win the race on poll cadence
   // (~250ms), not wait out the turn. Generous ceiling for slow CI.
   let cancelled = false;
@@ -51,9 +51,9 @@ Deno.test("raceCancellation yields CANCELLED promptly while the work hangs", asy
   assert(elapsed < 2_000, `stop took ${elapsed}ms; must land on poll cadence`);
 });
 
-Deno.test("raceCancellation swallows a late rejection from the abandoned work", async () => {
+test("raceCancellation swallows a late rejection from the abandoned work", async () => {
   // When cancel wins, the orphaned call may still fail later — that must not
-  // surface as an unhandled rejection (Deno's test sanitizer would flag it).
+  // surface as an unhandled rejection (and fail the run).
   let reject!: (e: Error) => void;
   const work = new Promise<never>((_, rej) => {
     reject = rej;
@@ -92,7 +92,7 @@ function buildOrchestrator(repository: CelerReviewRepository): AgenticReviewServ
   );
 }
 
-Deno.test("cancelReview records intent as 'cancelling' — terminal stamp belongs to the loop", async () => {
+test("cancelReview records intent as 'cancelling' — terminal stamp belongs to the loop", async () => {
   const repository = new CelerReviewRepository();
   const service = buildOrchestrator(repository);
   await repository.createReviewRun(makeRun("run-stop"));
@@ -107,13 +107,13 @@ Deno.test("cancelReview records intent as 'cancelling' — terminal stamp belong
   assertEquals(run.finishedAt, undefined);
 });
 
-Deno.test("cancelReview on an unknown run rejects instead of inventing state", async () => {
+test("cancelReview on an unknown run rejects instead of inventing state", async () => {
   const repository = new CelerReviewRepository();
   const service = buildOrchestrator(repository);
   await assertRejects(() => service.cancelReview("run-ghost"));
 });
 
-Deno.test("cancelRetvRun refuses ghosts — false when no such run is live", async () => {
+test("cancelRetvRun refuses ghosts — false when no such run is live", async () => {
   const { CdpRetvAgentService } = await import("../src/services/cdp_retv_agent_service.ts");
   const { CdpDriverService } = await import("../src/services/cdp_driver_service.ts");
   const repository = new CelerReviewRepository();

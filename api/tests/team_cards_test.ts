@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { assert, assertEquals } from "jsr:@std/assert";
+import { test, assert, assertEquals } from "./support/harness.ts";
 import {
   buildSlackPayload,
   buildTeamsPayload,
   buildTestPayload,
   runDeepLink,
 } from "../src/services/team/cards.ts";
-import { RetvFinishedEvent, ReviewFinishedEvent } from "../src/services/team/event_bus.ts";
+import { type RetvFinishedEvent, type ReviewFinishedEvent } from "../src/services/team/event_bus.ts";
 
 const REVIEW_EVENT: ReviewFinishedEvent = {
   type: "review.completed",
@@ -33,7 +33,7 @@ const REVIEW_EVENT: ReviewFinishedEvent = {
   ],
 };
 
-Deno.test("slack review card carries verdict, counts, tokens and the deep link", () => {
+test("slack review card carries verdict, counts, tokens and the deep link", () => {
   const payload = buildSlackPayload(REVIEW_EVENT, {
     publicUrl: "https://cap.example.com",
     detail: "summary",
@@ -47,14 +47,14 @@ Deno.test("slack review card carries verdict, counts, tokens and the deep link",
   assert(!text.includes("SQL injection"));
 });
 
-Deno.test("detail=findings includes top finding titles; no publicUrl omits the button", () => {
+test("detail=findings includes top finding titles; no publicUrl omits the button", () => {
   const payload = buildSlackPayload(REVIEW_EVENT, { detail: "findings" });
   const text = JSON.stringify(payload);
   assert(text.includes("[BLOCKER] SQL injection in search — src/db.ts:42"));
   assert(!text.includes('"url"'));
 });
 
-Deno.test("teams payload is an adaptive card in the message envelope", () => {
+test("teams payload is an adaptive card in the message envelope", () => {
   const payload = buildTeamsPayload(REVIEW_EVENT, {
     publicUrl: "https://cap.example.com/",
     detail: "summary",
@@ -89,7 +89,7 @@ const RETV_EVENT: RetvFinishedEvent = {
   findings: ["assertText needed a ref"],
 };
 
-Deno.test("retv card reports outcome and milestones with the retvRun deep link", () => {
+test("retv card reports outcome and milestones with the retvRun deep link", () => {
   const payload = buildSlackPayload(RETV_EVENT, {
     publicUrl: "https://cap.example.com",
     detail: "summary",
@@ -101,7 +101,7 @@ Deno.test("retv card reports outcome and milestones with the retvRun deep link",
   assert(!text.includes("assertText needed a ref"));
 });
 
-Deno.test("runDeepLink returns null without a public URL and encodes run ids", () => {
+test("runDeepLink returns null without a public URL and encodes run ids", () => {
   assertEquals(runDeepLink(undefined, "review", "r1"), null);
   assertEquals(runDeepLink("  ", "review", "r1"), null);
   assertEquals(
@@ -110,7 +110,7 @@ Deno.test("runDeepLink returns null without a public URL and encodes run ids", (
   );
 });
 
-Deno.test("test payloads render per app", () => {
+test("test payloads render per app", () => {
   const slack = buildTestPayload("slack", "#code-reviews") as { text: string };
   assert(slack.text.includes("#code-reviews"));
   const teams = JSON.stringify(buildTestPayload("teams", "#code-reviews"));

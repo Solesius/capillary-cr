@@ -5,12 +5,16 @@
 // backing store, at 1M+ records. Proves the store can be capillary's durable
 // working state under concurrent reviews while resident memory stays flat.
 //
-//   cd api && deno run --allow-all scripts/celer_bench.ts [--n 1000000] [--value 512]
+//   cd api && node scripts/celer_bench.ts [--n 1000000] [--value 512]
 //
 // Reports: write and read throughput (ops/sec), p50/p95/p99/max latency,
 // process RSS before/after (RSS should stay flat — the store is on disk, not
 // in the heap), and on-disk size.
 
+import { mkdtempSync } from "node:fs";
+import { readdir, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { CelerStore } from "../src/services/storage/celer_mem.ts";
 
 interface Args {
@@ -21,18 +25,19 @@ interface Args {
 
 function parseArgs(): Args {
   const flags = new Map<string, string>();
-  for (let i = 0; i < Deno.args.length; i += 2) {
-    flags.set(Deno.args[i].replace(/^--/, ""), Deno.args[i + 1] ?? "");
+  const argv = process.argv.slice(2);
+  for (let i = 0; i < argv.length; i += 2) {
+    flags.set(argv[i].replace(/^--/, ""), argv[i + 1] ?? "");
   }
   return {
     n: Number(flags.get("n") ?? 1_000_000),
     valueBytes: Number(flags.get("value") ?? 512),
-    path: flags.get("path") ?? Deno.makeTempDirSync({ prefix: "celer_bench_" }),
+    path: flags.get("path") ?? mkdtempSync(join(tmpdir(), "celer_bench_")),
   };
 }
 
 function rssMb(): number {
-  return Deno.memoryUsage().rss / 1_048_576;
+  return process.memoryUsage().rss / 1_048_576;
 }
 
 function percentile(sorted: Float64Array, p: number): number {
@@ -45,11 +50,11 @@ async function dirSizeMb(path: string): Promise<number> {
   // Recurse: RocksDB spreads data across SST files (and possibly subdirs),
   // unlike SQLite's single top-level file. A non-recursive walk undercounts it.
   let total = 0;
-  for await (const entry of Deno.readDir(path)) {
+  for (const entry of await readdir(path, { withFileTypes: true })) {
     const child = `${path}/${entry.name}`;
-    if (entry.isFile) {
-      total += (await Deno.stat(child)).size;
-    } else if (entry.isDirectory) {
+    if (entry.isFile()) {
+      total += (await stat(child)).size;
+    } else if (entry.isDirectory()) {
       total += (await dirSizeMb(child)) * 1_048_576;
     }
   }
@@ -61,7 +66,7 @@ async function main() {
   const SCOPE = "bench";
   const TABLE = "kv";
 
-  const backend = (Deno.args.includes("--sqlite") ? "sqlite" : "rocksdb") as "sqlite" | "rocksdb";
+  const backend = (process.argv.slice(2).includes("--sqlite") ? "sqlite" : "rocksdb") as "sqlite" | "rocksdb";
   const store = await CelerStore.tryOpen({
     path: args.path,
     backend,
@@ -70,7 +75,7 @@ async function main() {
   console.log(`backend: ${backend}`);
   if (!store) {
     console.error("celer native library unavailable — build api/native first (make ffi).");
-    Deno.exit(2);
+    process.exit(2);
   }
 
   const value = "x".repeat(args.valueBytes);
@@ -130,7 +135,7 @@ async function main() {
   console.log(`disk: ${diskMb.toFixed(0)} MB for ${args.n.toLocaleString()} records`);
 
   await store.close();
-  await Deno.remove(args.path, { recursive: true }).catch(() => {});
+  await rm(args.path, { recursive: true }).catch(() => {});
 }
 
 await main();

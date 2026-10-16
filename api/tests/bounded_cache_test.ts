@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { assert, assertEquals, assertThrows } from "jsr:@std/assert";
+import { test, assert, assertEquals, assertThrows } from "./support/harness.ts";
 import { BoundedCache } from "../src/repositories/bounded_cache.ts";
 
-Deno.test("BoundedCache rejects a non-positive or non-integer cap", () => {
+test("BoundedCache rejects a non-positive or non-integer cap", () => {
   assertThrows(() => new BoundedCache<number>(0));
   assertThrows(() => new BoundedCache<number>(-3));
   assertThrows(() => new BoundedCache<number>(2.5));
 });
 
-Deno.test("BoundedCache without eviction retains everything past the cap", () => {
+test("BoundedCache without eviction retains everything past the cap", () => {
   const cache = new BoundedCache<number>(2);
   cache.set("a", 1);
   cache.set("b", 2);
@@ -19,7 +19,7 @@ Deno.test("BoundedCache without eviction retains everything past the cap", () =>
   assertEquals(cache.get("a"), 1);
 });
 
-Deno.test("BoundedCache with eviction never exceeds the cap and drops the LRU", () => {
+test("BoundedCache with eviction never exceeds the cap and drops the LRU", () => {
   const cache = new BoundedCache<number>(2);
   cache.enableEviction();
   cache.set("a", 1);
@@ -31,7 +31,7 @@ Deno.test("BoundedCache with eviction never exceeds the cap and drops the LRU", 
   assertEquals(cache.get("c"), 3);
 });
 
-Deno.test("BoundedCache get() is an LRU touch — a read rescues an entry from eviction", () => {
+test("BoundedCache get() is an LRU touch — a read rescues an entry from eviction", () => {
   const cache = new BoundedCache<number>(2);
   cache.enableEviction();
   cache.set("a", 1);
@@ -44,7 +44,7 @@ Deno.test("BoundedCache get() is an LRU touch — a read rescues an entry from e
   assertEquals(cache.get("c"), 3);
 });
 
-Deno.test("BoundedCache enableEviction() trims an already-oversized cache", () => {
+test("BoundedCache enableEviction() trims an already-oversized cache", () => {
   const cache = new BoundedCache<number>(2);
   cache.set("a", 1);
   cache.set("b", 2);
@@ -55,7 +55,7 @@ Deno.test("BoundedCache enableEviction() trims an already-oversized cache", () =
   assertEquals(cache.get("a"), undefined);
 });
 
-Deno.test("BoundedCache set() on an existing key updates in place without growing", () => {
+test("BoundedCache set() on an existing key updates in place without growing", () => {
   const cache = new BoundedCache<number>(2);
   cache.enableEviction();
   cache.set("a", 1);
@@ -68,7 +68,7 @@ Deno.test("BoundedCache set() on an existing key updates in place without growin
   assertEquals(cache.get("a"), 11);
 });
 
-Deno.test("BoundedCache delete, has, and values behave", () => {
+test("BoundedCache delete, has, and values behave", () => {
   const cache = new BoundedCache<number>(4);
   cache.set("a", 1);
   cache.set("b", 2);

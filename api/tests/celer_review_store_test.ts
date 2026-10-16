@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { assert, assertEquals } from "jsr:@std/assert";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test, assert, assertEquals } from "./support/harness.ts";
 import { CelerStore } from "../src/services/storage/celer_mem.ts";
 import { DurableReviewStore } from "../src/services/storage/celer_review_store.ts";
 import { CelerReviewRepository } from "../src/repositories/review_repository.ts";
-import { RetvCdpRunRecord, ReviewFinding, ReviewRun } from "../src/domain/entities.ts";
+import { type RetvCdpRunRecord, type ReviewFinding, type ReviewRun } from "../src/domain/entities.ts";
 
 // Exercises the durable review store against the real native library. Self-skips
-// when celer-mem is unavailable so `deno test --allow-env` stays green. Run with:
-//   deno test --allow-env --allow-ffi --allow-read --allow-write
+// when celer-mem is unavailable so `npm test` stays green without the native
+// build. Run the storage suite against the real library after native/build.sh:
+//   node --test tests/celer_review_store_test.ts
 const NATIVE_AVAILABLE = CelerStore.canLoad();
 
 function makeRun(id: string): ReviewRun {
@@ -81,11 +85,11 @@ function makeRetvRun(runId: string, traceEnabled: boolean): RetvCdpRunRecord {
   };
 }
 
-Deno.test({
+test({
   name: "should_persist_and_rehydrate_review_artifacts_through_celer_store",
   ignore: !NATIVE_AVAILABLE,
   async fn() {
-    const dir = await Deno.makeTempDir({ prefix: "celer_review_test_" });
+    const dir = await mkdtemp(join(tmpdir(), "celer_review_test_"));
     try {
       // First lifecycle: write through the durable store (celer is the source
       // of truth; every write awaits its persistence).
@@ -137,12 +141,12 @@ Deno.test({
 
       await storeB.close();
     } finally {
-      await Deno.remove(dir, { recursive: true });
+      await rm(dir, { recursive: true });
     }
   },
 });
 
-Deno.test({
+test({
   name: "should_run_in_memory_when_durable_store_is_unavailable",
   async fn() {
     // Pointing at a non-existent library forces tryOpen to fall back to null.

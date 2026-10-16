@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
 import { AppError } from "../domain/errors.ts";
-import { ReviewFinding } from "../domain/entities.ts";
+import { type ReviewFinding } from "../domain/entities.ts";
 import { lensToGate, TCSRTC_GATES } from "../domain/review_phase.ts";
 import { enforceDefensiveInput } from "../lib/validation.ts";
-import { ReviewRepository } from "../repositories/review_repository.ts";
+import { type ReviewRepository } from "../repositories/review_repository.ts";
 
 export class ArtifactService {
-  constructor(private readonly repository: ReviewRepository) {}
+  private readonly repository: ReviewRepository;
+  constructor(repository: ReviewRepository) {
+    this.repository = repository;
+  }
 
   async exportMarkdownReview(runId: string): Promise<string> {
     enforceDefensiveInput(runId, "run_id");

@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
 import {
-  DiffFile,
-  ModuleEdge,
-  ModuleNode,
-  ProgramShapeSample,
-  ReviewChecklistItem,
-  ReviewFinding,
-  ReviewPacket,
-  RiskSurface,
-  TcsrctPass,
+  type DiffFile,
+  type ModuleEdge,
+  type ModuleNode,
+  type ProgramShapeSample,
+  type ReviewChecklistItem,
+  type ReviewFinding,
+  type ReviewPacket,
+  type RiskSurface,
+  type TcsrctPass,
 } from "../domain/entities.ts";
 import { AppError } from "../domain/errors.ts";
 import { lensToGate } from "../domain/review_phase.ts";
 import { enforceDefensiveInput } from "../lib/validation.ts";
-import { ReviewRepository } from "../repositories/review_repository.ts";
+import { type ReviewRepository } from "../repositories/review_repository.ts";
 
 function createId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().slice(0, 8)}`;
@@ -66,7 +66,10 @@ const PASSES: TcsrctPass[] = [
 ];
 
 export class TcsrctReviewService {
-  constructor(private readonly repository: ReviewRepository) {}
+  private readonly repository: ReviewRepository;
+  constructor(repository: ReviewRepository) {
+    this.repository = repository;
+  }
 
   async buildReviewPacket(runId: string): Promise<ReviewPacket> {
     enforceDefensiveInput(runId, "run_id");

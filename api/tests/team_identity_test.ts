@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { assert, assertEquals } from "jsr:@std/assert";
+import { test, assert, assertEquals } from "./support/harness.ts";
 import { MemberSessionStore } from "../src/services/team/members.ts";
 import {
   buildAppJwt,
@@ -17,12 +17,12 @@ import {
 } from "../src/services/team/jira.ts";
 import { parseInboundCommand, verifySlackSignature } from "../src/services/team/inbound.ts";
 import { repoFilterMatches } from "../src/services/team/connections.ts";
-import { ReviewFinishedEvent, TeamEventBus } from "../src/services/team/event_bus.ts";
-import { ReviewFinding } from "../src/domain/entities.ts";
+import { type ReviewFinishedEvent, TeamEventBus } from "../src/services/team/event_bus.ts";
+import { type ReviewFinding } from "../src/domain/entities.ts";
 
 // --- member sessions ---------------------------------------------------------
 
-Deno.test("member sessions mint, attach identity, and never leak the token in views", () => {
+test("member sessions mint, attach identity, and never leak the token in views", () => {
   const store = new MemberSessionStore();
   const first = store.ensure(undefined);
   assert(first.isNew);
@@ -46,7 +46,7 @@ Deno.test("member sessions mint, attach identity, and never leak the token in vi
 
 // --- github app: manifest, key handling, jwt, webhook signature ----------------
 
-Deno.test("app manifest points every callback at the public URL", () => {
+test("app manifest points every callback at the public URL", () => {
   const manifest = buildAppManifest("https://cap.example.com/") as {
     redirect_url: string;
     hook_attributes: { url: string };
@@ -58,7 +58,7 @@ Deno.test("app manifest points every callback at the public URL", () => {
   assertEquals(manifest.default_permissions.contents, "read");
 });
 
-Deno.test("pkcs1ToPkcs8 emits well-formed DER envelopes across length forms", () => {
+test("pkcs1ToPkcs8 emits well-formed DER envelopes across length forms", () => {
   for (const size of [16, 200, 4096]) {
     const body = new Uint8Array(size).fill(0xab);
     const wrapped = pkcs1ToPkcs8(body);
@@ -71,7 +71,7 @@ Deno.test("pkcs1ToPkcs8 emits well-formed DER envelopes across length forms", ()
   }
 });
 
-Deno.test("app JWT signs RS256 with honest claims (verifiable, clock-skewed iat)", async () => {
+test("app JWT signs RS256 with honest claims (verifiable, clock-skewed iat)", async () => {
   const pair = await crypto.subtle.generateKey(
     {
       name: "RSASSA-PKCS1-v1_5",
@@ -108,7 +108,7 @@ Deno.test("app JWT signs RS256 with honest claims (verifiable, clock-skewed iat)
   assert(valid);
 });
 
-Deno.test("webhook signature verification accepts the real MAC and rejects forgeries", async () => {
+test("webhook signature verification accepts the real MAC and rejects forgeries", async () => {
   const app = new GithubAppService(null);
   await app.init({
     appId: "1",
@@ -155,7 +155,7 @@ const REVIEW_EVENT: ReviewFinishedEvent = {
   topFindings: [{ severity: "blocker", title: "bad", filePath: "a.ts", line: 3 }],
 };
 
-Deno.test("buildCheckRun maps verdicts onto merge-box conclusions", () => {
+test("buildCheckRun maps verdicts onto merge-box conclusions", () => {
   const check = buildCheckRun(REVIEW_EVENT, "abc123", "https://cap/x");
   assertEquals(check.conclusion, "action_required");
   assertEquals(check.head_sha, "abc123");
@@ -175,7 +175,7 @@ Deno.test("buildCheckRun maps verdicts onto merge-box conclusions", () => {
   );
 });
 
-Deno.test("CheckPublisher posts once per finished review and stays silent unconfigured", async () => {
+test("CheckPublisher posts once per finished review and stays silent unconfigured", async () => {
   const calls: string[] = [];
   const fetchFn = ((url: string, init?: RequestInit) => {
     calls.push(`${url}:${String(init?.body ?? "").includes("abc123")}`);
@@ -226,7 +226,7 @@ function finding(): ReviewFinding {
   };
 }
 
-Deno.test("jira config requires all four env values; payload carries the finding", async () => {
+test("jira config requires all four env values; payload carries the finding", async () => {
   assertEquals(jiraConfigFromEnv({ JIRA_BASE_URL: "https://x.atlassian.net" }), null);
   const config = jiraConfigFromEnv({
     JIRA_BASE_URL: "https://x.atlassian.net/",
@@ -259,7 +259,7 @@ Deno.test("jira config requires all four env values; payload carries the finding
 
 // --- inbound slack ----------------------------------------------------------------
 
-Deno.test("inbound command parser handles review/status/garbage", () => {
+test("inbound command parser handles review/status/garbage", () => {
   assertEquals(parseInboundCommand("review Solesius/capillary-cr#47"), {
     kind: "review",
     ownerRepo: "Solesius/capillary-cr",
@@ -270,7 +270,7 @@ Deno.test("inbound command parser handles review/status/garbage", () => {
   assertEquals(parseInboundCommand("review nonsense").kind, "unknown");
 });
 
-Deno.test("slack signature verifies v0 MAC and rejects stale or forged requests", async () => {
+test("slack signature verifies v0 MAC and rejects stale or forged requests", async () => {
   const secret = "sekrit";
   const body = "command=%2Fcapillary&text=status";
   const timestamp = "1800000000";
@@ -300,7 +300,7 @@ Deno.test("slack signature verifies v0 MAC and rejects stale or forged requests"
 
 // --- per-repo routing ---------------------------------------------------------------
 
-Deno.test("repoFilterMatches: exact, prefix, unscoped, and repo-less events", () => {
+test("repoFilterMatches: exact, prefix, unscoped, and repo-less events", () => {
   assert(repoFilterMatches(undefined, "owner/repo"));
   assert(repoFilterMatches("", "owner/repo"));
   assert(repoFilterMatches("Owner/Repo", "owner/repo"));
@@ -314,7 +314,7 @@ Deno.test("repoFilterMatches: exact, prefix, unscoped, and repo-less events", ()
 
 // --- fixes from capillary's own review of this branch ---------------------------
 
-Deno.test("connectionMatches scopes by repository FULL NAME, not the numeric id", async () => {
+test("connectionMatches scopes by repository FULL NAME, not the numeric id", async () => {
   // Regression for the self-review blocker: an "owner/name" filter compared
   // against the numeric repositoryId silently never matched.
   const { ConnectionStore } = await import("../src/services/team/connections.ts");
@@ -346,7 +346,7 @@ Deno.test("connectionMatches scopes by repository FULL NAME, not the numeric id"
   );
 });
 
-Deno.test("reviewCompletionRefusal blocks evidence-free request_changes only", async () => {
+test("reviewCompletionRefusal blocks evidence-free request_changes only", async () => {
   const { reviewCompletionRefusal } = await import("../src/services/review_agent_service.ts");
   // The live bug: request_changes narrated in the report, zero recorded.
   const refusal = reviewCompletionRefusal("request_changes", 0);
@@ -357,7 +357,7 @@ Deno.test("reviewCompletionRefusal blocks evidence-free request_changes only", a
   assertEquals(reviewCompletionRefusal("comment", 0), null);
 });
 
-Deno.test("manifest omits webhooks on unreachable hosts (GitHub rejects localhost hooks)", async () => {
+test("manifest omits webhooks on unreachable hosts (GitHub rejects localhost hooks)", async () => {
   const { buildAppManifest, isPubliclyReachableUrl } = await import(
     "../src/services/team/github_app.ts"
   );

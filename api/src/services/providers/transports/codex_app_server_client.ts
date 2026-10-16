@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
 import {
-  ProviderError,
-  ProviderRequest,
-  ProviderStreamCallback,
-  ProviderStreamEvent,
+  type ProviderError,
+  type ProviderRequest,
+  type ProviderStreamCallback,
+  type ProviderStreamEvent,
 } from "../provider_core.ts";
+import { Command, type ChildProcess } from "../../../lib/proc.ts";
 
 // Minimal JSON-RPC 2.0 client for the Codex app-server protocol.
 //
@@ -49,7 +50,7 @@ function readTimeoutMsFromEnv(
   minMs: number,
   maxMs: number,
 ): number {
-  const raw = Deno.env.get(envName);
+  const raw = process.env[envName];
   if (!raw || raw.trim().length === 0) {
     return fallbackMs;
   }
@@ -132,14 +133,14 @@ function normalizeReasoningEffort(raw: string | undefined): string | undefined {
 // for speed, while review threads keep full (server-default) reasoning for
 // quality. A global override applies to every thread when set.
 function resolveReasoningEffort(runContextId: string | undefined): string | undefined {
-  const global = normalizeReasoningEffort(Deno.env.get("CODEX_APP_SERVER_REASONING_EFFORT"));
+  const global = normalizeReasoningEffort(process.env["CODEX_APP_SERVER_REASONING_EFFORT"]);
   if (global) {
     return global;
   }
 
   const normalized = runContextId?.trim().toLowerCase() || "";
   if (isAgentRunContext(normalized)) {
-    return normalizeReasoningEffort(Deno.env.get("CODEX_APP_SERVER_AGENT_REASONING_EFFORT")) ||
+    return normalizeReasoningEffort(process.env["CODEX_APP_SERVER_AGENT_REASONING_EFFORT"]) ||
       "low";
   }
 
@@ -713,7 +714,7 @@ export function openWebSocketChannel(baseUrl: string): Promise<CodexRpcChannel> 
 }
 
 function resolveStdioCommandCandidates(baseUrl: string): { command: string; args: string[] }[] {
-  const override = Deno.env.get("CODEX_APP_SERVER_CMD");
+  const override = process.env["CODEX_APP_SERVER_CMD"];
   if (override && override.trim()) {
     const parts = override.trim().split(/\s+/);
     return [{ command: parts[0], args: parts.slice(1) }];
@@ -736,7 +737,7 @@ function resolveStdioCommandCandidates(baseUrl: string): { command: string; args
   const candidates: { command: string; args: string[] }[] = [
     { command: "codex", args: ["app-server"] },
   ];
-  const home = Deno.env.get("HOME");
+  const home = process.env["HOME"];
   const knownDirs = [
     home ? `${home}/.local/bin` : "",
     home ? `${home}/.codex/bin` : "",
@@ -752,11 +753,11 @@ function resolveStdioCommandCandidates(baseUrl: string): { command: string; args
 export function openStdioChannel(baseUrl: string): Promise<CodexRpcChannel> {
   const candidates = resolveStdioCommandCandidates(baseUrl);
 
-  let child: Deno.ChildProcess | null = null;
+  let child: ChildProcess | null = null;
   let lastError: Error | null = null;
   for (const candidate of candidates) {
     try {
-      child = new Deno.Command(candidate.command, {
+      child = new Command(candidate.command, {
         args: candidate.args,
         stdin: "piped",
         stdout: "piped",
@@ -783,7 +784,7 @@ export function openStdioChannel(baseUrl: string): Promise<CodexRpcChannel> {
   return Promise.resolve(buildStdioChannel(child));
 }
 
-function buildStdioChannel(child: Deno.ChildProcess): CodexRpcChannel {
+function buildStdioChannel(child: ChildProcess): CodexRpcChannel {
   const writer = child.stdin.getWriter();
   const encoder = new TextEncoder();
   let messageHandler: (message: unknown) => void = () => {};

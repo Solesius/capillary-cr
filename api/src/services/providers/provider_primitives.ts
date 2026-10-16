@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { ProviderDescriptor, ProviderKind } from "./provider_core.ts";
+import { type ProviderDescriptor, type ProviderKind } from "./provider_core.ts";
 
 interface ProviderDefaults {
   baseUrl: string;
@@ -12,7 +12,7 @@ export function buildProviderDescriptor(
   defaults: ProviderDefaults,
   partial: Partial<ProviderDescriptor> = {},
 ): ProviderDescriptor {
-  const envKey = partial.apiKey || Deno.env.get("CAPILLARY_LLM_API_KEY") || "";
+  const envKey = partial.apiKey || process.env["CAPILLARY_LLM_API_KEY"] || "";
   return {
     kind,
     apiKey: envKey,

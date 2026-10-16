@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { assert, assertEquals } from "jsr:@std/assert";
-import { RetvCdpRunRecord, ReviewAgentRunRecord, ReviewFinding } from "../src/domain/entities.ts";
+import { test, assert, assertEquals } from "./support/harness.ts";
+import { type RetvCdpRunRecord, type ReviewAgentRunRecord, type ReviewFinding } from "../src/domain/entities.ts";
 import {
   retvRecordToEvent,
   reviewRecordToEvent,
-  TeamEvent,
+  type TeamEvent,
   TeamEventBus,
 } from "../src/services/team/event_bus.ts";
 
@@ -53,7 +53,7 @@ function reviewRecord(partial: Partial<ReviewAgentRunRecord>): ReviewAgentRunRec
   };
 }
 
-Deno.test("TeamEventBus delivers to every subscriber and isolates a throwing one", () => {
+test("TeamEventBus delivers to every subscriber and isolates a throwing one", () => {
   const bus = new TeamEventBus();
   const seen: string[] = [];
   bus.subscribe(() => {
@@ -66,7 +66,7 @@ Deno.test("TeamEventBus delivers to every subscriber and isolates a throwing one
   assertEquals(seen, ["retv.completed"]);
 });
 
-Deno.test("TeamEventBus unsubscribe detaches the listener", () => {
+test("TeamEventBus unsubscribe detaches the listener", () => {
   const bus = new TeamEventBus();
   const seen: TeamEvent[] = [];
   const detach = bus.subscribe((event) => void seen.push(event));
@@ -76,7 +76,7 @@ Deno.test("TeamEventBus unsubscribe detaches the listener", () => {
   assertEquals(bus.listenerCount, 0);
 });
 
-Deno.test("reviewRecordToEvent ranks top findings by severity and caps at five", () => {
+test("reviewRecordToEvent ranks top findings by severity and caps at five", () => {
   const record = reviewRecord({
     findings: [
       finding({ severity: "low", title: "low-1" }),
@@ -97,7 +97,7 @@ Deno.test("reviewRecordToEvent ranks top findings by severity and caps at five",
   assert(!event.topFindings.some((f) => f.title === "note-1"));
 });
 
-Deno.test("reviewRecordToEvent maps a cancelled stop reason to review.cancelled", () => {
+test("reviewRecordToEvent maps a cancelled stop reason to review.cancelled", () => {
   const event = reviewRecordToEvent(reviewRecord({ stopReason: "cancelled_by_user" }));
   assertEquals(event.type, "review.cancelled");
 });
@@ -128,7 +128,7 @@ function retvRecord(): RetvCdpRunRecord {
   };
 }
 
-Deno.test("retvRecordToEvent carries the token meter and milestones", () => {
+test("retvRecordToEvent carries the token meter and milestones", () => {
   const event = retvRecordToEvent(retvRecord());
   assertEquals(event.type, "retv.completed");
   assertEquals(event.inputTokens, 1000);

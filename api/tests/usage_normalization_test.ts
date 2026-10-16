@@ -4,7 +4,7 @@
 // Fixture tests pinning every provider usage dialect to the canonical shape.
 // Each fixture mirrors a real payload family; drift in a parser turns into a
 // red test here instead of a live miscount (the "IN 2" class).
-import { assert, assertEquals } from "jsr:@std/assert";
+import { test, assert, assertEquals } from "./support/harness.ts";
 import {
   normalizeAnthropicUsage,
   normalizeBedrockUsage,
@@ -14,7 +14,7 @@ import {
   usageLooksSuspect,
 } from "../src/services/providers/usage.ts";
 
-Deno.test("anthropic: flat cache fields sum into inputTotal", () => {
+test("anthropic: flat cache fields sum into inputTotal", () => {
   const u = normalizeAnthropicUsage({
     input_tokens: 42,
     cache_read_input_tokens: 18_000,
@@ -27,7 +27,7 @@ Deno.test("anthropic: flat cache fields sum into inputTotal", () => {
   assertEquals(u.source, "provider");
 });
 
-Deno.test("anthropic: nested cache_creation breakdown is summed when flat field absent", () => {
+test("anthropic: nested cache_creation breakdown is summed when flat field absent", () => {
   const u = normalizeAnthropicUsage({
     input_tokens: 10,
     cache_read_input_tokens: 5_000,
@@ -38,7 +38,7 @@ Deno.test("anthropic: nested cache_creation breakdown is summed when flat field 
   assertEquals(u.inputTotal, 6_510);
 });
 
-Deno.test("claude CLI: cache fields living only in camelCase modelUsage are recovered (the IN 2 bug)", () => {
+test("claude CLI: cache fields living only in camelCase modelUsage are recovered (the IN 2 bug)", () => {
   const u = normalizeClaudeCliUsage({
     usage: { input_tokens: 2, output_tokens: 468 },
     modelUsage: {
@@ -54,7 +54,7 @@ Deno.test("claude CLI: cache fields living only in camelCase modelUsage are reco
   assertEquals(u.output, 468);
 });
 
-Deno.test("claude CLI: rich flat usage wins when modelUsage is poorer or absent", () => {
+test("claude CLI: rich flat usage wins when modelUsage is poorer or absent", () => {
   const u = normalizeClaudeCliUsage({
     usage: {
       input_tokens: 42,
@@ -66,13 +66,13 @@ Deno.test("claude CLI: rich flat usage wins when modelUsage is poorer or absent"
   assertEquals(u.inputTotal, 20_542);
 });
 
-Deno.test("claude CLI: absent usage yields honest zeros, source absent", () => {
+test("claude CLI: absent usage yields honest zeros, source absent", () => {
   const u = normalizeClaudeCliUsage({ result: "hello" });
   assertEquals(u.inputTotal, 0);
   assertEquals(u.source, "absent");
 });
 
-Deno.test("openai dialect: prompt includes cached; fresh is the difference", () => {
+test("openai dialect: prompt includes cached; fresh is the difference", () => {
   const u = normalizeOpenAiUsage({
     prompt_tokens: 12_000,
     completion_tokens: 800,
@@ -83,7 +83,7 @@ Deno.test("openai dialect: prompt includes cached; fresh is the difference", () 
   assertEquals(u.inputCacheRead, 11_000);
 });
 
-Deno.test("gemini: promptTokenCount includes cachedContentTokenCount", () => {
+test("gemini: promptTokenCount includes cachedContentTokenCount", () => {
   const u = normalizeGeminiUsage({
     promptTokenCount: 9_000,
     cachedContentTokenCount: 7_500,
@@ -94,7 +94,7 @@ Deno.test("gemini: promptTokenCount includes cachedContentTokenCount", () => {
   assertEquals(u.output, 420);
 });
 
-Deno.test("bedrock: camelCase with cache read/write", () => {
+test("bedrock: camelCase with cache read/write", () => {
   const u = normalizeBedrockUsage({
     inputTokens: 100,
     cacheReadInputTokens: 4_000,
@@ -104,7 +104,7 @@ Deno.test("bedrock: camelCase with cache read/write", () => {
   assertEquals(u.inputTotal, 5_000);
 });
 
-Deno.test("sentinel: flags an implausibly small input for a large prompt, never a small one", () => {
+test("sentinel: flags an implausibly small input for a large prompt, never a small one", () => {
   const big = 80_000; // ~20k tokens of prompt
   assert(usageLooksSuspect(normalizeAnthropicUsage({ input_tokens: 2, output_tokens: 400 }), big));
   assert(

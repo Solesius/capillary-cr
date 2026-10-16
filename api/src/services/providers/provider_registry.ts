@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { ProviderDescriptor, ProviderKind, ProviderOps } from "./provider_core.ts";
+import { type ProviderDescriptor, type ProviderKind, type ProviderOps } from "./provider_core.ts";
 import { firstNonEmpty } from "./provider_helpers.ts";
 import { buildProviderDescriptor } from "./provider_primitives.ts";
 import {
@@ -61,7 +61,7 @@ const CLI_BASE_URL_ENV: Partial<Record<ProviderKind, string>> = {
 function resolveProviderDefaults(kind: ProviderKind): { baseUrl: string; model: string } {
   const defaults = PROVIDER_DEFAULTS[kind];
   const envVar = CLI_BASE_URL_ENV[kind];
-  const override = envVar ? Deno.env.get(envVar)?.trim() || "" : "";
+  const override = envVar ? process.env[envVar]?.trim() || "" : "";
   return override ? { ...defaults, baseUrl: override } : defaults;
 }
 
@@ -133,7 +133,7 @@ export function buildProviderFromKind(
 }
 
 function resolveProviderApiKey(kind: ProviderKind): string {
-  return firstNonEmpty(PROVIDER_API_KEY_CHAIN[kind].map((key) => Deno.env.get(key) || ""));
+  return firstNonEmpty(PROVIDER_API_KEY_CHAIN[kind].map((key) => process.env[key] || ""));
 }
 
 /**

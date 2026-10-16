@@ -21,19 +21,22 @@
 // findings and emits a deterministic report — no network required.
 
 import {
-  DiffFile,
-  ReviewAgentRunRecord,
-  ReviewAgentTraceCycle,
-  ReviewAgentTraceStep,
-  ReviewFinding,
-  ReviewPacket,
-  ReviewSeverity,
-  ReviewSuggestion,
+  type DiffFile,
+  type ReviewAgentRunRecord,
+  type ReviewAgentTraceCycle,
+  type ReviewAgentTraceStep,
+  type ReviewFinding,
+  type ReviewPacket,
+  type ReviewSeverity,
+  type ReviewSuggestion,
 } from "../domain/entities.ts";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { AppError } from "../domain/errors.ts";
 import { enforceDefensiveInput } from "../lib/validation.ts";
-import { ReviewRunEvent, TCSRTC_GATES, TcsrtcGate, toTcsrtcGate } from "../domain/review_phase.ts";
-import { ReviewRepository } from "../repositories/review_repository.ts";
+import { type ReviewRunEvent, TCSRTC_GATES, type TcsrtcGate, toTcsrtcGate } from "../domain/review_phase.ts";
+import { type ReviewRepository } from "../repositories/review_repository.ts";
 import { GitHubOakService } from "./github_service.ts";
 import { TcsrctReviewService } from "./tcsrct_review_service.ts";
 import { providerUsesGithubToken } from "./providers/provider_registry.ts";
@@ -86,7 +89,7 @@ const SEVERITY_ORDER: Record<ReviewSeverity, number> = {
 };
 
 function reviewMaxDurationMs(): number {
-  const raw = Deno.env.get("REVIEW_AGENT_MAX_DURATION_MS");
+  const raw = process.env["REVIEW_AGENT_MAX_DURATION_MS"];
   if (raw) {
     const parsed = Number(raw);
     if (Number.isFinite(parsed) && parsed > 0) {
@@ -234,11 +237,18 @@ export interface ReviewAgentPassOutput {
  * signature changes.
  */
 export class ReviewAgentService {
+  private readonly repository: ReviewRepository;
+  private readonly githubService: GitHubOakService;
+  private readonly tcsrct: TcsrctReviewService;
   constructor(
-    private readonly repository: ReviewRepository,
-    private readonly githubService: GitHubOakService,
-    private readonly tcsrct: TcsrctReviewService,
-  ) {}
+    repository: ReviewRepository,
+    githubService: GitHubOakService,
+    tcsrct: TcsrctReviewService,
+  ) {
+    this.repository = repository;
+    this.githubService = githubService;
+    this.tcsrct = tcsrct;
+  }
 
   /** Run one tool-driven review pass and persist the resulting run record. */
   async runReviewPass(input: ReviewAgentPassInput): Promise<ReviewAgentPassOutput> {
@@ -542,24 +552,24 @@ export class ReviewAgentService {
   /** Best-effort disk write so the model can reference a real on-disk path. */
   private async writeCaptureToDisk(capture: ReviewCapture): Promise<string | null> {
     try {
-      const base = Deno.env.get("CAPILLARY_STORAGE_DIR");
+      const base = process.env["CAPILLARY_STORAGE_DIR"];
       const dir = base
         ? `${base.replace(/\/+$/, "")}/review_captures/${capture.runId}`
-        : await Deno.makeTempDir({ prefix: "capillary_review_" });
-      await Deno.mkdir(dir, { recursive: true });
-      await Deno.writeTextFile(
+        : await mkdtemp(join(tmpdir(), "capillary_review_"));
+      await mkdir(dir, { recursive: true });
+      await writeFile(
         `${dir}/manifest.json`,
         JSON.stringify(toCaptureManifest(capture), null, 2),
       );
       const filesDir = `${dir}/changed`;
-      await Deno.mkdir(filesDir, { recursive: true });
+      await mkdir(filesDir, { recursive: true });
       for (const file of capture.changedFiles) {
         const safe = file.path.replace(/[^A-Za-z0-9._-]+/g, "_");
-        await Deno.writeTextFile(`${filesDir}/${safe}.patch`, file.patch);
+        await writeFile(`${filesDir}/${safe}.patch`, file.patch);
       }
       return dir;
     } catch {
-      // No --allow-write / --allow-read, or sandboxed: tools read the in-memory
+      // Read-only or sandboxed filesystem: tools read the in-memory
       // capture instead, so this is non-fatal.
       return null;
     }

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { assert, assertEquals } from "jsr:@std/assert";
-import { ChannelConnection, ConnectionStore } from "../src/services/team/connections.ts";
-import { ReviewFinishedEvent, TeamEventBus } from "../src/services/team/event_bus.ts";
+import { test, assert, assertEquals } from "./support/harness.ts";
+import { type ChannelConnection, ConnectionStore } from "../src/services/team/connections.ts";
+import { type ReviewFinishedEvent, TeamEventBus } from "../src/services/team/event_bus.ts";
 import { ChannelPublisher } from "../src/services/team/publisher.ts";
 import { withPostedArtifact } from "../src/services/team/posted_artifacts.ts";
 
@@ -33,7 +33,7 @@ function capturingFetch(status = 200) {
   return { calls, fetchFn };
 }
 
-Deno.test("publisher fans out only to enabled connections whose toggles match", async () => {
+test("publisher fans out only to enabled connections whose toggles match", async () => {
   const store = new ConnectionStore(null);
   const wants = await store.create({
     app: "slack",
@@ -62,7 +62,7 @@ Deno.test("publisher fans out only to enabled connections whose toggles match", 
   assert(store.list().find((c) => c.id === wants.id)?.lastPostedAt);
 });
 
-Deno.test("publisher renders per-app payloads from one event", async () => {
+test("publisher renders per-app payloads from one event", async () => {
   const store = new ConnectionStore(null);
   await store.create({ app: "slack", label: "#a", webhookUrl: "https://hooks.slack.com/S" });
   await store.create({
@@ -82,7 +82,7 @@ Deno.test("publisher renders per-app payloads from one event", async () => {
   assert(teamsBody.includes("AdaptiveCard"));
 });
 
-Deno.test("a failing webhook stamps lastError and never throws into the emitter", async () => {
+test("a failing webhook stamps lastError and never throws into the emitter", async () => {
   const store = new ConnectionStore(null);
   const created = await store.create({
     app: "slack",
@@ -100,7 +100,7 @@ Deno.test("a failing webhook stamps lastError and never throws into the emitter"
   assertEquals(store.list().find((c) => c.id === created.id)?.lastError, "HTTP 404");
 });
 
-Deno.test("sendTest hits the connection webhook and reports the outcome", async () => {
+test("sendTest hits the connection webhook and reports the outcome", async () => {
   const store = new ConnectionStore(null);
   const created = await store.create({
     app: "slack",
@@ -117,7 +117,7 @@ Deno.test("sendTest hits the connection webhook and reports the outcome", async 
   assert(calls[0].body.includes("connection test"));
 });
 
-Deno.test("publisher refuses delivery to a stored URL outside the allow-list", async () => {
+test("publisher refuses delivery to a stored URL outside the allow-list", async () => {
   // A connection persisted before the allow-list tightened: loaded from
   // storage, but never posted to.
   const store = new ConnectionStore(null);
@@ -162,7 +162,7 @@ class StubPersistence {
   }
 }
 
-Deno.test("withPostedArtifact replaces the entry for the same target instead of duplicating", () => {
+test("withPostedArtifact replaces the entry for the same target instead of duplicating", () => {
   const first = withPostedArtifact(undefined, {
     kind: "inline",
     findingId: "f1",

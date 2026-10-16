@@ -12,12 +12,12 @@
 // counts, token totals and the link leave the instance unless the operator
 // opted the connection into "findings".
 
-import { NotifyDetail } from "./connections.ts";
+import { type NotifyDetail } from "./connections.ts";
 import {
-  FindingPostedEvent,
-  RetvFinishedEvent,
-  ReviewFinishedEvent,
-  TeamEvent,
+  type FindingPostedEvent,
+  type RetvFinishedEvent,
+  type ReviewFinishedEvent,
+  type TeamEvent,
 } from "./event_bus.ts";
 
 export interface CardContext {

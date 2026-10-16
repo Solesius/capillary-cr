@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { ReviewRepository } from "../repositories/review_repository.ts";
+import { type ReviewRepository } from "../repositories/review_repository.ts";
 import { AppError } from "../domain/errors.ts";
 import type {
   RetvCdpRunListItem,
@@ -13,9 +13,9 @@ import {
   type CdpDialogOccurrence,
   type CdpDialogPolicy,
   CdpDriverService,
-  CdpWorkStep,
-  CdpWorkStepResult,
-  CdpWorkUnitResult,
+  type CdpWorkStep,
+  type CdpWorkStepResult,
+  type CdpWorkUnitResult,
 } from "./cdp_driver_service.ts";
 import {
   buildProviderFromKind,
@@ -48,7 +48,7 @@ function resolveAgentMaxDurationMs(requestedMs?: number): number {
     return clamp(requestedMs);
   }
 
-  const raw = Deno.env.get("RETV_AGENT_MAX_DURATION_MS");
+  const raw = process.env["RETV_AGENT_MAX_DURATION_MS"];
   const parsed = raw ? Number(raw) : NaN;
   if (Number.isFinite(parsed) && parsed > 0) {
     return clamp(parsed);
@@ -463,11 +463,15 @@ export class CdpRetvAgentService {
     return true;
   }
 
+  private readonly repository: ReviewRepository;
+  private readonly cdpDriver: CdpDriverService;
   constructor(
-    private readonly repository: ReviewRepository,
-    private readonly cdpDriver: CdpDriverService,
+    repository: ReviewRepository,
+    cdpDriver: CdpDriverService,
     options: CdpRetvAgentServiceOptions = {},
   ) {
+    this.repository = repository;
+    this.cdpDriver = cdpDriver;
     const providerKind = options.kind || this.resolveProviderKindFromEnv();
     const provider = buildProviderFromKind(providerKind, {
       kind: providerKind,
@@ -536,7 +540,7 @@ export class CdpRetvAgentService {
       const descriptor = {
         model: input.model?.trim() || (sameKind ? this.#plannerConfig.model : "local-model"),
         baseUrl: nextBaseUrl,
-        apiKey: Deno.env.get("CAPILLARY_LLM_API_KEY") || "",
+        apiKey: process.env["CAPILLARY_LLM_API_KEY"] || "",
       };
 
       if (descriptor.apiKey.trim()) {
@@ -2050,7 +2054,7 @@ export class CdpRetvAgentService {
   }
 
   private resolveProviderKindFromEnv(): ProviderKind {
-    const raw = Deno.env.get("CAPILLARY_LLM_PROVIDER") || "github_copilot";
+    const raw = process.env["CAPILLARY_LLM_PROVIDER"] || "github_copilot";
     const normalized = normalizePlannerProviderKind(raw);
     if (!normalized || normalized === "openai_compatible") {
       return "github_copilot";

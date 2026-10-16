@@ -6,7 +6,7 @@
 // team bus; runs only when an app is configured. Publishing failures log and
 // stop there — a checks hiccup can never affect the review that emitted.
 
-import { ReviewFinishedEvent, TeamEvent, TeamEventBus } from "./event_bus.ts";
+import { type ReviewFinishedEvent, type TeamEvent, TeamEventBus } from "./event_bus.ts";
 
 /** The slice of GithubAppService the publisher needs (test-fakeable). */
 export interface AppTokenSource {

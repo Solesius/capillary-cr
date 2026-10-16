@@ -35,7 +35,7 @@ Pasting a PAT into the UI works for a quick trial (it stays in memory only), but
 
 ## Quick start — local
 
-Requirements: [Deno](https://deno.com/) 2.x, Node.js 22+.
+Requirements: Node.js 24+ (API), Node.js 22+ (web).
 
 ```bash
 git clone https://github.com/Solesius/capillary-cr.git && cd capillary-cr
@@ -96,7 +96,7 @@ Completion has teeth: `goalAchieved` is a verdict that requires quoted on-page e
 
 ## Stack
 
-- **API** — Deno + Oak (TypeScript). Single process on `:8080`.
+- **API** — Node 24 + Express 5 (TypeScript, run directly). Single process on `:8080`. Moved from Deno after 1.2.1 — see [docs/node-migration.md](docs/node-migration.md).
 - **Frontend** — Angular 20. Standalone components, signals and `computed`, `OnPush` throughout. No NGXS.
 - **Graph** — Zdog. Canvas-2D torus, deliberately lightweight — no WebGL dependency.
 - **Review engine** — TCSRTC-gated agentic loop with typed SSE events, hot-path coverage enforcement, and CPU semantic embeddings (MiniLM over wasm) relating files by meaning before any LLM call.
@@ -109,11 +109,12 @@ Completion has teeth: `goalAchieved` is a verdict that requires quoted on-page e
 
 ## Local development
 
-Requirements: Deno 2.x, Node.js 22+
+Requirements: Node.js 24+ (API), Node.js 22+ (web); `g++`, `librocksdb-dev`, `libsqlite3-dev` to build the optional native store (`make native`)
 
 ```bash
 make dev          # starts API (port 8080) and Angular dev server (port 4200) concurrently
-make test         # Deno type-check + test, Angular unit tests, Playwright e2e scaffold
+make test         # API tests, Angular unit tests, Playwright e2e scaffold
+make check        # API type-check
 ```
 
 GitHub access (recommended — environment token):
@@ -162,7 +163,7 @@ Run a full review from a terminal, CI job, or another agent — no server needed
 
 ```bash
 cd api
-GITHUB_TOKEN=ghp_... deno task review --repo owner/name --pr 123
+GITHUB_TOKEN=ghp_... npm run review -- --repo owner/name --pr 123
 ```
 
 Live gate narration streams to stderr; the report lands on stdout (`--json` for the full run record). Exit codes are stable for automation: `0` approve/comment, `1` request_changes, `2` error. The model provider resolves exactly as the server does — Codex/Claude CLI logins, ws bridges, or provider keys.
@@ -174,7 +175,7 @@ Live gate narration streams to stderr; the report lands on stdout (`--json` for 
 Capillary exposes a stdio MCP server for agent-to-agent use:
 
 ```bash
-cd api && deno task mcp
+cd api && npm run mcp
 ```
 
 Tools cover GitHub identity, repository and PR listing, review run lifecycle, artifact retrieval, and CDP session management. Registration config for VS Code and Zed is at `.vscode/ihhi-mcp.json`.
@@ -192,7 +193,7 @@ make cdp-retv ARGS="--provider anthropic --goal 'Open Run page and verify findin
 Or from a goal file:
 
 ```bash
-cd api && deno task cdp:retv --provider anthropic --goal-file scripts/goals/view-items.txt --reuse-session
+cd api && npm run cdp:retv -- --provider anthropic --goal-file scripts/goals/view-items.txt --reuse-session
 ```
 
 Supported providers: `anthropic`, `gemini`, `openrouter`, `ihhi_bedrock`, `github_copilot`, `codex_app_server`.

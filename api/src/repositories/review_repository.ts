@@ -23,22 +23,22 @@
 // system produces today; if a future caller fans out concurrent writes to one
 // runId, it must serialize them (e.g. a per-run mutex) rather than rely on this.
 import {
-  DiffFile,
-  GitHubIdentity,
-  GitHubRepository,
-  GraphSnapshot,
-  PullRequest,
-  RetvCdpRunListItem,
-  RetvCdpRunRecord,
-  ReviewAgentRunListItem,
-  ReviewAgentRunRecord,
-  ReviewChecklistItem,
-  ReviewFinding,
-  ReviewPacket,
-  ReviewRun,
+  type DiffFile,
+  type GitHubIdentity,
+  type GitHubRepository,
+  type GraphSnapshot,
+  type PullRequest,
+  type RetvCdpRunListItem,
+  type RetvCdpRunRecord,
+  type ReviewAgentRunListItem,
+  type ReviewAgentRunRecord,
+  type ReviewChecklistItem,
+  type ReviewFinding,
+  type ReviewPacket,
+  type ReviewRun,
 } from "../domain/entities.ts";
 import { notFound } from "../domain/errors.ts";
-import { ReviewArtifactStore } from "../services/storage/celer_review_store.ts";
+import { type ReviewArtifactStore } from "../services/storage/celer_review_store.ts";
 import { BoundedCache } from "./bounded_cache.ts";
 
 export interface RuntimeLlmConfig {
@@ -296,7 +296,6 @@ export class CelerReviewRepository implements ReviewRepository {
 
   // async so a not-found rejects the promise rather than throwing
   // synchronously — the whole repository contract is uniformly async.
-  // deno-lint-ignore require-await
   async getPullRequest(repositoryId: string, pullRequestId: string): Promise<PullRequest> {
     const pr = this.#pullRequests.find((item) =>
       item.repositoryId === repositoryId && item.id === pullRequestId
