@@ -9,9 +9,14 @@
 // comment. Tag-shaped tokens outside code are therefore wrapped in inline code,
 // which both hosts render literally. Fenced blocks and existing code spans are
 // left untouched, so suggestion code is never altered.
+//
+// Line-oriented by design: inline code spans that cross a line break are not
+// recognised (each line is scanned on its own), which errs toward quoting.
 
 const FENCE = /^(\s*)(`{3,}|~{3,})/;
-const TAG = /<\/?[A-Za-z][^<>\n]*>/g;
+// A real tag name, then attributes or the end: `<title>`, `</div>`, `<br/>`,
+// `<a href="x">`. Autolinks (`<https://…>`, `<user@host>`) do not match.
+const TAG = /<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>\n]*)?\/?>/g;
 
 /** Quote tag-shaped tokens in one line, skipping existing inline code spans. */
 function quoteTagsInLine(line: string): string {
@@ -27,8 +32,10 @@ function quoteTagsInLine(line: string): string {
     const run = /^`+/.exec(line.slice(tick))![0];
     const close = line.indexOf(run, tick + run.length);
     if (close === -1) {
-      out += line.slice(tick);
-      break;
+      // An unmatched backtick run is literal text; keep protecting what follows.
+      out += run;
+      index = tick + run.length;
+      continue;
     }
     out += line.slice(tick, close + run.length);
     index = close + run.length;

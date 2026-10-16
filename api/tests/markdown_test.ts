@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { assertEquals } from "./support/harness.ts";
-import { test } from "./support/harness.ts";
+import { assertEquals, test } from "./support/harness.ts";
 import { markdownProse } from "../src/lib/markdown.ts";
 import { buildPrSummaryComment } from "../src/services/review_agent_service.ts";
 import type { ReviewAgentRunRecord } from "../src/domain/entities.ts";
@@ -23,6 +22,24 @@ test("markdown: existing code spans, fences and plain comparisons are untouched"
   assertEquals(markdownProse(fenced), "Before `<p>`\n```html\n<title>Knowledge Graph</title>\n```\nAfter `<br>`");
 });
 
+test("markdown: autolinks keep rendering as links", () => {
+  assertEquals(markdownProse("See <https://example.com/a?b=1> or <ops@example.com>"), "See <https://example.com/a?b=1> or <ops@example.com>");
+  assertEquals(markdownProse("Self-closing <br/> and generic Promise<T>"), "Self-closing `<br/>` and generic Promise`<T>`");
+});
+
+test("markdown: a stray backtick does not leave later tags unprotected", () => {
+  assertEquals(markdownProse("it's a ` typo, then <title> breaks"), "it's a ` typo, then `<title>` breaks");
+});
+
+test("markdown: tilde fences and longer fences close only on a long enough run", () => {
+  assertEquals(markdownProse("~~~\n<title>x</title>\n~~~\n<p>"), "~~~\n<title>x</title>\n~~~\n`<p>`");
+  // A ```` fence is not closed by ```: the inner line stays code.
+  assertEquals(
+    markdownProse("````\n```\n<title>x</title>\n````\nafter <p>"),
+    "````\n```\n<title>x</title>\n````\nafter `<p>`",
+  );
+});
+
 test("markdown: the review summary comment quotes tags in the model summary", () => {
   const record = {
     verdict: "request_changes",
@@ -37,5 +54,5 @@ test("markdown: the review summary comment quotes tags in the model summary", ()
   } as unknown as ReviewAgentRunRecord;
   const comment = buildPrSummaryComment(record);
   assertEquals(comment.includes("Changes the `<title>` element."), true);
-  assertEquals(comment.includes("<sub>Posted by"), true);
+  assertEquals(comment.includes("Changes the <title>"), false);
 });
