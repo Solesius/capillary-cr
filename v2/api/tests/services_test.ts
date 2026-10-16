@@ -742,6 +742,27 @@ test("should_run_modified_tcsrct_when_review_packet_is_valid", async () => {
   assertEquals(run.findingCount > 0, true);
 });
 
+test("should_mark_run_failed_when_a_synchronous_review_phase_throws", async () => {
+  const { repository, githubService, diffDagService, reviewService } = buildFixture();
+  await githubService.connectGithub("valid", "ghp_test_token");
+  await githubService.listRepositories();
+  await githubService.listPullRequests("1207713294");
+  diffDagService.buildDiffDag = () => Promise.reject(new Error("dag_exploded"));
+  const failedRunIds: string[] = [];
+  const appendReviewEvent = repository.appendReviewEvent.bind(repository);
+  repository.appendReviewEvent = (runId, event) => {
+    if (event.startsWith("phase:failed:")) failedRunIds.push(runId);
+    return appendReviewEvent(runId, event);
+  };
+
+  await assertRejects(() => reviewService.beginReview("8", "1207713294"), Error, "dag_exploded");
+
+  assertEquals(failedRunIds.length, 1);
+  const run = await repository.getReviewRun(failedRunIds[0]);
+  assertEquals(run.status, "failed");
+  assertEquals(run.currentPhase, "failed");
+});
+
 test("should_persist_review_agent_record_with_report_when_review_completes", async () => {
   const { repository, githubService, reviewService } = buildFixture();
   await githubService.connectGithub("valid", "ghp_test_token");

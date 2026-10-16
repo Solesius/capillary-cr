@@ -9,6 +9,7 @@
 // the fake-CDP test were written against. The production API does not use it;
 // that runs on Express (see main.ts).
 
+import { once } from "node:events";
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -134,7 +135,11 @@ async function writeResponse(res: ServerResponse, response: Response): Promise<v
     return;
   }
   for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
-    res.write(chunk);
+    // Honour backpressure: a slow client must not make us buffer the body.
+    if (!res.write(chunk)) {
+      await Promise.race([once(res, "drain"), once(res, "close")]);
+    }
+    if (res.destroyed) return;
   }
   res.end();
 }

@@ -98,7 +98,14 @@ export class AgenticReviewService {
 
   async beginReview(pullRequestId: string, repositoryId?: string): Promise<ReviewRun> {
     const { runId, resolvedRepositoryId } = await this.createRun(pullRequestId, repositoryId);
-    await this.executeReviewLoop(runId, pullRequestId, resolvedRepositoryId, NOOP_EMIT);
+    try {
+      await this.executeReviewLoop(runId, pullRequestId, resolvedRepositoryId, NOOP_EMIT);
+    } catch (error) {
+      // Same terminal state as the async and streaming entry points: a phase
+      // that throws must not leave the stored run mid-pipeline forever.
+      await this.failRun(runId, error);
+      throw error;
+    }
     return this.repository.getReviewRun(runId);
   }
 
