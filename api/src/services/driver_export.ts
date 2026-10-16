@@ -13,7 +13,7 @@
 //
 // Pure functions over the persisted record; exported for direct unit testing.
 
-import { RetvCdpRunRecord, RetvCdpTraceCycle } from "../domain/entities.ts";
+import { type RetvCdpRunRecord, type RetvCdpTraceCycle } from "../domain/entities.ts";
 
 function str(value: unknown): string {
   return typeof value === "string" ? value : String(value ?? "");

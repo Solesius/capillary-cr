@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
 import { AppError, notFound } from "../domain/errors.ts";
+import { Command, type ChildProcess } from "../lib/proc.ts";
 
 export type CdpWaitUntil = "load" | "domcontentloaded";
 
@@ -225,7 +226,7 @@ const DEFAULT_CHROME_CANDIDATES = [
 ] as const;
 
 type ProbeExecutable = (candidate: string) => Promise<boolean>;
-type LaunchBrowser = (executablePath: string, args: string[]) => Deno.ChildProcess;
+type LaunchBrowser = (executablePath: string, args: string[]) => ChildProcess;
 
 interface CdpDriverServiceOptions {
   baseUrl?: string;
@@ -235,7 +236,7 @@ interface CdpDriverServiceOptions {
 
 export async function resolveChromeExecutablePath(
   probeExecutable: ProbeExecutable,
-  chromePathEnv = Deno.env.get("CHROME_PATH") || "",
+  chromePathEnv = process.env["CHROME_PATH"] || "",
   options: { excludeHeadlessShell?: boolean } = {},
 ): Promise<string | null> {
   const seen = new Set<string>();
@@ -264,7 +265,7 @@ export async function resolveChromeExecutablePath(
 
 async function probeExecutable(candidate: string): Promise<boolean> {
   try {
-    const child = new Deno.Command(candidate, {
+    const child = new Command(candidate, {
       args: ["--version"],
       stdout: "null",
       stderr: "null",
@@ -277,8 +278,8 @@ async function probeExecutable(candidate: string): Promise<boolean> {
   }
 }
 
-function launchBrowser(executablePath: string, args: string[]): Deno.ChildProcess {
-  return new Deno.Command(executablePath, {
+function launchBrowser(executablePath: string, args: string[]): ChildProcess {
+  return new Command(executablePath, {
     args,
     stdout: "null",
     stderr: "null",
@@ -385,11 +386,11 @@ class CdpConnection {
 }
 
 export class CdpDriverService {
-  #baseUrl = Deno.env.get("CDP_BASE_URL") || "http://127.0.0.1:9333";
+  #baseUrl = process.env["CDP_BASE_URL"] || "http://127.0.0.1:9333";
   #sessions = new Map<string, CdpSessionState>();
   #probeExecutable: ProbeExecutable;
   #launchBrowser: LaunchBrowser;
-  #launchedBrowser: Deno.ChildProcess | null = null;
+  #launchedBrowser: ChildProcess | null = null;
   /** Mode of the browser we spawned; null when none/external. */
   #launchedHeaded = false;
   /** The one headed co-engineer session — reused/focused, never duplicated. */
@@ -419,9 +420,9 @@ export class CdpDriverService {
     // (non-page targets may reject the override).
     try {
       await connection.send("Emulation.setDeviceMetricsOverride", {
-        width: Number(Deno.env.get("CDP_VIEWPORT_WIDTH")) || 1280,
-        height: Number(Deno.env.get("CDP_VIEWPORT_HEIGHT")) || 800,
-        deviceScaleFactor: Number(Deno.env.get("CDP_DEVICE_SCALE")) || 2,
+        width: Number(process.env["CDP_VIEWPORT_WIDTH"]) || 1280,
+        height: Number(process.env["CDP_VIEWPORT_HEIGHT"]) || 800,
+        deviceScaleFactor: Number(process.env["CDP_DEVICE_SCALE"]) || 2,
         mobile: false,
       });
     } catch {
@@ -817,12 +818,12 @@ export class CdpDriverService {
     }
 
     const debugPort = this.resolveDebugPort();
-    const userDataDir = Deno.env.get("CDP_USER_DATA_DIR") || `/tmp/capillary-cdp-${debugPort}`;
+    const userDataDir = process.env["CDP_USER_DATA_DIR"] || `/tmp/capillary-cdp-${debugPort}`;
     // Extra operator-set launch flags, e.g. the container image sets
     // CDP_LAUNCH_FLAGS="--headless=new --no-sandbox --disable-gpu
     // --disable-dev-shm-usage" — headless Chromium cannot start in a
     // non-root container without them. Unset for local headed driving.
-    const extraFlags = (Deno.env.get("CDP_LAUNCH_FLAGS") || "")
+    const extraFlags = (process.env["CDP_LAUNCH_FLAGS"] || "")
       .split(/\s+/)
       .filter((flag) => flag.length > 0)
       // Headed launch: strip operator-set headless flags so the actual
@@ -871,7 +872,7 @@ export class CdpDriverService {
       throw new AppError("cdp_target_create_failed", 502, "cdp_target_create_failed");
     }
 
-    const payload = await response.json();
+    const payload = await response.json() as Partial<CdpTargetResponse>;
     if (!payload.webSocketDebuggerUrl || !payload.id) {
       throw new AppError("cdp_target_invalid", 502, "cdp_target_invalid");
     }
@@ -1158,7 +1159,7 @@ export class CdpDriverService {
     // Force HiDPI at capture time: a clip with an explicit scale renders the
     // viewport at 2x regardless of whether the emulation override stuck —
     // the override-only approach still produced mushy frames on some targets.
-    const scale = Number(Deno.env.get("CDP_DEVICE_SCALE")) || 2;
+    const scale = Number(process.env["CDP_DEVICE_SCALE"]) || 2;
     let clip: { x: number; y: number; width: number; height: number; scale: number } | undefined;
     try {
       const metrics = await connection.send<{

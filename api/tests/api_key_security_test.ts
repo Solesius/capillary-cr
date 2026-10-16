@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { assert, assertEquals, assertThrows } from "jsr:@std/assert";
+import { test, assert, assertEquals, assertThrows } from "./support/harness.ts";
 import { CelerReviewRepository } from "../src/repositories/review_repository.ts";
 import { CdpDriverService } from "../src/services/cdp_driver_service.ts";
 import { CdpRetvAgentService } from "../src/services/cdp_retv_agent_service.ts";
@@ -20,11 +20,11 @@ function makeService(): { repo: CelerReviewRepository; service: CdpRetvAgentServ
 function withEnv(overrides: Record<string, string | undefined>, fn: () => void): void {
   const prior: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(overrides)) {
-    prior[key] = Deno.env.get(key);
+    prior[key] = process.env[key];
     if (value === undefined) {
-      Deno.env.delete(key);
+      delete process.env[key];
     } else {
-      Deno.env.set(key, value);
+      process.env[key] = value;
     }
   }
   try {
@@ -32,15 +32,15 @@ function withEnv(overrides: Record<string, string | undefined>, fn: () => void):
   } finally {
     for (const [key, value] of Object.entries(prior)) {
       if (value === undefined) {
-        Deno.env.delete(key);
+        delete process.env[key];
       } else {
-        Deno.env.set(key, value);
+        process.env[key] = value;
       }
     }
   }
 }
 
-Deno.test("should_ignore_request_supplied_api_key_and_resolve_only_from_env", () => {
+test("should_ignore_request_supplied_api_key_and_resolve_only_from_env", () => {
   withEnv({ ANTHROPIC_API_KEY: undefined, CAPILLARY_LLM_API_KEY: undefined }, () => {
     const { service } = makeService();
 
@@ -56,7 +56,7 @@ Deno.test("should_ignore_request_supplied_api_key_and_resolve_only_from_env", ()
   });
 });
 
-Deno.test("should_load_api_key_from_provider_env_var", () => {
+test("should_load_api_key_from_provider_env_var", () => {
   withEnv({ ANTHROPIC_API_KEY: "sk-from-env", CAPILLARY_LLM_API_KEY: undefined }, () => {
     const { service } = makeService();
 
@@ -65,7 +65,7 @@ Deno.test("should_load_api_key_from_provider_env_var", () => {
   });
 });
 
-Deno.test("should_pin_base_url_to_documented_default_for_cloud_providers", () => {
+test("should_pin_base_url_to_documented_default_for_cloud_providers", () => {
   withEnv({ ANTHROPIC_API_KEY: "sk-from-env", CAPILLARY_LLM_API_KEY: undefined }, () => {
     const { service } = makeService();
 
@@ -79,7 +79,7 @@ Deno.test("should_pin_base_url_to_documented_default_for_cloud_providers", () =>
   });
 });
 
-Deno.test("should_allow_base_url_override_only_for_local_provider", () => {
+test("should_allow_base_url_override_only_for_local_provider", () => {
   withEnv({ CAPILLARY_LLM_API_KEY: undefined }, () => {
     const { service } = makeService();
 
@@ -94,7 +94,7 @@ Deno.test("should_allow_base_url_override_only_for_local_provider", () => {
   });
 });
 
-Deno.test("should_reject_cleartext_http_base_url_when_local_provider_carries_env_key", () => {
+test("should_reject_cleartext_http_base_url_when_local_provider_carries_env_key", () => {
   withEnv({ CAPILLARY_LLM_API_KEY: "local-env-key" }, () => {
     const { service } = makeService();
 
@@ -110,7 +110,7 @@ Deno.test("should_reject_cleartext_http_base_url_when_local_provider_carries_env
   });
 });
 
-Deno.test("should_allow_cleartext_http_to_loopback_for_local_models", () => {
+test("should_allow_cleartext_http_to_loopback_for_local_models", () => {
   withEnv({ CAPILLARY_LLM_API_KEY: "local-env-key" }, () => {
     const { service } = makeService();
 
@@ -123,7 +123,7 @@ Deno.test("should_allow_cleartext_http_to_loopback_for_local_models", () => {
   });
 });
 
-Deno.test("should_never_expose_the_raw_api_key_in_the_config_view", () => {
+test("should_never_expose_the_raw_api_key_in_the_config_view", () => {
   withEnv({ ANTHROPIC_API_KEY: "sk-from-env", CAPILLARY_LLM_API_KEY: undefined }, () => {
     const { service } = makeService();
 

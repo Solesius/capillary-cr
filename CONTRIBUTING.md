@@ -5,7 +5,7 @@ the conventions the codebase expects.
 
 ## Prerequisites
 
-- [Deno](https://deno.com/) 2.x (API)
+- Node.js 24+ (API; runs the TypeScript directly)
 - Node.js 22+ (web)
 - `sqlite3` + a C++23 compiler (`g++`) if you build the native `celer-mem` FFI
   (`api/native/build.sh` auto-fetches the [celer-mem](https://github.com/Solesius/celer-mem)
@@ -14,7 +14,7 @@ the conventions the codebase expects.
 
 ## Layout
 
-- `api/` — Deno + Oak API. Tasks live in [api/deno.json](api/deno.json).
+- `api/` — Node + Express API. Scripts live in [api/package.json](api/package.json).
 - `web/` — Angular 20 SPA (standalone components, signals, `OnPush`).
 - `capillary-cr.sml` (repo root) — the SML manifest is the source of truth for
   the review domain. Keep service/entity declarations in sync when you change
@@ -34,9 +34,9 @@ make docker-up      # build & run the single-instance container locally
 Focused loops:
 
 ```bash
-cd api && deno task dev            # API only
-cd api && deno check src/main.ts   # type-check
-cd api && deno task test           # backend tests
+cd api && npm run dev              # API only
+cd api && npm run check            # type-check
+cd api && npm test                 # backend tests
 cd web && npm run start            # web only
 cd web && npm run -s build         # production web build
 cd web && npm test                 # web unit tests
@@ -44,13 +44,27 @@ cd web && npm test                 # web unit tests
 
 ## Testing conventions
 
-- Backend tests use `Deno.test` with `jsr:@std/assert` and `snake_case`
-  `should_*` names. Run with `deno test --allow-env --allow-net`; native FFI
-  tests additionally need `--allow-ffi --allow-read --allow-write`.
+- Backend tests run on `node:test` through `api/tests/support/harness.ts`
+  (`test`, `assert`, `assertEquals`, `assertThrows`, `assertRejects`) with
+  `snake_case` `should_*` names. Run with `npm test`; native FFI tests use the
+  real `libceler_ffi.so` when it has been built (`make native`).
 - Prefer dependency injection (e.g. inject a fake spawner / channel / fetch) over
   hitting real CLIs, networks, or browsers in tests.
 - Add or update tests alongside behavior changes; keep the suite green before
   opening a PR. CI runs the API and web suites on every pull request.
+
+## Capillary reviews itself
+
+Every PR is reviewed by Capillary before it is marked ready. Open it as a
+**draft**, then run the agent CLI from your branch against it:
+
+```bash
+cd api
+GITHUB_TOKEN=$(gh auth token) npm run review -- --repo Solesius/capillary-cr --pr <n>
+```
+
+Fix real findings (with a test), note false positives in the PR, re-run until
+the verdict is clean, and only then mark the PR ready for review.
 
 ## Code conventions
 

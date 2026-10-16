@@ -7,7 +7,7 @@
 // the same "posted ✓" truth — instead of the client-local state that let a
 // second browser re-post a duplicate.
 
-import { PostedArtifact, ReviewAgentRunRecord } from "../../domain/entities.ts";
+import { type PostedArtifact, type ReviewAgentRunRecord } from "../../domain/entities.ts";
 
 /**
  * Return the artifact list with `artifact` recorded, replacing any prior

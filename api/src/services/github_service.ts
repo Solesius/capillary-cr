@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
 import {
-  DiffFile,
-  GitHubIdentity,
-  GitHubRepository,
-  PullRequest,
-  RiskHint,
+  type DiffFile,
+  type GitHubIdentity,
+  type GitHubRepository,
+  type PullRequest,
+  type RiskHint,
 } from "../domain/entities.ts";
 import { AppError, unauthorized } from "../domain/errors.ts";
 import { enforceDefensiveInput, enforceTextBody } from "../lib/validation.ts";
-import { ReviewRepository } from "../repositories/review_repository.ts";
+import { type ReviewRepository } from "../repositories/review_repository.ts";
 
 interface GitHubUserDto {
   id: number;
@@ -193,10 +193,15 @@ export class GitHubOakService {
   readonly #pendingDeviceSessions = new Map<string, PendingGithubDeviceSession>();
   readonly #oauthStateTtlMs = 10 * 60 * 1000;
 
+  private readonly repository: ReviewRepository;
+  private readonly fetcher: typeof fetch;
   constructor(
-    private readonly repository: ReviewRepository,
-    private readonly fetcher: typeof fetch = fetch,
-  ) {}
+    repository: ReviewRepository,
+    fetcher: typeof fetch = fetch,
+  ) {
+    this.repository = repository;
+    this.fetcher = fetcher;
+  }
 
   async beginGithubOAuth(apiOrigin: string, webOrigin?: string): Promise<GithubOAuthStartResult> {
     const oauthClientId = this.requireGithubOAuthClientId();
@@ -259,7 +264,7 @@ export class GitHubOakService {
       createdAtMs: now,
     });
 
-    const scopes = Deno.env.get("GITHUB_OAUTH_SCOPES")?.trim() ||
+    const scopes = process.env["GITHUB_OAUTH_SCOPES"]?.trim() ||
       "repo workflow read:org read:user";
     const authorizeUrl = new URL("https://github.com/login/oauth/authorize");
     authorizeUrl.searchParams.set("client_id", oauthClientId);
@@ -363,8 +368,8 @@ export class GitHubOakService {
     }
 
     const resolvedToken = token?.trim() ||
-      Deno.env.get("CAPILLARY_GITHUB_TOKEN")?.trim() ||
-      Deno.env.get("GITHUB_TOKEN")?.trim() ||
+      process.env["CAPILLARY_GITHUB_TOKEN"]?.trim() ||
+      process.env["GITHUB_TOKEN"]?.trim() ||
       null;
     if (!resolvedToken) {
       throw new AppError("github_token_required", 401, "github_token_required");
@@ -1123,7 +1128,7 @@ export class GitHubOakService {
       throw new AppError("github_request_failed", response.status, "github_request_failed");
     }
 
-    return { body: await response.json(), headers: response.headers };
+    return { body: await response.json() as T, headers: response.headers };
   }
 
   private async exchangeGithubOAuthCode(code: string, redirectUri: string): Promise<string> {
@@ -1154,7 +1159,7 @@ export class GitHubOakService {
   }
 
   private async requestGithubDeviceCode(clientId: string): Promise<GitHubDeviceCodeDto> {
-    const scopes = Deno.env.get("GITHUB_OAUTH_SCOPES")?.trim() || "repo read:org read:user";
+    const scopes = process.env["GITHUB_OAUTH_SCOPES"]?.trim() || "repo read:org read:user";
     const body = new URLSearchParams({
       client_id: clientId,
       scope: scopes,
@@ -1256,7 +1261,7 @@ export class GitHubOakService {
   }
 
   private requireGithubOAuthClientId(): string {
-    const configuredClientId = Deno.env.get("GITHUB_OAUTH_CLIENT_ID")?.trim();
+    const configuredClientId = process.env["GITHUB_OAUTH_CLIENT_ID"]?.trim();
     if (configuredClientId) {
       return configuredClientId;
     }
@@ -1267,7 +1272,7 @@ export class GitHubOakService {
   }
 
   private requireGithubOAuthClientSecret(): string {
-    const clientSecret = Deno.env.get("GITHUB_OAUTH_CLIENT_SECRET")?.trim();
+    const clientSecret = process.env["GITHUB_OAUTH_CLIENT_SECRET"]?.trim();
     if (!clientSecret) {
       throw new AppError("github_oauth_not_configured", 503, "github_oauth_not_configured");
     }
@@ -1275,7 +1280,7 @@ export class GitHubOakService {
   }
 
   private getGithubOAuthClientSecret(): string {
-    return Deno.env.get("GITHUB_OAUTH_CLIENT_SECRET")?.trim() || "";
+    return process.env["GITHUB_OAUTH_CLIENT_SECRET"]?.trim() || "";
   }
 
   private hasGithubOAuthClientSecret(): boolean {
@@ -1283,7 +1288,7 @@ export class GitHubOakService {
   }
 
   private resolveGithubOAuthRedirectUri(apiOrigin: string): string {
-    const fromEnv = Deno.env.get("GITHUB_OAUTH_REDIRECT_URI")?.trim();
+    const fromEnv = process.env["GITHUB_OAUTH_REDIRECT_URI"]?.trim();
     if (fromEnv) {
       return fromEnv;
     }
@@ -1293,7 +1298,7 @@ export class GitHubOakService {
   }
 
   private normalizeWebOrigin(webOrigin?: string): string {
-    const candidate = webOrigin?.trim() || Deno.env.get("CORS_ORIGIN")?.trim() ||
+    const candidate = webOrigin?.trim() || process.env["CORS_ORIGIN"]?.trim() ||
       "http://localhost:4200";
     let parsed: URL;
     try {

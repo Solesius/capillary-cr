@@ -16,7 +16,7 @@ posture. It is the map for consuming and operating Capillary.
 
 ## 1. System at a glance
 
-- **API** — Deno + Oak (TypeScript), single process, listens on `:8080`.
+- **API** — Node 24 + Express 5 (TypeScript), single process, listens on `:8080`.
 - **Web** — Angular 20 (standalone components, signals, `OnPush`). Built to
   static assets and served by the API in a single-instance deploy.
 - **Durable memory** — `celer-mem`, an embedded store reached over a small
@@ -38,7 +38,7 @@ flowchart LR
       NG[Angular SPA]
     end
     subgraph Host["Single-instance container"]
-      API[Deno + Oak API :8080]
+      API[Node + Express API :8080]
       REPO[(Bounded LRU cache\nCelerReviewRepository)]
       CELER[(celer-mem\nRocksDB via FFI\nsource of truth)]
       API --- REPO
@@ -70,6 +70,16 @@ same origin. See [README.md](README.md) and
   except the GitHub OAuth handshake requires a connected identity.
 - **Static SPA**: with `CAPILLARY_SERVE_WEB=1`, non-`/api/` paths are served from
   `CAPILLARY_WEB_DIST` with SPA fallback to `index.html`.
+- **Runtime**: Node 24 runs the TypeScript sources directly (type stripping,
+  no build step) under tini as PID 1, as uid/gid 1993. V8 tuning via
+  `NODE_OPTIONS`, or the Deno-era `DENO_V8_FLAGS` (the entrypoint passes its
+  comma-separated flags to node).
+- **HTTP layer** ([api/src/http/](api/src/http/)): Express 5. Routes are a
+  declarative table (`router.ts`) of pure handlers `(req) => Reply`; `reply.ts`
+  interprets the `Reply` value (json | text | bytes | events/SSE) and is the
+  only code that writes the response. Each route declares its body mode
+  (`none`, `json` — malformed → `400 invalid_json`, `lenient`, `raw` for
+  signed webhooks); `405` + `Allow` and JSON `404`s derive from the table.
 - **Health**: `GET /healthz` is unauthenticated and sits ahead of the login
   gate; it backs the Docker `HEALTHCHECK` and any orchestrator probe.
 - **Origin safety**: `CORS_ORIGIN` is a comma-separated allow-list. Mutating
@@ -156,7 +166,7 @@ far, then the live tail. Closing a tab, navigating away, or reloading never
 affects a run; the web app re-attaches to active sessions on load. Multiple
 sessions run concurrently; the UI warns before starting an additional one
 (each concurrent session drives its own model turns — token cost stacks).
-The agent CLI (`deno task review`, [review_cli.ts](api/scripts/review_cli.ts))
+The agent CLI (`npm run review`, [review_cli.ts](api/scripts/review_cli.ts))
 runs the same pipeline in-process with a stable stdout/stderr/exit-code
 contract for automation.
 
@@ -290,6 +300,8 @@ and pluggable transports. Provider kinds:
     `CLAUDE_CODE_URL=ws://host.docker.internal:7898` (the bridge allowlists
     the exact print-mode flag set the transport emits — nothing else spawns)
 
+  The bridges are plain Node 24 scripts (`node api/scripts/<bridge>.ts`).
+
   Both overrides are env-only — request payloads still cannot repoint the
   providers. GitHub Copilot needs no bridge: it authenticates with the
   connected GitHub OAuth token over REST from anywhere.
@@ -322,6 +334,10 @@ Capillary treats model credentials as **environment-only** secrets.
   `getPlannerConfig` exposes `hasApiKey: boolean` and nothing more. The durable
   store holds no identity, token, or key fields.
 - **CSRF/SSRF floor.** Origin allow-list + mutating-method origin check (§2).
+- **Process boundary.** The Deno-era `--allow-*` permission flags no longer
+  exist; the boundary is the container — a non-root user (uid 1993), no added
+  capabilities, and an env-only credential surface. Node's `--permission`
+  model is a possible future hardening step.
 
 ```mermaid
 flowchart LR
@@ -358,7 +374,9 @@ flowchart LR
   **and** the native FFI library loads; otherwise the repository degrades to
   pure in-memory (caches become authoritative and never evict).
 - **celer-mem FFI**: built by [api/native/build.sh](api/native/build.sh) into
-  `libceler_ffi.so` — **RocksDB** backend by default, SQLite on bare-metal
+  `libceler_ffi.so` and bound with [koffi](https://koffi.dev/)
+  ([celer_mem.ts](api/src/services/storage/celer_mem.ts); store calls run on
+  koffi's worker threads, off the event loop) — **RocksDB** backend by default, SQLite on bare-metal
   macOS (or `CELER_BACKEND` override); the runtime opens whichever engine the
   library was compiled with ("auto"), so a build can never be asked for an
   engine it lacks. celer-mem sources are not vendored — the script fetches the
@@ -386,6 +404,9 @@ load-bearing ones:
 | `GITHUB_OAUTH_CLIENT_ID` / `_SECRET` / `_REDIRECT_URI` / `_SCOPES` | GitHub login |
 | `CAPILLARY_LLM_API_KEY` + provider-specific keys | Model credentials (env only) |
 | `CDP_BASE_URL` / `CHROME_PATH` | Functional-test browser endpoint |
+| `CLAUDE_CODE_URL` / `CODEX_APP_SERVER_URL` | Host CLI bridges (§6) |
+| `NODE_OPTIONS` / `DENO_V8_FLAGS` | V8 tuning (e.g. `--max-old-space-size=768`) |
+| `TRUST_PROXY` | Express `trust proxy` setting when behind an ingress |
 
 ---
 
@@ -393,14 +414,18 @@ load-bearing ones:
 
 | Task | Command |
 | --- | --- |
-| API type-check | `cd api && deno check src/main.ts` |
-| API tests | `cd api && deno task test` |
+| API type-check | `cd api && npm run check` (or `make check`) |
+| API tests | `cd api && npm test` |
+| Native store | `make native` (builds `api/native/libceler_ffi.so`) |
+| Self-review | `cd api && npm run review -- --repo Solesius/capillary-cr --pr <n>` |
+| Deno ↔ Node compat | `make compat V1=<deno image> V2=<node image>` |
 | Web build | `cd web && npm run -s build` |
 | Web unit tests | `cd web && npm test` |
 | Local container | `make docker-up` |
 | Publish to GHCR | `make image-push OWNER=<org> REPO=<repo> TAG=v0.1.0` |
 
-CI runs the API + web suites on every PR
-([.github/workflows/ci.yml](.github/workflows/ci.yml)); tagged releases
+CI type-checks, builds the native store, runs the API + web suites and builds
+the image on every PR ([.github/workflows/ci.yml](.github/workflows/ci.yml));
+tagged releases
 publish the image to GHCR
 ([.github/workflows/publish-image.yml](.github/workflows/publish-image.yml)).

@@ -1,4 +1,4 @@
-# Dev toolchain for the v2 API: Node 24 + the native build deps for celer-mem.
+# Dev toolchain for the API: Node 24 + the native build deps for celer-mem.
 # Used to install, type-check, build the FFI shim and run tests with the repo
 # bind-mounted. Not shipped.
 FROM node:24-trixie-slim

@@ -18,7 +18,7 @@
 // Pure functions here (prompt build, reply parsing, report build, verdict
 // guard) — the network/orchestration lives on ReviewAgentService.
 
-import { PostedArtifact, ReviewFinding } from "../domain/entities.ts";
+import { type PostedArtifact, type ReviewFinding } from "../domain/entities.ts";
 
 export interface DeltaFile {
   path: string;

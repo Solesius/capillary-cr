@@ -3,15 +3,24 @@
 .gitignore
 
 # Build artifacts
-api/.data
 api/native/.deps
 api/native/libceler_ffi.so
 web/dist
+web/.angular
 
 # Dependency directories
 web/node_modules
+api/node_modules
+
+# Runtime data and local scratch
+api/.data
+data
+compat
+docs
+*.sml
 
 # Editor/runtime noise
 .vscode
 .DS_Store
 *.log
+.env

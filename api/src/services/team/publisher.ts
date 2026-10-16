@@ -6,14 +6,14 @@
 // dead webhook logs and stamps lastError on that connection, never affects
 // other channels, and never touches the emitting run.
 
-import { buildSlackPayload, buildTeamsPayload, buildTestPayload, CardContext } from "./cards.ts";
+import { buildSlackPayload, buildTeamsPayload, buildTestPayload, type CardContext } from "./cards.ts";
 import {
-  ChannelConnection,
+  type ChannelConnection,
   connectionMatches,
   ConnectionStore,
   isAllowedWebhookUrl,
 } from "./connections.ts";
-import { TeamEvent, TeamEventBus } from "./event_bus.ts";
+import { type TeamEvent, TeamEventBus } from "./event_bus.ts";
 
 const DELIVERY_TIMEOUT_MS = 8_000;
 

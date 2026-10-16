@@ -166,7 +166,7 @@ const rawLoggedFor = new Set<string>();
  */
 export function logRawUsageOnce(provider: string, raw: unknown): void {
   try {
-    if (Deno.env.get("CAPILLARY_LOG_RAW_USAGE") !== "1" || rawLoggedFor.has(provider)) {
+    if (process.env["CAPILLARY_LOG_RAW_USAGE"] !== "1" || rawLoggedFor.has(provider)) {
       return;
     }
     rawLoggedFor.add(provider);

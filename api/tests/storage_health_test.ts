@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { assert, assertEquals } from "jsr:@std/assert";
+import { test, assert, assertEquals } from "./support/harness.ts";
 import { StorageHealth } from "../src/services/storage/storage_health.ts";
 
-Deno.test("StorageHealth starts healthy and non-durable", () => {
+test("StorageHealth starts healthy and non-durable", () => {
   const health = new StorageHealth();
   const snap = health.snapshot();
   assertEquals(snap.durable, false);
@@ -12,13 +12,13 @@ Deno.test("StorageHealth starts healthy and non-durable", () => {
   assertEquals(snap.lastError, null);
 });
 
-Deno.test("StorageHealth.markDurable flips the durable flag", () => {
+test("StorageHealth.markDurable flips the durable flag", () => {
   const health = new StorageHealth();
   health.markDurable();
   assertEquals(health.snapshot().durable, true);
 });
 
-Deno.test("StorageHealth.recordError counts failures and captures the last one", () => {
+test("StorageHealth.recordError counts failures and captures the last one", () => {
   const health = new StorageHealth();
   // Silence the intentional console.warn for the failure log.
   const original = console.warn;
@@ -38,7 +38,7 @@ Deno.test("StorageHealth.recordError counts failures and captures the last one",
   assert(typeof snap.lastError?.at === "string" && snap.lastError.at.length > 0);
 });
 
-Deno.test("StorageHealth.recordError stringifies non-Error throwables", () => {
+test("StorageHealth.recordError stringifies non-Error throwables", () => {
   const health = new StorageHealth();
   const original = console.warn;
   console.warn = () => {};

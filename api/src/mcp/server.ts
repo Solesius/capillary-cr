@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { Server } from "npm:@modelcontextprotocol/sdk@1.13.1/server/index.js";
-import { StdioServerTransport } from "npm:@modelcontextprotocol/sdk@1.13.1/server/stdio.js";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
-} from "npm:@modelcontextprotocol/sdk@1.13.1/types.js";
+} from "@modelcontextprotocol/sdk/types.js";
 import { AppError } from "../domain/errors.ts";
 import { deps } from "../http/deps.ts";
-import { CdpWorkUnitRequest } from "../services/cdp_driver_service.ts";
+import { type CdpWorkUnitRequest } from "../services/cdp_driver_service.ts";
 
 type ToolResult = {
   content: Array<{ type: "text"; text: string }>;

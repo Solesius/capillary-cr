@@ -1,31 +1,39 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-// celer_mem.ts — Deno FFI binding for celer-mem embedded storage.
+// celer_mem.ts — koffi FFI binding for celer-mem embedded storage.
 //
 // This wraps the C ABI shim in `native/celer_ffi.cpp` (compiled to
 // `native/libceler_ffi.so` via `native/build.sh`) and presents a clean,
-// fully-async key/value store. Every native call is marked `nonblocking`, so
-// reads, writes, scans and batches run on Deno's FFI thread pool and never
-// stall the event loop — matching celer-mem's own async-first design.
+// fully-async key/value store. Every native call goes through koffi's `.async`
+// form, so reads, writes, scans and batches run on koffi's worker threads and
+// never stall the event loop — matching celer-mem's own async-first design.
 //
 // celer-mem organizes data as scope -> table -> key/value. The concrete storage
 // engine (RocksDB by default, SQLite as a fallback) is chosen by the native
 // build and resolved at open time; this binding is backend-agnostic.
 //
 // The native library is optional: callers should use `CelerStore.tryOpen()` and
-// fall back gracefully when FFI is unavailable (library not built, or the
-// process lacks `--allow-ffi`).
+// fall back gracefully when it is unavailable (library not built, or koffi has
+// no prebuild for the platform).
 //
-// Buffer lifetime note (memory-safety critical): a nonblocking FFI call runs on
-// a worker thread while JS keeps executing, so every argument buffer whose raw
-// pointer we hand across (via `Deno.UnsafePointer.of()`) must stay alive until
-// the call resolves. We push each such buffer into `keepAlive` and reference it
-// *after* the await — that post-await use makes the async state machine capture
-// `keepAlive` (and therefore the buffers) for the full duration of the call, so
-// V8 cannot collect them mid-flight. V8 never relocates an ArrayBuffer's backing
-// store, so the pointer stays valid as long as the buffer is reachable. The
-// returned response is copied out of native memory before `celer_free` runs.
+// Buffer lifetime note (memory-safety critical): koffi hands a TypedArray's
+// backing store to native code by pointer, without copying. An async call runs
+// on a worker thread while JS keeps executing, so every argument buffer must
+// stay alive until the call resolves. We push each buffer into `keepAlive` and
+// reference it *after* the await — that post-await use makes the async state
+// machine capture `keepAlive` (and therefore the buffers) for the full duration
+// of the call, so V8 cannot collect them mid-flight. V8 never relocates an
+// ArrayBuffer's backing store, so the pointer stays valid as long as the buffer
+// is reachable. The returned response is copied out of native memory before
+// `celer_free` runs.
 
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import type { LibraryHandle } from "koffi";
+
+type KoffiFunction = ReturnType<LibraryHandle["func"]>;
+
+const require = createRequire(import.meta.url);
 const LIB_URL = new URL("../../../native/libceler_ffi.so", import.meta.url);
 
 const encoder = new TextEncoder();
@@ -33,46 +41,63 @@ const decoder = new TextDecoder();
 
 // Sink for the FFI keep-alive anchor in #invoke. Exported so it is provably
 // observable module state — the optimizer cannot treat the writes that pin
-// argument buffers past a nonblocking call as dead code. Never read for logic.
+// argument buffers past an async call as dead code. Never read for logic.
 export let ffiKeepAliveSink = 0;
 
-const SYMBOLS = {
-  celer_open: {
-    parameters: ["pointer", "pointer", "pointer", "i32"],
-    result: "pointer",
-    nonblocking: true,
-  },
-  celer_close_store: { parameters: [], result: "pointer", nonblocking: true },
-  celer_put: {
-    parameters: ["pointer", "pointer", "pointer", "i32", "pointer", "i32"],
-    result: "pointer",
-    nonblocking: true,
-  },
-  celer_get: {
-    parameters: ["pointer", "pointer", "pointer", "i32"],
-    result: "pointer",
-    nonblocking: true,
-  },
-  celer_del: {
-    parameters: ["pointer", "pointer", "pointer", "i32"],
-    result: "pointer",
-    nonblocking: true,
-  },
-  celer_prefix_scan: {
-    parameters: ["pointer", "pointer", "pointer", "i32"],
-    result: "pointer",
-    nonblocking: true,
-  },
-  celer_batch: {
-    parameters: ["pointer", "pointer", "pointer", "i32"],
-    result: "pointer",
-    nonblocking: true,
-  },
-  celer_compact: { parameters: ["pointer", "pointer"], result: "pointer", nonblocking: true },
-  celer_free: { parameters: ["pointer"], result: "void" },
+// koffi is loaded lazily so a missing or unloadable addon degrades to the
+// same "native unavailable" path as a missing shared library.
+type Koffi = typeof import("koffi");
+let koffiModule: Koffi | null = null;
+function koffi(): Koffi {
+  koffiModule ??= require("koffi") as Koffi;
+  return koffiModule;
+}
+
+const SIGNATURES = {
+  celer_open: "void *celer_open(void *backend, void *path, void *schema, int32_t schema_len)",
+  celer_close_store: "void *celer_close_store()",
+  celer_put:
+    "void *celer_put(void *scope, void *table, void *key, int32_t key_len, void *value, int32_t value_len)",
+  celer_get: "void *celer_get(void *scope, void *table, void *key, int32_t key_len)",
+  celer_del: "void *celer_del(void *scope, void *table, void *key, int32_t key_len)",
+  celer_prefix_scan:
+    "void *celer_prefix_scan(void *scope, void *table, void *prefix, int32_t prefix_len)",
+  celer_batch: "void *celer_batch(void *scope, void *table, void *ops, int32_t ops_len)",
+  celer_compact: "void *celer_compact(void *scope, void *table)",
+  celer_free: "void celer_free(void *ptr)",
 } as const;
 
-type CelerLib = Deno.DynamicLibrary<typeof SYMBOLS>;
+type SymbolName = keyof typeof SIGNATURES;
+
+/** Opaque native pointer as koffi represents it (null for NULL). */
+type NativePointer = unknown;
+
+interface CelerLib {
+  symbols: Record<SymbolName, KoffiFunction>;
+  close(): void;
+}
+
+function libPathOf(libPath: string | URL): string {
+  return libPath instanceof URL ? fileURLToPath(libPath) : libPath;
+}
+
+function loadLib(libPath: string | URL): CelerLib {
+  const handle: LibraryHandle = koffi().load(libPathOf(libPath));
+  const symbols = Object.fromEntries(
+    (Object.keys(SIGNATURES) as SymbolName[]).map((name) => [name, handle.func(SIGNATURES[name])]),
+  ) as Record<SymbolName, KoffiFunction>;
+  return { symbols, close: () => handle.unload() };
+}
+
+/** Promise view over koffi's callback-style async call. */
+function callAsync(fn: KoffiFunction, args: unknown[]): Promise<NativePointer> {
+  return new Promise((resolve, reject) => {
+    fn.async(...args, (err: unknown, result: NativePointer) => {
+      if (err) reject(err);
+      else resolve(result);
+    });
+  });
+}
 
 export interface CelerScanEntry {
   key: string;
@@ -123,8 +148,8 @@ function cstr(value: string): Uint8Array {
 /** Binary-safe buffer for length-delimited parameters; never zero length. */
 function buf(value: string | Uint8Array): Uint8Array {
   const bytes = toBytes(value);
-  // Deno passes a null pointer for zero-length TypedArrays; pad to one byte so
-  // the native side always receives a valid (length-bounded) pointer.
+  // A zero-length TypedArray may surface as a null pointer on the native side;
+  // pad to one byte so it always receives a valid (length-bounded) pointer.
   return bytes.length === 0 ? new Uint8Array(1) : bytes;
 }
 
@@ -137,20 +162,20 @@ interface DecodedResponse {
   payload: Uint8Array;
 }
 
-function readResponse(lib: CelerLib, ptr: Deno.PointerValue): DecodedResponse {
-  if (ptr === null) {
+function readResponse(lib: CelerLib, ptr: NativePointer): DecodedResponse {
+  if (ptr === null || ptr === undefined) {
     throw new Error("celer-mem: native call returned null (allocation failed)");
   }
-  const view = new Deno.UnsafePointerView(ptr);
-  const status = view.getInt32(0);
-  const length = view.getInt32(4);
-  // getArrayBuffer returns a view over native memory, so copy the bytes out
+  const k = koffi();
+  const status = k.decode(ptr, 0, "int32_t") as number;
+  const length = k.decode(ptr, 4, "int32_t") as number;
+  // koffi.view returns a view over native memory, so copy the bytes out
   // before celer_free() runs — otherwise the allocator's free-list bookkeeping
   // clobbers the head of the payload (use-after-free).
   let payload = new Uint8Array(0);
   if (length > 0) {
     payload = new Uint8Array(length);
-    payload.set(new Uint8Array(view.getArrayBuffer(length, 8)));
+    payload.set(new Uint8Array(k.view(ptr, 8 + length), 8, length));
   }
   lib.symbols.celer_free(ptr);
   return { status, payload };
@@ -206,7 +231,7 @@ export class CelerStore {
   /** True when the native library can be located and loaded. */
   static canLoad(libPath?: string | URL): boolean {
     try {
-      const lib = Deno.dlopen(libPath ?? LIB_URL, SYMBOLS);
+      const lib = loadLib(libPath ?? LIB_URL);
       lib.close();
       return true;
     } catch {
@@ -215,7 +240,7 @@ export class CelerStore {
   }
 
   static async open(options: CelerStoreOptions): Promise<CelerStore> {
-    const lib = Deno.dlopen(options.libPath ?? LIB_URL, SYMBOLS);
+    const lib = loadLib(options.libPath ?? LIB_URL);
     const store = new CelerStore(lib);
     const schema = options.schema.map((d) => `${d.scope}\t${d.table}`).join("\n");
     try {
@@ -253,25 +278,14 @@ export class CelerStore {
   }
 
   /**
-   * Invoke a nonblocking native symbol. Buffer args are passed as explicit
-   * pointers and held in `keepAlive`, which is referenced after the await so the
-   * async state machine keeps the buffers (and their native pointers) valid for
-   * the whole call on the FFI worker thread. See the buffer-lifetime note above.
+   * Invoke a native symbol asynchronously. Buffer args are handed to koffi by
+   * pointer and held in `keepAlive`, which is referenced after the await so the
+   * async state machine keeps the buffers (and their native memory) valid for
+   * the whole call on the worker thread. See the buffer-lifetime note above.
    */
-  async #invoke(
-    // deno-lint-ignore no-explicit-any
-    fn: (...args: any[]) => Promise<Deno.PointerValue>,
-    ...args: CallArg[]
-  ): Promise<DecodedResponse> {
-    const keepAlive: Uint8Array[] = [];
-    const params = args.map((arg) => {
-      if (typeof arg === "number") {
-        return arg;
-      }
-      keepAlive.push(arg);
-      return Deno.UnsafePointer.of(arg);
-    });
-    const ptr = await fn(...params);
+  async #invoke(fn: KoffiFunction, ...args: CallArg[]): Promise<DecodedResponse> {
+    const keepAlive = args.filter((arg): arg is Uint8Array => typeof arg !== "number");
+    const ptr = await callAsync(fn, args);
     const response = readResponse(this.#lib, ptr);
     // Anchor: a real use of every kept buffer *after* the await and the native
     // read. Folding their byte lengths into a module sink is an observable side
@@ -406,7 +420,7 @@ export class CelerStore {
     }
     this.#closed = true;
     try {
-      const response = readResponse(this.#lib, await this.#lib.symbols.celer_close_store());
+      const response = readResponse(this.#lib, await callAsync(this.#lib.symbols.celer_close_store, []));
       expectOk(response, "close");
     } finally {
       this.#lib.close();

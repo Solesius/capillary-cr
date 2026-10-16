@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
-import { REVIEW_PASSES, ReviewPass, ReviewProgress } from "../domain/review_phase.ts";
+import { REVIEW_PASSES, type ReviewPass, type ReviewProgress } from "../domain/review_phase.ts";
 
 /**
  * Immutable snapshot of agentic review state fed to the pure planner.

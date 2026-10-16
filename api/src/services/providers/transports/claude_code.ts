@@ -1,19 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
+import { mkdtempSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   errorResult,
   okResult,
-  ProviderDescriptor,
-  ProviderError,
-  ProviderOps,
-  ProviderRequest,
-  ProviderResponse,
-  ProviderResult,
-  ProviderStreamCallback,
+  type ProviderDescriptor,
+  type ProviderError,
+  type ProviderOps,
+  type ProviderRequest,
+  type ProviderResponse,
+  type ProviderResult,
+  type ProviderStreamCallback,
 } from "../provider_core.ts";
 import { invalidRequest } from "./common.ts";
 import { estimateTokens } from "../provider_helpers.ts";
 import { logRawUsageOnce, normalizeClaudeCliUsage } from "../usage.ts";
+import { Command } from "../../../lib/proc.ts";
 
 // Claude Code transport.
 //
@@ -55,19 +59,19 @@ export function isClaudeWsBaseUrl(baseUrl: string): boolean {
 
 function isExecutableFile(path: string): boolean {
   try {
-    return Deno.statSync(path).isFile;
+    return statSync(path).isFile();
   } catch {
     return false;
   }
 }
 
-// Resolve an absolute path to the `claude` binary. Deno.Command will not search
-// PATH for a bare program name when the child env is replaced (clearEnv), so we
-// resolve it ourselves and fall back to the bare name otherwise.
+// Resolve an absolute path to the `claude` binary. The child env is replaced
+// (clearEnv) and service PATHs often miss per-user install dirs, so we resolve
+// it ourselves and fall back to the bare name otherwise.
 function resolveClaudeBin(): string {
   let configured = "";
   try {
-    configured = Deno.env.get("CLAUDE_CODE_BIN")?.trim() || "";
+    configured = process.env["CLAUDE_CODE_BIN"]?.trim() || "";
   } catch {
     configured = "";
   }
@@ -77,14 +81,14 @@ function resolveClaudeBin(): string {
 
   let pathEnv = "";
   try {
-    pathEnv = Deno.env.get("PATH") || "";
+    pathEnv = process.env["PATH"] || "";
   } catch {
     pathEnv = "";
   }
 
   let home = "";
   try {
-    home = Deno.env.get("HOME") || "";
+    home = process.env["HOME"] || "";
   } catch {
     home = "";
   }
@@ -117,7 +121,7 @@ function resolveClaudeBin(): string {
 // Force subscription OAuth auth: never leak an API key to the child CLI.
 function buildClaudeChildEnv(): { env: Record<string, string>; clearEnv: boolean } {
   try {
-    const env = Deno.env.toObject();
+    const env = ({ ...process.env } as Record<string, string>);
     delete env.ANTHROPIC_API_KEY;
     delete env.ANTHROPIC_AUTH_TOKEN;
     return { env, clearEnv: true };
@@ -136,13 +140,13 @@ function buildClaudeChildEnv(): { env: Record<string, string>; clearEnv: boolean
 let hermeticCwd: string | null = null;
 function resolveHermeticCwd(): string {
   if (!hermeticCwd) {
-    hermeticCwd = Deno.makeTempDirSync({ prefix: "capillary_claude_hermetic_" });
+    hermeticCwd = mkdtempSync(join(tmpdir(), "capillary_claude_hermetic_"));
   }
   return hermeticCwd;
 }
 
 function defaultClaudeCliSpawner(invocation: ClaudeCliInvocation): ClaudeCliProcess {
-  const command = new Deno.Command(resolveClaudeBin(), {
+  const command = new Command(resolveClaudeBin(), {
     args: invocation.args,
     cwd: resolveHermeticCwd(),
     stdin: "piped",

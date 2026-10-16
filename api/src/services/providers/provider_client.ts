@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
 import {
-  ProviderDescriptor,
-  ProviderRequest,
-  ProviderResponse,
-  ProviderResult,
-  ProviderStreamCallback,
+  type ProviderDescriptor,
+  type ProviderRequest,
+  type ProviderResponse,
+  type ProviderResult,
+  type ProviderStreamCallback,
 } from "./provider_core.ts";
 import { resolveProviderOps } from "./provider_registry.ts";
 

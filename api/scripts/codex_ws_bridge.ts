@@ -6,7 +6,7 @@
 // Run this on the machine where the Codex CLI is installed and logged in, then
 // point a containerized Capillary API at it:
 //
-//   deno run --allow-net --allow-run --allow-env api/scripts/codex_ws_bridge.ts
+//   node api/scripts/codex_ws_bridge.ts
 //   # container env: CODEX_APP_SERVER_URL=ws://host.docker.internal:7899
 //
 // Protocol: one JSON-RPC message per WebSocket text frame (matching the
@@ -21,12 +21,17 @@
 //                       network can reach it; firewall accordingly)
 //   CODEX_APP_SERVER_CMD  override the spawned command (default "codex app-server")
 
-const port = Number(Deno.env.get("CODEX_BRIDGE_PORT") || 7899);
-const hostname = Deno.env.get("CODEX_BRIDGE_HOST") || "0.0.0.0";
+
+import { statSync } from "node:fs";
+import { Command, type ChildProcess } from "../src/lib/proc.ts";
+import { serve, upgradeWebSocket, type UpgradedWebSocket } from "../src/lib/serve.ts";
+
+const port = Number(process.env["CODEX_BRIDGE_PORT"] || 7899);
+const hostname = process.env["CODEX_BRIDGE_HOST"] || "0.0.0.0";
 
 function isExecutableFile(path: string): boolean {
   try {
-    return Deno.statSync(path).isFile;
+    return statSync(path).isFile();
   } catch {
     return false;
   }
@@ -36,8 +41,8 @@ function isExecutableFile(path: string): boolean {
 // miss per-user install dirs (~/.local/bin), and a bare name then fails with
 // "entity not found".
 function resolveCodexBin(): string {
-  const home = Deno.env.get("HOME") || "";
-  const searchDirs = (Deno.env.get("PATH") || "").split(":");
+  const home = process.env["HOME"] || "";
+  const searchDirs = (process.env["PATH"] || "").split(":");
   if (home) {
     searchDirs.push(`${home}/.local/bin`, `${home}/.npm-global/bin`, `${home}/bin`);
   }
@@ -55,7 +60,7 @@ function resolveCodexBin(): string {
 }
 
 function resolveCommand(): { command: string; args: string[] } {
-  const override = Deno.env.get("CODEX_APP_SERVER_CMD")?.trim();
+  const override = process.env["CODEX_APP_SERVER_CMD"]?.trim();
   if (override) {
     const parts = override.split(/\s+/);
     return { command: parts[0], args: parts.slice(1) };
@@ -67,7 +72,7 @@ function log(...parts: unknown[]): void {
   console.log(`[codex-ws-bridge ${new Date().toISOString()}]`, ...parts);
 }
 
-async function pipeChildToSocket(child: Deno.ChildProcess, socket: WebSocket): Promise<void> {
+async function pipeChildToSocket(child: ChildProcess, socket: UpgradedWebSocket): Promise<void> {
   const decoder = new TextDecoder();
   let buffer = "";
   for await (const chunk of child.stdout) {
@@ -84,7 +89,7 @@ async function pipeChildToSocket(child: Deno.ChildProcess, socket: WebSocket): P
   }
 }
 
-async function drainStderr(child: Deno.ChildProcess): Promise<void> {
+async function drainStderr(child: ChildProcess): Promise<void> {
   const decoder = new TextDecoder();
   for await (const chunk of child.stderr) {
     const text = decoder.decode(chunk).trim();
@@ -94,11 +99,11 @@ async function drainStderr(child: Deno.ChildProcess): Promise<void> {
   }
 }
 
-function handleConnection(socket: WebSocket): void {
+function handleConnection(socket: UpgradedWebSocket): void {
   const { command, args } = resolveCommand();
-  let child: Deno.ChildProcess;
+  let child: ChildProcess;
   try {
-    child = new Deno.Command(command, {
+    child = new Command(command, {
       args,
       stdin: "piped",
       stdout: "piped",
@@ -148,11 +153,11 @@ function handleConnection(socket: WebSocket): void {
   child.status.then((status) => shutdown(`app_server_exited code=${status.code}`));
 }
 
-Deno.serve({ port, hostname }, (request) => {
+serve({ port, hostname }, (request) => {
   if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
     return new Response("codex ws bridge — connect with a WebSocket client", { status: 426 });
   }
-  const { socket, response } = Deno.upgradeWebSocket(request);
+  const { socket, response } = upgradeWebSocket(request);
   socket.onopen = () => handleConnection(socket);
   return response;
 });

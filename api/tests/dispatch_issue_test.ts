@@ -5,7 +5,7 @@
 // drops unknown usernames; a real-but-unassignable bot (copilot-swe-agent
 // behind a token shape without Copilot assignment rights) 422s, and that must
 // degrade to `assigned: false` — never sink the issue itself.
-import { assert, assertEquals } from "jsr:@std/assert";
+import { test, assert, assertEquals } from "./support/harness.ts";
 import { CelerReviewRepository } from "../src/repositories/review_repository.ts";
 import { GitHubOakService } from "../src/services/github_service.ts";
 
@@ -75,7 +75,7 @@ const draft = {
   assignees: ["Copilot"],
 };
 
-Deno.test("should_create_issue_without_assignees_in_the_create_call", async () => {
+test("should_create_issue_without_assignees_in_the_create_call", async () => {
   const { service, calls } = await buildService(() =>
     new Response(JSON.stringify({ assignees: [{ login: "Copilot" }] }), { status: 201 })
   );
@@ -86,7 +86,7 @@ Deno.test("should_create_issue_without_assignees_in_the_create_call", async () =
   assertEquals(issue.assigned, true);
 });
 
-Deno.test("should_keep_the_issue_and_report_unassigned_when_github_refuses_the_bot", async () => {
+test("should_keep_the_issue_and_report_unassigned_when_github_refuses_the_bot", async () => {
   const { service } = await buildService(() =>
     new Response(
       JSON.stringify({ message: "Validation Failed" }),
@@ -98,7 +98,7 @@ Deno.test("should_keep_the_issue_and_report_unassigned_when_github_refuses_the_b
   assertEquals(issue.assigned, false);
 });
 
-Deno.test("should_report_unassigned_when_github_silently_drops_the_assignee", async () => {
+test("should_report_unassigned_when_github_silently_drops_the_assignee", async () => {
   const { service } = await buildService(() =>
     new Response(JSON.stringify({ assignees: [] }), { status: 201 })
   );
@@ -106,7 +106,7 @@ Deno.test("should_report_unassigned_when_github_silently_drops_the_assignee", as
   assertEquals(issue.assigned, false);
 });
 
-Deno.test("should_not_count_a_different_returned_login_as_assigned", async () => {
+test("should_not_count_a_different_returned_login_as_assigned", async () => {
   // The 2026-07-14 live failure: REST silently drops "copilot-swe-agent"
   // (the GraphQL actor login) — only "Copilot" is the REST-assignable Bot.
   // A response whose assignees don't include the requested login is a miss.
@@ -120,7 +120,7 @@ Deno.test("should_not_count_a_different_returned_login_as_assigned", async () =>
   assertEquals(issue.assigned, false);
 });
 
-Deno.test("should_retry_assignment_with_the_instance_token_when_the_member_token_is_refused", async () => {
+test("should_retry_assignment_with_the_instance_token_when_the_member_token_is_refused", async () => {
   const { service, calls } = await buildService((token) =>
     token === "member-token"
       ? new Response(JSON.stringify({ message: "Validation Failed" }), { status: 422 })
@@ -133,7 +133,7 @@ Deno.test("should_retry_assignment_with_the_instance_token_when_the_member_token
   assertEquals(issue.assigned, true);
 });
 
-Deno.test("should_skip_assignment_entirely_when_no_assignees_are_requested", async () => {
+test("should_skip_assignment_entirely_when_no_assignees_are_requested", async () => {
   const { service, calls } = await buildService(() =>
     new Response(JSON.stringify({ assignees: [] }), { status: 201 })
   );

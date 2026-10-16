@@ -5,33 +5,33 @@
 // responder to JavaScript dialogs (an unanswered dialog freezes the page and
 // used to stall runs to their time budget), the policy only governs
 // confirm/prompt, and protocol-event dispatch isolates subscribers.
-import { assert, assertEquals } from "jsr:@std/assert";
+import { test, assert, assertEquals } from "./support/harness.ts";
 import { CdpEventHub, resolveDialogAction } from "../src/services/cdp_driver_service.ts";
 import { formatDialogObservation } from "../src/services/cdp_retv_agent_service.ts";
 
-Deno.test("alert is accepted under both policies — it has no other answer", () => {
+test("alert is accepted under both policies — it has no other answer", () => {
   assertEquals(resolveDialogAction("alert", "dismiss").accept, true);
   assertEquals(resolveDialogAction("alert", "accept").accept, true);
 });
 
-Deno.test("beforeunload is accepted under both policies — dismissing stalls navigation", () => {
+test("beforeunload is accepted under both policies — dismissing stalls navigation", () => {
   assertEquals(resolveDialogAction("beforeunload", "dismiss").accept, true);
   assertEquals(resolveDialogAction("beforeunload", "accept").accept, true);
 });
 
-Deno.test("confirm and prompt follow the session policy", () => {
+test("confirm and prompt follow the session policy", () => {
   assertEquals(resolveDialogAction("confirm", "dismiss").accept, false);
   assertEquals(resolveDialogAction("prompt", "dismiss").accept, false);
   assertEquals(resolveDialogAction("confirm", "accept").accept, true);
   assertEquals(resolveDialogAction("prompt", "accept").accept, true);
 });
 
-Deno.test("an unknown dialog type defaults to the policy, not a crash", () => {
+test("an unknown dialog type defaults to the policy, not a crash", () => {
   assertEquals(resolveDialogAction("mystery", "dismiss").accept, false);
   assertEquals(resolveDialogAction("mystery", "accept").accept, true);
 });
 
-Deno.test("dialog observation names the type, quotes the message, states the action", () => {
+test("dialog observation names the type, quotes the message, states the action", () => {
   const line = formatDialogObservation({
     dialogType: "confirm",
     message: "Delete item?",
@@ -40,7 +40,7 @@ Deno.test("dialog observation names the type, quotes the message, states the act
   assertEquals(line, 'confirm appeared: "Delete item?" — auto-dismissed');
 });
 
-Deno.test("dialog observation truncates a long message", () => {
+test("dialog observation truncates a long message", () => {
   const line = formatDialogObservation({
     dialogType: "alert",
     message: "x".repeat(500),
@@ -51,7 +51,7 @@ Deno.test("dialog observation truncates a long message", () => {
   assert(line.endsWith("— auto-accepted"));
 });
 
-Deno.test("truncation never splits a surrogate pair (page-controlled text)", () => {
+test("truncation never splits a surrogate pair (page-controlled text)", () => {
   // 139 ASCII points + an astral emoji straddling the old UTF-16 cut point.
   const line = formatDialogObservation({
     dialogType: "confirm",
@@ -61,7 +61,7 @@ Deno.test("truncation never splits a surrogate pair (page-controlled text)", () 
   assert(line.includes("💥…"));
 });
 
-Deno.test("event hub delivers to every subscriber of a method", () => {
+test("event hub delivers to every subscriber of a method", () => {
   const hub = new CdpEventHub();
   const seen: string[] = [];
   hub.on("Page.javascriptDialogOpening", (params) => seen.push(`a:${params.message}`));
@@ -70,7 +70,7 @@ Deno.test("event hub delivers to every subscriber of a method", () => {
   assertEquals(seen, ["a:hi", "b:hi"]);
 });
 
-Deno.test("event hub only delivers to the dispatched method", () => {
+test("event hub only delivers to the dispatched method", () => {
   const hub = new CdpEventHub();
   const seen: string[] = [];
   hub.on("Network.responseReceived", () => seen.push("network"));
@@ -78,7 +78,7 @@ Deno.test("event hub only delivers to the dispatched method", () => {
   assertEquals(seen, []);
 });
 
-Deno.test("unsubscribe stops delivery without touching peers", () => {
+test("unsubscribe stops delivery without touching peers", () => {
   const hub = new CdpEventHub();
   const seen: string[] = [];
   const off = hub.on("Page.frameNavigated", () => seen.push("gone"));
@@ -88,7 +88,7 @@ Deno.test("unsubscribe stops delivery without touching peers", () => {
   assertEquals(seen, ["stays"]);
 });
 
-Deno.test("a throwing handler never blocks its peers", () => {
+test("a throwing handler never blocks its peers", () => {
   const hub = new CdpEventHub();
   const seen: string[] = [];
   hub.on("Network.loadingFailed", () => {
@@ -99,7 +99,7 @@ Deno.test("a throwing handler never blocks its peers", () => {
   assertEquals(seen, ["survived"]);
 });
 
-Deno.test("clear drops every subscription", () => {
+test("clear drops every subscription", () => {
   const hub = new CdpEventHub();
   const seen: string[] = [];
   hub.on("Page.loadEventFired", () => seen.push("fired"));

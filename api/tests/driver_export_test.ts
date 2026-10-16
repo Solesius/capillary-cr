@@ -3,9 +3,9 @@
 //
 // Pins the run-skeleton codegen: tool→Playwright mapping, source-safe
 // escaping, failed-step quarantine, and the runsheet's action table.
-import { assert, assertEquals } from "jsr:@std/assert";
+import { test, assert, assertEquals } from "./support/harness.ts";
 import { buildAgentRunsheet, buildPlaywrightSpec } from "../src/services/driver_export.ts";
-import { RetvCdpRunRecord } from "../src/domain/entities.ts";
+import { type RetvCdpRunRecord } from "../src/domain/entities.ts";
 
 function makeRecord(): RetvCdpRunRecord {
   return {
@@ -87,14 +87,14 @@ function makeRecord(): RetvCdpRunRecord {
   };
 }
 
-Deno.test("playwright spec maps tools and escapes selectors safely", () => {
+test("playwright spec maps tools and escapes selectors safely", () => {
   const spec = buildPlaywrightSpec(makeRecord());
   assert(spec.includes('await page.goto("http://localhost:4200/login");'));
   assert(spec.includes('await page.locator("input[name=\\"email\\"]").first().fill("a@b.dev");'));
   assert(spec.includes('import { expect, test } from "@playwright/test";'));
 });
 
-Deno.test("playwright spec quarantines steps that failed in the recorded run", () => {
+test("playwright spec quarantines steps that failed in the recorded run", () => {
   const spec = buildPlaywrightSpec(makeRecord());
   assert(spec.includes("FAILED in the recorded run"));
   // The failed assert is present but commented — never silently replayed.
@@ -102,12 +102,12 @@ Deno.test("playwright spec quarantines steps that failed in the recorded run", (
   assert(!spec.includes('\n  await expect(page.locator("body")'));
 });
 
-Deno.test("playwright spec comments unknown tools instead of guessing", () => {
+test("playwright spec comments unknown tools instead of guessing", () => {
   const spec = buildPlaywrightSpec(makeRecord());
   assert(spec.includes("// unsupported tool mystery"));
 });
 
-Deno.test("runsheet carries goal, ordered actions with intent, and outcomes", () => {
+test("runsheet carries goal, ordered actions with intent, and outcomes", () => {
   const sheet = buildAgentRunsheet(makeRecord());
   assert(sheet.includes("## Goal"));
   assert(sheet.includes("| 1 | 1 | navigate |"));
@@ -117,7 +117,7 @@ Deno.test("runsheet carries goal, ordered actions with intent, and outcomes", ()
   assert(sheet.includes("whitespace-normalized"));
 });
 
-Deno.test("unexecuted tail tool calls are quarantined, not laundered into passes", () => {
+test("unexecuted tail tool calls are quarantined, not laundered into passes", () => {
   const record = makeRecord();
   // Cycle 1 planned two calls but only executed the first (crashed mid-batch).
   record.trace!.cycles[0].steps = [record.trace!.cycles[0].steps[0]];
@@ -127,7 +127,7 @@ Deno.test("unexecuted tail tool calls are quarantined, not laundered into passes
   assert(spec.includes("FAILED in the recorded run"));
 });
 
-Deno.test("assertText equals exports as exact toHaveText, not containment", () => {
+test("assertText equals exports as exact toHaveText, not containment", () => {
   const record = makeRecord();
   record.trace!.cycles[1].toolCalls[0] = {
     tool: "assertText",
@@ -140,7 +140,7 @@ Deno.test("assertText equals exports as exact toHaveText, not containment", () =
   assert(!spec.includes('toContainText("Welcome back")'));
 });
 
-Deno.test("typed credentials are redacted to env placeholders in both artifacts", () => {
+test("typed credentials are redacted to env placeholders in both artifacts", () => {
   const record = makeRecord();
   record.trace!.cycles[0].toolCalls[1] = {
     tool: "type",
@@ -156,7 +156,7 @@ Deno.test("typed credentials are redacted to env placeholders in both artifacts"
   assert(sheet.includes("redacted-secret"));
 });
 
-Deno.test("runsheet neutralizes backticks so args cannot break the table", () => {
+test("runsheet neutralizes backticks so args cannot break the table", () => {
   const record = makeRecord();
   record.trace!.cycles[0].toolCalls[1] = {
     tool: "type",

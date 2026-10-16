@@ -1,5 +1,11 @@
 # Registry-first single-instance deployment for Capillary.
 #
+# Same project name, service, ports, env surface and named volumes as the
+# Deno-era compose file, so `docker compose up -d` on a host that ran an
+# older release reuses its data as-is (see docs/node-migration.md). To run a
+# second stack beside an existing one, give it its own project and port:
+#   CAPILLARY_PORT=8090 docker compose -p capillary-next up -d
+#
 # Default (pull the published image from GHCR):
 #   CAPILLARY_IMAGE=ghcr.io/solesius/capillary-cr:latest docker compose up -d
 # or set CAPILLARY_IMAGE in a .env file (see .env.example) and run:
@@ -19,6 +25,8 @@
 # `pull_policy: missing` means an already-present image is used as-is and is only
 # pulled when absent; an explicit `docker compose build` (or `make docker-build`)
 # overrides it with a locally built image tagged the same as CAPILLARY_IMAGE.
+name: capillary
+
 services:
   capillary:
     image: "${CAPILLARY_IMAGE:-ghcr.io/solesius/capillary-cr:latest}"
@@ -26,9 +34,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    # (No init: needed — the deno base image already runs tini as PID 1, so
-    # chromium zombies from RetV runs are reaped; adding docker-init would
-    # just nest a second tini that warns.)
+    # (No init: needed — the image runs tini as PID 1, so chromium zombies
+    # from RetV runs are reaped; adding docker-init would just nest a second
+    # tini that warns.)
     # Review runs stream a lot of stdout; uncapped json-file logs turn into
     # real disk I/O on laptop/WSL2 hosts. Cap and rotate.
     logging:
@@ -40,12 +48,14 @@ services:
       - "${CAPILLARY_PORT:-8080}:8080"
     environment:
       PORT: "8080"
-      # V8 tuning passthrough (Deno reads this natively). Null-form: the var
-      # reaches the container ONLY when set in .env/shell — Deno hard-errors
-      # on an empty DENO_V8_FLAGS, so never default it to "". Laptops can
+      # V8 tuning passthrough. DENO_V8_FLAGS (the Deno-era knob) keeps
+      # working: the entrypoint hands its comma-separated flags to node.
+      # NODE_OPTIONS is the native knob (it admits only a subset of V8 flags). Null-form: the
+      # vars reach the container ONLY when set in .env/shell. Laptops can
       # bound GC pressure with e.g.:
       #   DENO_V8_FLAGS=--max-old-space-size=768,--optimize-for-size
       DENO_V8_FLAGS:
+      NODE_OPTIONS:
       CORS_ORIGIN: "${CORS_ORIGIN:-http://localhost:8080}"
       CAPILLARY_SERVE_WEB: "1"
       CAPILLARY_WEB_DIST: "/app/web-dist"
@@ -114,9 +124,9 @@ services:
       - capillary-data:/var/lib/capillary
       - capillary-captures:/app/api/.data/review_captures
     healthcheck:
-      # Each probe boots a fresh Deno runtime — constant background CPU on
+      # Each probe boots a fresh node process — constant background CPU on
       # laptops. 60s keeps orchestrators honest at half the idle cost.
-      test: ["CMD", "deno", "eval", "const r = await fetch(`http://127.0.0.1:$${Deno.env.get('PORT') || 8080}/healthz`); if (!r.ok) Deno.exit(1);"]
+      test: ["CMD", "node", "-e", "fetch(`http://127.0.0.1:$${process.env.PORT || 8080}/healthz`).then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
       interval: 60s
       timeout: 5s
       start_period: 20s

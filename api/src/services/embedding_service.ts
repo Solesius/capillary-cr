@@ -24,6 +24,9 @@
 // mount a cache volume) so containers embed offline. Until integrated we do
 // not add the ~30MB quantized model to the image.
 
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 export interface FileForEmbedding {
   path: string;
   content: string;
@@ -66,22 +69,22 @@ type FeatureExtractionPipeline = (
 export class MiniLmEmbeddingService implements FileEmbeddingProvider {
   #pipeline: Promise<FeatureExtractionPipeline> | null = null;
 
+  private readonly model: string;
   constructor(
-    private readonly model: string = Deno.env.get("CAPILLARY_EMBEDDING_MODEL")?.trim() ||
+    model: string = process.env["CAPILLARY_EMBEDDING_MODEL"]?.trim() ||
       DEFAULT_EMBEDDING_MODEL,
-  ) {}
+  ) {
+    this.model = model;
+  }
 
   #loadPipeline(): Promise<FeatureExtractionPipeline> {
     if (!this.#pipeline) {
       this.#pipeline = (async () => {
-        // URL import of the *web* bundle deliberately: the npm specifier
-        // resolves the node build, whose native onnxruntime binding
-        // hard-crashes Deno's isolate. v2's classic wasm loader runs under
-        // Deno (v3's ort-1.22 loader env-sniffs itself into dead ends).
-        // Pure CPU, identical on host/container/CI.
-        const { pipeline, env } = await import(
-          "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/+esm"
-        ) as unknown as {
+        // The node build of transformers v2 (onnxruntime-node, CPU). Same
+        // pinned release the Deno build pulled as a web bundle, now a locked
+        // dependency: no CDN fetch at runtime. Loaded lazily so a missing or
+        // broken native backend only disables embeddings, never boot.
+        const { pipeline, env } = await import("@xenova/transformers") as unknown as {
           pipeline: (
             task: string,
             model?: string,
@@ -89,6 +92,7 @@ export class MiniLmEmbeddingService implements FileEmbeddingProvider {
           ) => Promise<unknown>;
           env: {
             allowLocalModels?: boolean;
+            cacheDir?: string;
             backends?: { onnx?: { wasm?: { numThreads?: number } } };
           };
         };
@@ -97,8 +101,12 @@ export class MiniLmEmbeddingService implements FileEmbeddingProvider {
         // logging noise on every load. Hub download + cache is the only path
         // we use.
         env.allowLocalModels = false;
-        // Single wasm thread: Deno lacks the worker shims the
-        // multi-threaded path expects.
+        // The package default caches inside node_modules, which is read-only
+        // in the container. Use a writable, ephemeral location instead.
+        env.cacheDir = process.env["CAPILLARY_EMBEDDING_CACHE"]?.trim() ||
+          join(tmpdir(), "capillary-models");
+        // Single wasm thread if the wasm backend is ever selected: keeps CPU
+        // use and memory flat and identical to the previous runtime.
         if (env.backends?.onnx?.wasm) {
           env.backends.onnx.wasm.numThreads = 1;
         }

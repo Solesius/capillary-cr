@@ -4,7 +4,7 @@
 // Agent-grade review CLI: run a full Capillary review from a terminal, CI
 // job, or another agent. No server required — the pipeline runs in-process.
 //
-//   GITHUB_TOKEN=ghp_... deno task review --repo owner/name --pr 123
+//   GITHUB_TOKEN=ghp_... npm run review -- --repo owner/name --pr 123
 //
 // Flags:
 //   --repo <owner/name>   repository (required)
@@ -22,25 +22,33 @@
 // resolves exactly as the server does: Codex/Claude CLI logins, ws bridges
 // via CODEX_APP_SERVER_URL / CLAUDE_CODE_URL, or provider API keys.
 
-import { parseArgs } from "jsr:@std/cli/parse-args";
+import { parseArgs } from "node:util";
 import { deps } from "../src/http/deps.ts";
-import { ReviewRunEvent } from "../src/domain/review_phase.ts";
+import { type ReviewRunEvent } from "../src/domain/review_phase.ts";
 
 function fail(message: string): never {
   console.error(`capillary-review: ${message}`);
-  Deno.exit(2);
+  process.exit(2);
 }
 
-const args = parseArgs(Deno.args, {
-  string: ["repo", "pr", "max-cycles"],
-  boolean: ["json", "quiet", "help"],
-});
+const args = parseArgs({
+  args: process.argv.slice(2),
+  strict: false,
+  options: {
+    repo: { type: "string" },
+    pr: { type: "string" },
+    "max-cycles": { type: "string" },
+    json: { type: "boolean" },
+    quiet: { type: "boolean" },
+    help: { type: "boolean" },
+  },
+}).values;
 
 if (args.help) {
   console.error(
-    "usage: GITHUB_TOKEN=... deno task review --repo owner/name --pr 123 [--max-cycles n] [--json] [--quiet]",
+    "usage: GITHUB_TOKEN=... npm run review -- --repo owner/name --pr 123 [--max-cycles n] [--json] [--quiet]",
   );
-  Deno.exit(0);
+  process.exit(0);
 }
 
 const repoFullName = String(args.repo || "").trim();
@@ -49,8 +57,8 @@ if (!repoFullName.includes("/") || !prNumber) {
   fail("required: --repo owner/name and --pr <number> (see --help)");
 }
 
-const token = Deno.env.get("GITHUB_TOKEN")?.trim() ||
-  Deno.env.get("CAPILLARY_GITHUB_TOKEN")?.trim();
+const token = process.env["GITHUB_TOKEN"]?.trim() ||
+  process.env["CAPILLARY_GITHUB_TOKEN"]?.trim();
 if (!token) {
   fail("GITHUB_TOKEN env var is required");
 }
@@ -113,7 +121,7 @@ try {
 
   // The stream result is the compact summary; the full artifact (report,
   // verdict, findings) is the persisted run record.
-  const record = deps.repository.getReviewAgentRun(result.runId);
+  const record = await deps.repository.getReviewAgentRun(result.runId);
   if (!record) {
     fail(`run ${result.runId} completed but no record was persisted`);
   }
@@ -124,7 +132,7 @@ try {
     console.log(record.report);
   }
   narrate(`verdict: ${record.verdict} (${record.findingCount} findings)`);
-  Deno.exit(record.verdict === "request_changes" ? 1 : 0);
+  process.exit(record.verdict === "request_changes" ? 1 : 0);
 } catch (error) {
   fail(error instanceof Error ? error.message : String(error));
 }

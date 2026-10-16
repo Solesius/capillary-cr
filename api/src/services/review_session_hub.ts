@@ -9,7 +9,7 @@
 // between screens, or attaching twice never affects the run. Multiple
 // sessions run concurrently; each is keyed by its runId.
 
-import { ReviewRunEvent } from "../domain/review_phase.ts";
+import { type ReviewRunEvent } from "../domain/review_phase.ts";
 
 export interface ReviewSessionSummary {
   runId: string;
@@ -52,7 +52,10 @@ export type RunStarter = (
 export class ReviewSessionHub {
   #sessions = new Map<string, SessionState>();
 
-  constructor(private readonly startRun: RunStarter) {}
+  private readonly startRun: RunStarter;
+  constructor(startRun: RunStarter) {
+    this.startRun = startRun;
+  }
 
   /**
    * Launch a review as a detached session. Resolves as soon as the run has

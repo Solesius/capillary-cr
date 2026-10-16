@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# v1 (Deno) ↔ v2 (Node) compatibility check. Run from the repository root.
+# Deno (v1, <= 1.2.1) ↔ Node (v2) compatibility check. Run from the repository
+# root; used to gate the cutover and to verify rollback safety afterwards.
 #
-#   v2/compat/run.sh [v1-image] [v2-image] [source-volume]
+#   compat/run.sh [v1-image] [v2-image] [source-volume]
 #
 # 1. Wire parity: both images on fresh volumes, the same request script
 #    replayed against each (login gate on, then off), responses diffed —
@@ -14,8 +15,8 @@
 # storage snapshots are byte-identical; v1 sees v2's write.
 set -euo pipefail
 
-V1=${1:-capillary-cr:v1-head}
-V2=${2:-capillary-cr:v2-node}
+V1=${1:-ghcr.io/solesius/capillary-cr:1.2.1}
+V2=${2:-ghcr.io/solesius/capillary-cr:latest}
 SRC=${3:-capillary_capillary-data}
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT="$(mktemp -d)"

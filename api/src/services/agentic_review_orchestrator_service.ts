@@ -2,19 +2,19 @@
 // Copyright 2026 Khalil Warren — capillary
 import { AppError } from "../domain/errors.ts";
 import {
-  ReviewAgentRunListItem,
-  ReviewAgentRunRecord,
-  ReviewFinding,
-  ReviewRun,
+  type ReviewAgentRunListItem,
+  type ReviewAgentRunRecord,
+  type ReviewFinding,
+  type ReviewRun,
 } from "../domain/entities.ts";
 import {
-  ReviewCycleSummary,
-  ReviewPass,
-  ReviewRunEvent,
-  ReviewRunResult,
+  type ReviewCycleSummary,
+  type ReviewPass,
+  type ReviewRunEvent,
+  type ReviewRunResult,
 } from "../domain/review_phase.ts";
 import { enforceDefensiveInput } from "../lib/validation.ts";
-import { ReviewRepository } from "../repositories/review_repository.ts";
+import { type ReviewRepository } from "../repositories/review_repository.ts";
 import { ArtifactService } from "./artifact_service.ts";
 import { ClickClackCoordinationService } from "./click_clack_coordination_service.ts";
 import { DiffDagService } from "./diff_dag_service.ts";
@@ -57,15 +57,29 @@ const MAX_AGENTIC_CYCLES = 6;
  * unit-tested logic in agentic_review_logic.ts.
  */
 export class AgenticReviewService {
+  private readonly repository: ReviewRepository;
+  private readonly clickClack: ClickClackCoordinationService;
+  private readonly diffDagService: DiffDagService;
+  private readonly githubService: GitHubOakService;
+  private readonly tcsrct: TcsrctReviewService;
+  private readonly artifacts: ArtifactService;
+  private readonly llmProvider?: LlmProviderService;
   constructor(
-    private readonly repository: ReviewRepository,
-    private readonly clickClack: ClickClackCoordinationService,
-    private readonly diffDagService: DiffDagService,
-    private readonly githubService: GitHubOakService,
-    private readonly tcsrct: TcsrctReviewService,
-    private readonly artifacts: ArtifactService,
-    private readonly llmProvider?: LlmProviderService,
+    repository: ReviewRepository,
+    clickClack: ClickClackCoordinationService,
+    diffDagService: DiffDagService,
+    githubService: GitHubOakService,
+    tcsrct: TcsrctReviewService,
+    artifacts: ArtifactService,
+    llmProvider?: LlmProviderService,
   ) {
+    this.repository = repository;
+    this.clickClack = clickClack;
+    this.diffDagService = diffDagService;
+    this.githubService = githubService;
+    this.tcsrct = tcsrct;
+    this.artifacts = artifacts;
+    this.llmProvider = llmProvider;
     // The TCSRTC review agent is constructed from services already held here,
     // so wiring it in requires no constructor/DI signature changes.
     this.reviewAgent = new ReviewAgentService(repository, githubService, tcsrct);
@@ -84,7 +98,14 @@ export class AgenticReviewService {
 
   async beginReview(pullRequestId: string, repositoryId?: string): Promise<ReviewRun> {
     const { runId, resolvedRepositoryId } = await this.createRun(pullRequestId, repositoryId);
-    await this.executeReviewLoop(runId, pullRequestId, resolvedRepositoryId, NOOP_EMIT);
+    try {
+      await this.executeReviewLoop(runId, pullRequestId, resolvedRepositoryId, NOOP_EMIT);
+    } catch (error) {
+      // Same terminal state as the async and streaming entry points: a phase
+      // that throws must not leave the stored run mid-pipeline forever.
+      await this.failRun(runId, error);
+      throw error;
+    }
     return this.repository.getReviewRun(runId);
   }
 
@@ -93,7 +114,10 @@ export class AgenticReviewService {
 
     queueMicrotask(() => {
       this.executeReviewLoop(runId, pullRequestId, resolvedRepositoryId, NOOP_EMIT)
-        .catch((error) => this.failRun(runId, error));
+        .catch((error) => this.failRun(runId, error))
+        // failRun writes to storage; if that fails too (e.g. the original error
+        // was a storage fault) log it rather than crash on an unhandled rejection.
+        .catch((error) => console.error("review run could not be marked failed", runId, error));
     });
 
     return this.repository.getReviewRun(runId);

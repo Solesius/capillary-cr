@@ -35,7 +35,7 @@ Pasting a PAT into the UI works for a quick trial (it stays in memory only), but
 
 ## Quick start — local
 
-Requirements: [Deno](https://deno.com/) 2.x, Node.js 22+.
+Requirements: Node.js 24+ (API), Node.js 22+ (web).
 
 ```bash
 git clone https://github.com/Solesius/capillary-cr.git && cd capillary-cr
@@ -96,12 +96,12 @@ Completion has teeth: `goalAchieved` is a verdict that requires quoted on-page e
 
 ## Stack
 
-- **API** — Deno + Oak (TypeScript). Single process on `:8080`.
+- **API** — Node 24 + Express 5 (TypeScript, run directly). Single process on `:8080`. Moved from Deno after 1.2.1 — see [docs/node-migration.md](docs/node-migration.md).
 - **Frontend** — Angular 20. Standalone components, signals and `computed`, `OnPush` throughout. No NGXS.
 - **Graph** — Zdog. Canvas-2D torus, deliberately lightweight — no WebGL dependency.
 - **Review engine** — TCSRTC-gated agentic loop with typed SSE events, hot-path coverage enforcement, and CPU semantic embeddings (MiniLM over wasm) relating files by meaning before any LLM call.
 - **Sessions** — reviews run as durable server-side sessions: bounce between screens or reload, re-attach with a full narrative replay; run several concurrently (with a token-cost warning before each additional session).
-- **LLM providers** — Anthropic, Gemini, OpenRouter, AWS Bedrock, GitHub Copilot, Codex. Server-side only; keys never touch the client.
+- **LLM providers** — Claude Code CLI, Codex, Anthropic, Gemini, OpenRouter, AWS Bedrock, GitHub Copilot. Server-side only; keys never touch the client.
 - **Durable storage** — [`celer-mem`](https://github.com/Solesius/celer-mem) over FFI, **RocksDB** backend (SQLite fallback on bare-metal macOS). celer is the **source of truth** for review artifacts; the process keeps only a bounded LRU cache in front of it, so resident memory stays flat under concurrent reviews and runs survive restarts. Persistence health is surfaced at `/healthz`. Optional: without `CAPILLARY_STORAGE_DIR` (or the native lib), the process runs fully in-memory.
 - **Browser agent** — Chrome DevTools Protocol. Auto-detects a local Chrome binary or connects to an existing CDP endpoint.
 
@@ -109,11 +109,12 @@ Completion has teeth: `goalAchieved` is a verdict that requires quoted on-page e
 
 ## Local development
 
-Requirements: Deno 2.x, Node.js 22+
+Requirements: Node.js 24+ (API), Node.js 22+ (web); `g++`, `librocksdb-dev`, `libsqlite3-dev` to build the optional native store (`make native`)
 
 ```bash
 make dev          # starts API (port 8080) and Angular dev server (port 4200) concurrently
-make test         # Deno type-check + test, Angular unit tests, Playwright e2e scaffold
+make test         # API tests, Angular unit tests, Playwright e2e scaffold
+make check        # API type-check
 ```
 
 GitHub access (recommended — environment token):
@@ -142,6 +143,8 @@ make docker-up
 
 The container serves the built Angular SPA and the API from the same origin on `:8080`. Durable storage and review captures live in docker-managed named volumes — no host directory setup or ownership configuration needed.
 
+**Upgrading from 1.2.x (Deno).** The API now runs on Node; the container contract is unchanged — same port, env vars, volumes and uid — so `docker compose pull && docker compose up -d` is the whole upgrade, and rolling back to 1.2.1 reads the data the new image wrote. A few HTTP edge cases were tightened (e.g. malformed JSON is now `400 invalid_json` instead of `500`); the full list is in [docs/node-migration.md](docs/node-migration.md).
+
 Key environment variables:
 
 ```
@@ -150,9 +153,21 @@ CORS_ORIGIN=https://your-host.example  # comma-separated allow-list
 GITHUB_OAUTH_CLIENT_ID=...
 GITHUB_OAUTH_CLIENT_SECRET=...         # optional; device flow works without it
 ANTHROPIC_API_KEY=...                  # or whichever provider you use
+NODE_OPTIONS=--max-old-space-size=768  # optional V8 tuning (DENO_V8_FLAGS still honoured)
 ```
 
 Full variable reference in [`.env.example`](.env.example).
+
+### Using your host's Claude Code / Codex login from the container
+
+The container can drive the CLIs you are already logged into on the host — no API key in Capillary. Run a bridge on the host (Node 24+, after `cd api && npm ci`) and point the container at it:
+
+```bash
+node api/scripts/claude_ws_bridge.ts   # → CLAUDE_CODE_URL=ws://host.docker.internal:7898
+node api/scripts/codex_ws_bridge.ts    # → CODEX_APP_SERVER_URL=ws://host.docker.internal:7899
+```
+
+The Claude bridge only spawns the exact non-interactive print-mode flag set Capillary emits; anything else is rejected before spawn. Compose already maps `host.docker.internal` on Linux.
 
 ---
 
@@ -162,7 +177,7 @@ Run a full review from a terminal, CI job, or another agent — no server needed
 
 ```bash
 cd api
-GITHUB_TOKEN=ghp_... deno task review --repo owner/name --pr 123
+GITHUB_TOKEN=ghp_... npm run review -- --repo owner/name --pr 123
 ```
 
 Live gate narration streams to stderr; the report lands on stdout (`--json` for the full run record). Exit codes are stable for automation: `0` approve/comment, `1` request_changes, `2` error. The model provider resolves exactly as the server does — Codex/Claude CLI logins, ws bridges, or provider keys.
@@ -174,10 +189,14 @@ Live gate narration streams to stderr; the report lands on stdout (`--json` for 
 Capillary exposes a stdio MCP server for agent-to-agent use:
 
 ```bash
-cd api && deno task mcp
+cd api && npm run mcp
 ```
 
-Tools cover GitHub identity, repository and PR listing, review run lifecycle, artifact retrieval, and CDP session management. Registration config for VS Code and Zed is at `.vscode/ihhi-mcp.json`.
+Tools cover GitHub identity, repository and PR listing, review run lifecycle, artifact retrieval, and CDP session management. Register it with any MCP client as a stdio server (Node 24+):
+
+```json
+{ "command": "node", "args": ["/path/to/capillary-cr/api/src/mcp/server.ts"], "env": { "GITHUB_TOKEN": "ghp_..." } }
+```
 
 ---
 
@@ -192,7 +211,7 @@ make cdp-retv ARGS="--provider anthropic --goal 'Open Run page and verify findin
 Or from a goal file:
 
 ```bash
-cd api && deno task cdp:retv --provider anthropic --goal-file scripts/goals/view-items.txt --reuse-session
+cd api && npm run cdp:retv -- --provider anthropic --goal-file scripts/goals/view-items.txt --reuse-session
 ```
 
 Supported providers: `anthropic`, `gemini`, `openrouter`, `ihhi_bedrock`, `github_copilot`, `codex_app_server`.

@@ -254,3 +254,25 @@ test("app: SPA fallback works when the web dist root is relative", async () => {
     await rm(root, { recursive: true });
   }
 });
+
+test("app: the GitHub App manifest rejects an org that would reshape its URL", async () => {
+  const previous = process.env["CAPILLARY_PUBLIC_URL"];
+  process.env["CAPILLARY_PUBLIC_URL"] = "https://capillary.example.com";
+  try {
+    await serve(createApp({ allowedOrigins: [ORIGIN], requireGithubLogin: false, webDistRoot: null }), async (base) => {
+      const ok = await fetch(`${base}/api/github/app/manifest?org=solesius-labs`);
+      assertEquals(ok.status, 200);
+      assertEquals(
+        ((await ok.json()) as { createUrl: string }).createUrl,
+        "https://github.com/organizations/solesius-labs/settings/apps/new",
+      );
+
+      const reshaped = await fetch(`${base}/api/github/app/manifest?org=${encodeURIComponent("evil/../x?y#z")}`);
+      assertEquals(reshaped.status, 400);
+      assertEquals(((await reshaped.json()) as { error: string }).error, "invalid_organization");
+    });
+  } finally {
+    if (previous === undefined) delete process.env["CAPILLARY_PUBLIC_URL"];
+    else process.env["CAPILLARY_PUBLIC_URL"] = previous;
+  }
+});

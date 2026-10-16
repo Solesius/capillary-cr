@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Khalil Warren — capillary
 import {
-  ChatMessage,
+  type ChatMessage,
   errorResult,
   okResult,
-  ProviderDescriptor,
-  ProviderError,
-  ProviderOps,
-  ProviderRequest,
-  ProviderResponse,
-  ProviderResult,
-  ProviderStreamCallback,
+  type ProviderDescriptor,
+  type ProviderError,
+  type ProviderOps,
+  type ProviderRequest,
+  type ProviderResponse,
+  type ProviderResult,
+  type ProviderStreamCallback,
 } from "../provider_core.ts";
 import { emitTextStream, estimateTokens, JSON_CONTENT_TYPE } from "../provider_helpers.ts";
 import { logRawUsageOnce, normalizeOpenAiUsage } from "../usage.ts";
