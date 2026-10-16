@@ -15,6 +15,8 @@ import {
 interface Recorded {
   url: URL;
   token: string | null;
+  method: string;
+  body: unknown;
 }
 
 /** Fake GitLab: `handle` answers each request; every call is recorded. */
@@ -25,7 +27,12 @@ function fakeGitLab(
   const fetcher = (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
     const headers = new Headers(init?.headers);
-    calls.push({ url, token: headers.get("PRIVATE-TOKEN") });
+    calls.push({
+      url,
+      token: headers.get("PRIVATE-TOKEN"),
+      method: init?.method ?? "GET",
+      body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+    });
     return Promise.resolve(handle(url));
   };
   return { fetch: fetcher as typeof fetch, calls };
@@ -407,4 +414,50 @@ test("should_prefer_draft_flags_and_treat_locked_as_closed", () => {
   assertEquals(mergeRequestState({ ...base, state: "locked" }), "closed");
   assertEquals(mergeRequestState({ ...base, state: "closed" }), "closed");
   assertEquals(mergeRequestState({ ...base, state: "merged", draft: true }), "merged");
+});
+
+test("should_attribute_gitlab_posts_to_the_member_only_when_asked", async () => {
+  const fake = fakeGitLab((url) => url.pathname.endsWith("/notes") ? jsonResponse({ id: 5 }) : jsonResponse(MR_OPEN));
+  const service = new GitLabService({ token: "glpat-test" }, null, fake.fetch);
+
+  await service.postPullRequestComment("gitlab-42", "7", "Looks good.", {
+    onBehalfOf: "gl-khalil",
+    asToken: "ghp_member_token",
+  });
+  await service.postPullRequestComment("gitlab-42", "7", "Looks good.");
+
+  const notes = fake.calls.filter((call) => call.method === "POST");
+  assertEquals(notes.length, 2);
+  assertEquals(notes[0].body, {
+    body: "Looks good.\n\n<sub>Posted on behalf of @gl-khalil via Capillary.</sub>",
+  });
+  assertEquals(notes[1].body, { body: "Looks good." });
+  // GitLab always posts with the server token; the member's GitHub token is never sent.
+  assertEquals(notes[0].token, "glpat-test");
+});
+
+test("should_abort_a_hung_gitlab_request_as_unreachable", async () => {
+  const hung = ((_input: string | URL | Request, init?: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      signal?.addEventListener("abort", () => reject(signal.reason));
+    })) as typeof fetch;
+  const service = new GitLabService({ token: "glpat-test", timeoutMs: 50 }, null, hung);
+  const started = Date.now();
+
+  const error = await assertRejects(() => service.getIdentity(), AppError);
+
+  assertEquals(error.code, "gitlab_unreachable");
+  assert(Date.now() - started < 5000, "the request should give up at the configured timeout");
+});
+
+test("should_keep_the_network_cause_in_the_unreachable_message_without_the_token", async () => {
+  const refused = (() => Promise.reject(new TypeError("self-signed certificate"))) as typeof fetch;
+  const service = new GitLabService({ token: "glpat-secret-value" }, null, refused);
+
+  const error = await assertRejects(() => service.getIdentity(), AppError);
+
+  assertEquals(error.code, "gitlab_unreachable");
+  assert(error.message.includes("self-signed certificate"), error.message);
+  assert(!error.message.includes("glpat-secret-value"), "the token must never appear in an error");
 });

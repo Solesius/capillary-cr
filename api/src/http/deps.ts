@@ -74,9 +74,11 @@ const clickClackService = new ClickClackCoordinationService(repository);
 const githubService = new GitHubOakService(repository);
 // GitLab: a full code host beside GitHub, token from server env only. Merge
 // requests and diffs land in the same catalog the review pipeline reads.
+const gitlabTimeoutMs = Number(process.env["GITLAB_REQUEST_TIMEOUT_MS"]);
 const gitlabService = new GitLabService({
   baseUrl: process.env["GITLAB_BASE_URL"],
   token: process.env["CAPILLARY_GITLAB_TOKEN"],
+  timeoutMs: Number.isFinite(gitlabTimeoutMs) && gitlabTimeoutMs > 0 ? gitlabTimeoutMs : undefined,
 }, repository);
 // The pipeline, posting routes, CLI and MCP talk to this; it serves each call
 // from the host the repository id names (`gitlab-<id>` or GitHub's numeric id).
@@ -87,13 +89,17 @@ const codeHost = new CodeHostRouter(githubService, gitlabService);
 // and private repos that device flow against the built-in OAuth app cannot —
 // so a containerized deploy with CAPILLARY_GITHUB_TOKEN set just works, no
 // UI login step.
+// The probe is not awaited: a slow or unreachable GitLab must not delay boot.
 if (gitlabService.configured()) {
-  const identity = await gitlabService.getIdentity().catch(() => null);
-  if (identity) {
-    console.log(`GitLab identity connected from environment token: ${identity.login}`);
-  } else {
-    console.warn("CAPILLARY_GITLAB_TOKEN set but GitLab connection failed; check the token and GITLAB_BASE_URL.");
-  }
+  void gitlabService.getIdentity().then(
+    (identity) => console.log(`GitLab identity connected from environment token: ${identity.login}`),
+    (error: unknown) =>
+      console.warn(
+        `CAPILLARY_GITLAB_TOKEN set but GitLab connection failed (${
+          error instanceof Error ? error.message : String(error)
+        }); check the token and GITLAB_BASE_URL.`,
+      ),
+  );
 }
 
 if (process.env["CAPILLARY_GITHUB_TOKEN"]?.trim() || process.env["GITHUB_TOKEN"]?.trim()) {

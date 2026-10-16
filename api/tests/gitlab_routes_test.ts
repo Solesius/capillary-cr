@@ -10,6 +10,7 @@ import { assertEquals, test } from "./support/harness.ts";
 import { AppError } from "../src/domain/errors.ts";
 import type { GitHubIdentity } from "../src/domain/entities.ts";
 import { createApp } from "../src/http/app.ts";
+import { deps } from "../src/http/deps.ts";
 import { errorMiddleware, sourceRoutes } from "../src/http/router.ts";
 import { mount } from "../src/http/routing.ts";
 
@@ -116,5 +117,66 @@ test("should_verify_the_merge_request_webhook_token_at_the_route", async () => {
   } finally {
     if (previous === undefined) delete process.env["GITLAB_WEBHOOK_SECRET"];
     else process.env["GITLAB_WEBHOOK_SECRET"] = previous;
+  }
+});
+
+test("should_queue_a_review_only_for_an_opened_merge_request_with_a_valid_token", async () => {
+  const previousSecret = process.env["GITLAB_WEBHOOK_SECRET"];
+  const previousAuto = process.env["CAPILLARY_AUTO_REVIEW_ON_OPEN"];
+  process.env["GITLAB_WEBHOOK_SECRET"] = "hook-s3cret";
+  process.env["CAPILLARY_AUTO_REVIEW_ON_OPEN"] = "1";
+  const started: unknown[] = [];
+  const realStart = deps.reviewSessionHub.start;
+  deps.reviewSessionHub.start = (async (request: unknown) => {
+    started.push(request);
+    return {} as never;
+  }) as typeof realStart;
+  const opened = JSON.stringify({
+    object_kind: "merge_request",
+    project: { id: 42 },
+    object_attributes: { iid: 7, action: "open" },
+  });
+  const deliver = (event: string, body: string) =>
+    fetch(`${base}/api/gitlab/webhook`, {
+      method: "POST",
+      headers: { "x-gitlab-event": event, "x-gitlab-token": "hook-s3cret" },
+      body,
+    });
+  let base = "";
+  try {
+    await serve(createApp({ allowedOrigins: [], requireGithubLogin: false, webDistRoot: null }), async (url) => {
+      base = url;
+      const valid = await deliver("Merge Request Hook", opened);
+      assertEquals(valid.status, 202);
+      await valid.body?.cancel();
+      assertEquals(started, [{ repositoryId: "gitlab-42", pullRequestId: "7" }]);
+
+      const malformed = await deliver("Merge Request Hook", "not json");
+      assertEquals(malformed.status, 202);
+      await malformed.body?.cancel();
+
+      const draft = await deliver(
+        "Merge Request Hook",
+        JSON.stringify({
+          object_kind: "merge_request",
+          project: { id: 42 },
+          object_attributes: { iid: 8, action: "open", draft: true },
+        }),
+      );
+      assertEquals(draft.status, 202);
+      await draft.body?.cancel();
+
+      const wrongEvent = await deliver("Push Hook", opened);
+      assertEquals(wrongEvent.status, 202);
+      await wrongEvent.body?.cancel();
+
+      assertEquals(started.length, 1, "only the valid opened merge request queues a review");
+    });
+  } finally {
+    deps.reviewSessionHub.start = realStart;
+    if (previousSecret === undefined) delete process.env["GITLAB_WEBHOOK_SECRET"];
+    else process.env["GITLAB_WEBHOOK_SECRET"] = previousSecret;
+    if (previousAuto === undefined) delete process.env["CAPILLARY_AUTO_REVIEW_ON_OPEN"];
+    else process.env["CAPILLARY_AUTO_REVIEW_ON_OPEN"] = previousAuto;
   }
 });

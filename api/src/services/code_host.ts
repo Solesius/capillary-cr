@@ -40,8 +40,13 @@ export interface CompareFile {
 }
 
 export interface PostOptions {
-  /** Team mode: post as a connected member (GitHub only; GitLab posts as the server token). */
+  /** Team mode, GitHub: the member's token, so the post is made as that member. Ignored by GitLab. */
   asToken?: string;
+  /**
+   * Team mode: the requesting member's login. GitLab posts with the server token,
+   * so GitLab adds a "Posted on behalf of @login" line to the body. GitHub ignores it.
+   */
+  onBehalfOf?: string;
 }
 
 /** What the review pipeline, posting routes, CLI and MCP need from a code host. */

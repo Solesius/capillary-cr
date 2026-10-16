@@ -432,6 +432,7 @@ load-bearing ones:
 | `GITHUB_OAUTH_CLIENT_ID` / `_SECRET` / `_REDIRECT_URI` / `_SCOPES` | GitHub login |
 | `CAPILLARY_GITLAB_TOKEN` / `GITLAB_BASE_URL` | GitLab code host (token: `api` scope to post, `read_api` to review only) |
 | `GITLAB_WEBHOOK_SECRET` | Verifies `POST /api/gitlab/webhook` (MR opened → auto-review) |
+| `GITLAB_REQUEST_TIMEOUT_MS` | Per-request timeout for GitLab calls (default 15000) |
 | `CAPILLARY_LLM_API_KEY` + provider-specific keys | Model credentials (env only) |
 | `CDP_BASE_URL` / `CHROME_PATH` | Functional-test browser endpoint |
 | `CLAUDE_CODE_URL` / `CODEX_APP_SERVER_URL` | Host CLI bridges (§6) |

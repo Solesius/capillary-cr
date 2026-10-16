@@ -595,7 +595,7 @@ export class ReviewAgentService {
         "This run predates head-sha anchoring; re-run a full review once.",
       );
     }
-    // Ask GitHub, not the in-memory PR cache: the whole point is the CURRENT
+    // Ask the code host, not the in-memory PR cache: the whole point is the CURRENT
     // head, and the cache may be cold after a restart (live-found bug —
     // pull_request_not_found on a rebooted instance).
     const pull = await this.codeHost.getPullRequest(
@@ -1194,7 +1194,7 @@ export class ReviewAgentService {
       : [];
     const lineRaw = Number(args.line);
     const confidenceRaw = Number(args.confidence);
-    // A finding is only actionable if it anchors to a line GitHub will accept as
+    // A finding is only actionable if it anchors to a line the code host will accept as
     // an inline comment — i.e. an added/context line in this file's diff. Resolve
     // it against the real patch: trust the model's line only when it is a genuine
     // commentable line, otherwise anchor by the finding text, otherwise fall back
@@ -1276,7 +1276,7 @@ export class ReviewAgentService {
 
 /**
  * Compact PR-comment body for a completed review: verdict, summary, counts,
- * and the model that drove it. GitHub supplies the timestamp on the comment.
+ * and the model that drove it. The code host stamps the comment's timestamp.
  */
 export function buildPrSummaryComment(record: ReviewAgentRunRecord): string {
   const lines: string[] = [];
@@ -1321,7 +1321,7 @@ function patchForPath(capture: ReviewCapture, filePath: string): string {
 // it is genuinely commentable, else the line whose content best matches the
 // finding text, else the file's first changed line. Deletion ('-') lines never
 // advance the new-file counter and are not right-side comment targets. Returning
-// a real diff line is what lets every finding be posted without GitHub rejecting
+// a real diff line is what lets every finding be posted without the code host rejecting
 // it — the difference between the tool working and "praying" the model is exact.
 // Exported for direct unit testing — pure function, no service state.
 export function postableDiffLine(

@@ -46,15 +46,28 @@ import {
   gitlabProjectId,
   gitlabRepositoryId,
   type OptionalCodeHost,
+  type PostOptions,
   type PullRequestStateFilter,
   sourceOf,
 } from "./code_host.ts";
+
+/**
+ * Team mode: GitLab posts are made with the server token, so the member who
+ * requested the post is named in the body instead. Matches the recorded artifact.
+ */
+function attributed(body: string, options?: PostOptions): string {
+  return options?.onBehalfOf
+    ? `${body}\n\n<sub>Posted on behalf of @${options.onBehalfOf} via Capillary.</sub>`
+    : body;
+}
 
 export interface GitLabConfig {
   /** Instance origin, optionally with a path prefix. Blank → https://gitlab.com. */
   baseUrl?: string | null;
   /** Personal, project or group access token. Server environment only. */
   token?: string | null;
+  /** Per-request timeout in milliseconds. Defaults to 15 seconds. */
+  timeoutMs?: number;
 }
 
 /** The catalog slice GitLab writes merge requests and diffs into. */
@@ -64,6 +77,7 @@ export type GitLabCatalog = Pick<
 >;
 
 const DEFAULT_BASE_URL = "https://gitlab.com";
+const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const PAGE_SIZE = 100;
 // Loop guard only (10k items), never a product limit.
 const PAGE_LOOP_GUARD = 100;
@@ -313,6 +327,7 @@ export class GitLabService implements OptionalCodeHost {
   readonly #token: string | null;
   readonly #catalog: GitLabCatalog | null;
   readonly #fetcher: typeof fetch;
+  readonly #timeoutMs: number;
   #projects: GitHubRepository[] = [];
   #identity: GitHubIdentity | null = null;
 
@@ -321,6 +336,7 @@ export class GitLabService implements OptionalCodeHost {
     this.#token = config.token?.trim() || null;
     this.#catalog = catalog;
     this.#fetcher = fetcher;
+    this.#timeoutMs = config.timeoutMs && config.timeoutMs > 0 ? config.timeoutMs : DEFAULT_REQUEST_TIMEOUT_MS;
   }
 
   /** A token is set. (A bad base URL still counts: calls then fail loudly with 503.) */
@@ -486,13 +502,18 @@ export class GitLabService implements OptionalCodeHost {
   // --- posting ---------------------------------------------------------------
 
   /** A note on the merge request's overview thread. */
-  async postPullRequestComment(repositoryId: string, pullRequestId: string, body: string): Promise<{ htmlUrl: string }> {
+  async postPullRequestComment(
+    repositoryId: string,
+    pullRequestId: string,
+    body: string,
+    options?: PostOptions,
+  ): Promise<{ htmlUrl: string }> {
     enforceTextBody(body, "comment_body");
     const mr = await this.#mergeRequest(repositoryId, pullRequestId);
     const note = await this.#send<{ id?: number }>(
       "POST",
       `/projects/${this.#project(repositoryId)}/merge_requests/${mr.iid}/notes`,
-      { body },
+      { body: attributed(body, options) },
       "gitlab_comment_failed",
     );
     return { htmlUrl: note.id ? `${mr.web_url}#note_${note.id}` : mr.web_url };
@@ -503,6 +524,7 @@ export class GitLabService implements OptionalCodeHost {
     repositoryId: string,
     pullRequestId: string,
     input: { path: string; line: number; body: string },
+    options?: PostOptions,
   ): Promise<{ htmlUrl: string }> {
     enforceDefensiveInput(input.path, "comment_path");
     enforceTextBody(input.body, "comment_body");
@@ -511,7 +533,7 @@ export class GitLabService implements OptionalCodeHost {
       pullRequestId,
       input.path,
       lineNumber(input.line),
-      `${input.body}\n\n<sub>Flagged by ${CAPILLARY_LINK}</sub>`,
+      attributed(`${input.body}\n\n<sub>Flagged by ${CAPILLARY_LINK}</sub>`, options),
       "gitlab_inline_comment_failed",
     );
   }
@@ -521,6 +543,7 @@ export class GitLabService implements OptionalCodeHost {
     repositoryId: string,
     pullRequestId: string,
     input: { path: string; startLine: number; endLine: number; code: string; note: string },
+    options?: PostOptions,
   ): Promise<{ htmlUrl: string }> {
     enforceDefensiveInput(input.path, "suggestion_path");
     const startLine = lineNumber(input.startLine);
@@ -530,7 +553,7 @@ export class GitLabService implements OptionalCodeHost {
       pullRequestId,
       input.path,
       endLine,
-      suggestionBody({ startLine, endLine, code: input.code, note: input.note }),
+      attributed(suggestionBody({ startLine, endLine, code: input.code, note: input.note }), options),
       "gitlab_suggestion_failed",
     );
   }
@@ -542,6 +565,7 @@ export class GitLabService implements OptionalCodeHost {
   async createRepositoryIssue(
     repositoryId: string,
     input: { title: string; body: string; labels?: string[]; assignees?: string[] },
+    options?: PostOptions,
   ): Promise<{ htmlUrl: string; number: number; assigned: boolean }> {
     enforceTextBody(input.body, "issue_body");
     const project = this.#project(repositoryId);
@@ -550,7 +574,7 @@ export class GitLabService implements OptionalCodeHost {
       `/projects/${project}/issues`,
       {
         title: input.title.slice(0, 250),
-        description: input.body,
+        description: attributed(input.body, options),
         ...(input.labels?.length ? { labels: input.labels.join(",") } : {}),
       },
       "gitlab_issue_failed",
@@ -735,9 +759,13 @@ export class GitLabService implements OptionalCodeHost {
           ...(body === undefined ? {} : { "content-type": "application/json" }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        signal: AbortSignal.timeout(this.#timeoutMs),
       });
-    } catch {
-      throw new AppError("gitlab_unreachable", 502, "gitlab_unreachable");
+    } catch (cause) {
+      // The cause (DNS, TLS, refused, timeout) is kept in the message for operators.
+      // Request headers are never part of it, so the token cannot leak here.
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      throw new AppError(`gitlab_unreachable: ${detail}`, 502, "gitlab_unreachable");
     }
     if (!response.ok) {
       throw gitlabHttpError(response.status);

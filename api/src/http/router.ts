@@ -15,7 +15,8 @@ import { teamBus } from "../services/team/event_bus.ts";
 import type { GitLabService } from "../services/gitlab_service.ts";
 import { buildAppManifest, isPubliclyReachableUrl } from "../services/team/github_app.ts";
 import { mergeRequestToReview, verifyGitlabWebhookToken } from "../services/team/gitlab.ts";
-import { parseInboundCommand, verifySlackSignature } from "../services/team/inbound.ts";
+import { sourceOf } from "../services/code_host.ts";
+import { parseInboundCommand, pickRepository, verifySlackSignature } from "../services/team/inbound.ts";
 import { MEMBER_COOKIE } from "../services/team/members.ts";
 import { recordPostedArtifact } from "../services/team/posted_artifacts.ts";
 import { deps } from "./deps.ts";
@@ -38,7 +39,7 @@ import { del, get, origin, param, patch, post, query, type Route } from "./routi
 
 /**
  * Persist shared posted-state on the run record and announce the publication
- * on the team bus. Best-effort: the GitHub post already succeeded, so a
+ * on the team bus. Best-effort: the code host post already succeeded, so a
  * persistence hiccup must not fail the request that reports it.
  */
 async function publishPostedArtifact(
@@ -383,7 +384,7 @@ const reviews: Route[] = [
     )),
 ];
 
-// --- posting findings to GitHub / Jira (human-initiated, one per click) -------
+// --- posting findings to the code host / Jira (human-initiated, one per click) -
 
 const findingNotFound = (message: string) => json({ message }, 404);
 
@@ -396,7 +397,7 @@ const posting: Route[] = [
       record.repositoryId,
       record.pullRequestId,
       buildPrSummaryComment(record),
-      { asToken: memberToken(member.sessionId) },
+      { asToken: memberToken(member.sessionId), onBehalfOf: memberLogin(member.sessionId) },
     );
     await publishPostedArtifact(record, {
       kind: "summary",
@@ -406,8 +407,8 @@ const posting: Route[] = [
     return withCookie(json({ posted: true, url: result.htmlUrl }, 201), member.cookie);
   }, { body: "none" }),
 
-  // Post one finding's committable suggestion to the PR as a GitHub
-  // ```suggestion block. Never batched, never automatic.
+  // Post one finding's committable suggestion to the PR or MR as a suggestion
+  // block the host can apply. Never batched, never automatic.
   post("/api/review/runs/:runId/findings/:findingId/suggestion", async (req) => {
     const record = await deps.reviewService.getReviewAgentRun(param(req, "runId"));
     if (!record) return findingNotFound("review_run_not_found");
@@ -424,7 +425,7 @@ const posting: Route[] = [
         code: finding.suggestion.code,
         note: `**${finding.title}** — ${finding.finding}`,
       },
-      { asToken: memberToken(member.sessionId) },
+      { asToken: memberToken(member.sessionId), onBehalfOf: memberLogin(member.sessionId) },
     );
     await publishPostedArtifact(record, {
       kind: "suggestion",
@@ -453,7 +454,7 @@ const posting: Route[] = [
         line: finding.line,
         body: `**[${severity}] ${finding.title}**\n\n${finding.finding}${fix}`,
       },
-      { asToken: memberToken(member.sessionId) },
+      { asToken: memberToken(member.sessionId), onBehalfOf: memberLogin(member.sessionId) },
     );
     await publishPostedArtifact(record, {
       kind: "inline",
@@ -495,7 +496,7 @@ const posting: Route[] = [
       // REST knows the coding agent as "Copilot" (Bot) — "copilot-swe-agent"
       // is its GraphQL actor login and REST silently drops it as unknown.
       assignees: ["Copilot"],
-    }, { asToken: memberToken(member.sessionId) });
+    }, { asToken: memberToken(member.sessionId), onBehalfOf: memberLogin(member.sessionId) });
     await publishPostedArtifact(record, {
       kind: "dispatch",
       findingId: finding.id,
@@ -878,13 +879,22 @@ async function slackCommand(textArg: string): Promise<{ response_type: string; t
   if (command.kind === "review") {
     try {
       const repos = await deps.codeHost.lookupRepositories(command.ownerRepo);
-      const repo = repos.find((item) => item.fullName.toLowerCase() === command.ownerRepo.toLowerCase());
-      if (!repo) {
+      const picked = pickRepository(repos, command.ownerRepo, command.source);
+      if (picked.kind === "none") {
         return {
           response_type: "ephemeral",
           text: `Repository ${command.ownerRepo} not found or not accessible.`,
         };
       }
+      if (picked.kind === "ambiguous") {
+        const hosts = picked.matches.map((match) => sourceOf(match.id)).join(", ");
+        return {
+          response_type: "ephemeral",
+          text: `Repository ${command.ownerRepo} exists on more than one host (${hosts}). ` +
+            `Prefix it with github: or gitlab:, for example /capillary review gitlab:${command.ownerRepo}#${command.prNumber}.`,
+        };
+      }
+      const repo = picked.repo;
       const session = await deps.reviewSessionHub.start({
         pullRequestId: command.prNumber,
         repositoryId: repo.id,
@@ -903,7 +913,7 @@ async function slackCommand(textArg: string): Promise<{ response_type: string; t
   }
   return {
     response_type: "ephemeral",
-    text: "Usage: /capillary review owner/repo#123 · /capillary status",
+    text: "Usage: /capillary review [github:|gitlab:]owner/repo#123 · /capillary status",
   };
 }
 
