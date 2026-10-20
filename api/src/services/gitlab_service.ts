@@ -143,7 +143,9 @@ interface GitLabMergeRequestDiffDto {
 /**
  * Validate and normalize a GitLab base URL. Blank means gitlab.com. Remote hosts
  * must use https (the token travels in a header); plain http is allowed only for
- * loopback so a local dev instance still works. Returns null when unusable.
+ * loopback so a local dev instance still works. The API root many tools ask
+ * for (`https://gitlab.com/api/v4`) is accepted too: requests add `/api/v4`
+ * themselves, so a trailing one is dropped. Returns null when unusable.
  */
 export function normalizeGitlabBaseUrl(raw: string | null | undefined): string | null {
   const value = raw?.trim() || DEFAULT_BASE_URL;
@@ -157,22 +159,37 @@ export function normalizeGitlabBaseUrl(raw: string | null | undefined): string |
   if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
     return null;
   }
-  return url.href.replace(/\/+$/, "");
+  return url.href.replace(/\/+$/, "").replace(/\/api\/v4$/i, "");
 }
 
-/** Map a GitLab HTTP failure onto a stable AppError code (mirrors github_request_failed). */
-export function gitlabHttpError(status: number): AppError {
-  if (status === 401) {
-    return new AppError("gitlab_auth_failed", 401, "gitlab_auth_failed");
-  }
-  if (status === 403) {
-    return new AppError("gitlab_forbidden", 403, "gitlab_forbidden");
-  }
-  if (status === 404) {
-    return new AppError("gitlab_not_found", 404, "gitlab_not_found");
-  }
+/**
+ * Map a GitLab HTTP failure onto a stable AppError code (mirrors
+ * github_request_failed). The code stays fixed for callers; the message adds
+ * the request and GitLab's own explanation so an operator can act on it.
+ */
+export function gitlabHttpError(status: number, request?: string, reason?: string): AppError {
+  const code = status === 401
+    ? "gitlab_auth_failed"
+    : status === 403
+    ? "gitlab_forbidden"
+    : status === 404
+    ? "gitlab_not_found"
+    : "gitlab_request_failed";
   const mapped = status >= 500 ? 502 : status;
-  return new AppError("gitlab_request_failed", mapped, "gitlab_request_failed");
+  const detail = [request && `${request} returned ${status}`, reason].filter(Boolean).join(": ");
+  return new AppError(detail ? `${code} (${detail})` : code, code === "gitlab_request_failed" ? mapped : status, code);
+}
+
+/** GitLab's error text from a failed response body, if it has one. */
+async function gitlabErrorReason(response: Response): Promise<string | undefined> {
+  try {
+    const body = await response.json() as { message?: unknown; error?: unknown; error_description?: unknown };
+    const reason = body.error_description ?? body.message ?? body.error;
+    const text = typeof reason === "string" ? reason : reason === undefined ? undefined : JSON.stringify(reason);
+    return text?.slice(0, 300);
+  } catch {
+    return undefined;
+  }
 }
 
 export function mergeRequestState(mr: GitLabMergeRequestDto): PullRequest["state"] {
@@ -773,7 +790,8 @@ export class GitLabService implements OptionalCodeHost {
       throw new AppError(`gitlab_unreachable: ${detail}`, 502, "gitlab_unreachable");
     }
     if (!response.ok) {
-      throw gitlabHttpError(response.status);
+      // The path only (no query string): it names the resource without echoing input back.
+      throw gitlabHttpError(response.status, `${method} ${path.split("?")[0]}`, await gitlabErrorReason(response));
     }
     return response;
   }

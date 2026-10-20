@@ -272,6 +272,9 @@ test("should_normalize_base_url_and_reject_remote_plain_http", () => {
   assertEquals(normalizeGitlabBaseUrl("http://localhost:8929"), "http://localhost:8929");
   assertEquals(normalizeGitlabBaseUrl("http://git.example.com"), null);
   assertEquals(normalizeGitlabBaseUrl("not a url"), null);
+  // The API root is a common way to name the instance; requests add /api/v4 themselves.
+  assertEquals(normalizeGitlabBaseUrl("https://gitlab.com/api/v4"), "https://gitlab.com");
+  assertEquals(normalizeGitlabBaseUrl("https://git.corp.example/gitlab/api/v4/"), "https://git.corp.example/gitlab");
 });
 
 test("should_map_unauthorized_response_to_stable_auth_error_code", async () => {
@@ -352,6 +355,17 @@ test("should_map_forbidden_and_not_found_responses_to_their_codes", async () => 
   const gone = await assertRejects(() => missing.getPullRequest("gitlab-42", "7"), AppError);
   assertEquals(gone.status, 404);
   assertEquals(gone.code, "gitlab_not_found");
+});
+
+test("should_name_the_failed_request_and_gitlabs_reason_in_the_error_message", async () => {
+  const service = new GitLabService(
+    { token: "glpat-test" },
+    null,
+    fakeGitLab(() => jsonResponse({ error: "insufficient_scope", error_description: "The request requires higher privileges." }, {}, 403)).fetch,
+  );
+  const error = await assertRejects(() => service.getIdentity(), AppError);
+  assertEquals(error.code, "gitlab_forbidden");
+  assertEquals(error.message, "gitlab_forbidden (GET /user returned 403: The request requires higher privileges.)");
 });
 
 test("should_pass_rate_limit_status_through_as_request_failed", async () => {
