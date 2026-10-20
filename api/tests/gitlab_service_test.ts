@@ -357,7 +357,7 @@ test("should_map_forbidden_and_not_found_responses_to_their_codes", async () => 
   assertEquals(gone.code, "gitlab_not_found");
 });
 
-test("should_name_the_failed_request_and_gitlabs_reason_in_the_error_message", async () => {
+test("should_name_the_failed_request_and_keep_gitlabs_reason_as_the_cause", async () => {
   const service = new GitLabService(
     { token: "glpat-test" },
     null,
@@ -365,7 +365,9 @@ test("should_name_the_failed_request_and_gitlabs_reason_in_the_error_message", a
   );
   const error = await assertRejects(() => service.getIdentity(), AppError);
   assertEquals(error.code, "gitlab_forbidden");
-  assertEquals(error.message, "gitlab_forbidden (GET /user returned 403: The request requires higher privileges.)");
+  // Clients see the request; GitLab's reason is kept for operator logs.
+  assertEquals(error.message, "gitlab_forbidden (GET /user returned 403)");
+  assertEquals(error.cause, "The request requires higher privileges.");
 });
 
 test("should_fall_back_through_gitlabs_error_fields_and_bound_the_reason", async () => {
@@ -379,24 +381,33 @@ test("should_fall_back_through_gitlabs_error_fields_and_bound_the_reason", async
   );
   assertEquals(proxy.status, 502);
   assertEquals(proxy.message, "gitlab_request_failed (GET /user returned 502)");
+  assertEquals(proxy.cause, undefined);
 
   // Validation errors are objects; a null field is no reason at all.
   const invalid = await assertRejects(
     () => failing(() => jsonResponse({ message: { title: ["is too long"] } }, {}, 400)).getIdentity(),
     AppError,
   );
-  assertEquals(invalid.message, 'gitlab_request_failed (GET /user returned 400: {"title":["is too long"]})');
+  assertEquals(invalid.cause, '{"title":["is too long"]}');
   const empty = await assertRejects(
     () => failing(() => jsonResponse({ error: null }, {}, 404)).getIdentity(),
     AppError,
   );
   assertEquals(empty.message, "gitlab_not_found (GET /user returned 404)");
+  assertEquals(empty.cause, undefined);
 
   const long = await assertRejects(
     () => failing(() => jsonResponse({ message: "x".repeat(1000) }, {}, 403)).getIdentity(),
     AppError,
   );
-  assertEquals(long.message, `gitlab_forbidden (GET /user returned 403: ${"x".repeat(300)})`);
+  assertEquals(long.cause, "x".repeat(300));
+
+  // A body past the read limit is not parsed at all.
+  const huge = await assertRejects(
+    () => failing(() => jsonResponse({ message: "y".repeat(10_000) }, {}, 403)).getIdentity(),
+    AppError,
+  );
+  assertEquals(huge.cause, undefined);
 });
 
 test("should_omit_the_query_string_from_the_failed_request", async () => {
@@ -406,7 +417,7 @@ test("should_omit_the_query_string_from_the_failed_request", async () => {
     fakeGitLab(() => jsonResponse({ message: "403 Forbidden" }, {}, 403)).fetch,
   );
   const error = await assertRejects(() => service.listRepositories(true), AppError);
-  assertEquals(error.message, "gitlab_forbidden (GET /projects returned 403: 403 Forbidden)");
+  assertEquals(error.message, "gitlab_forbidden (GET /projects returned 403)");
 });
 
 test("should_pass_rate_limit_status_through_as_request_failed", async () => {

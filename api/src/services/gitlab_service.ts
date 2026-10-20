@@ -164,8 +164,10 @@ export function normalizeGitlabBaseUrl(raw: string | null | undefined): string |
 
 /**
  * Map a GitLab HTTP failure onto a stable AppError code (mirrors
- * github_request_failed). The code stays fixed for callers; the message adds
- * the request and GitLab's own explanation so an operator can act on it.
+ * github_request_failed). The code stays fixed for callers and the message
+ * names the failed request. GitLab's own explanation is kept as the error's
+ * cause, for operator logs only: on a self-hosted instance it can name
+ * internal hosts or paths, so it is never part of what API clients receive.
  */
 export function gitlabHttpError(status: number, request?: string, reason?: string): AppError {
   const code = status === 401
@@ -176,19 +178,43 @@ export function gitlabHttpError(status: number, request?: string, reason?: strin
     ? "gitlab_not_found"
     : "gitlab_request_failed";
   const mapped = status >= 500 ? 502 : status;
-  const detail = [request && `${request} returned ${status}`, reason].filter(Boolean).join(": ");
-  return new AppError(detail ? `${code} (${detail})` : code, code === "gitlab_request_failed" ? mapped : status, code);
+  return new AppError(
+    request ? `${code} (${request} returned ${status})` : code,
+    code === "gitlab_request_failed" ? mapped : status,
+    code,
+    reason ? { cause: reason } : undefined,
+  );
 }
 
-/** GitLab's error text from a failed response body, if it has one. */
+const ERROR_BODY_LIMIT = 4096;
+
+/** GitLab's error text from a failed response, reading at most a few KiB of the body. */
 async function gitlabErrorReason(response: Response): Promise<string | undefined> {
+  const reader = response.body?.getReader();
+  if (!reader) return undefined;
+  const chunks: Uint8Array[] = [];
+  let size = 0;
   try {
-    const body = await response.json() as { message?: unknown; error?: unknown; error_description?: unknown };
-    const reason = body.error_description ?? body.message ?? body.error;
+    while (size < ERROR_BODY_LIMIT) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      size += value.length;
+    }
+  } catch {
+    return undefined;
+  } finally {
+    void reader.cancel().catch(() => {});
+  }
+  try {
+    const text = Buffer.concat(chunks).subarray(0, ERROR_BODY_LIMIT).toString("utf8");
+    const body = JSON.parse(text) as Record<string, unknown>;
+    const reason = body["error_description"] ?? body["message"] ?? body["error"];
     if (reason === undefined || reason === null) return undefined;
     // Validation failures arrive as objects ({ message: { title: ["is too long"] } }).
     return (typeof reason === "string" ? reason : JSON.stringify(reason)).slice(0, 300);
   } catch {
+    // Not JSON, or cut off at the limit: there is no reason worth reporting.
     return undefined;
   }
 }

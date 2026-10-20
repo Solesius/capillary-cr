@@ -97,6 +97,8 @@ if (gitlabService.configured()) {
       console.warn(
         `CAPILLARY_GITLAB_TOKEN set but GitLab connection failed (${
           error instanceof Error ? error.message : String(error)
+        }${
+          error instanceof Error && typeof error.cause === "string" ? `: ${error.cause}` : ""
         }); check the token and GITLAB_BASE_URL.`,
       ),
   );
