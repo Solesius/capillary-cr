@@ -368,6 +368,47 @@ test("should_name_the_failed_request_and_gitlabs_reason_in_the_error_message", a
   assertEquals(error.message, "gitlab_forbidden (GET /user returned 403: The request requires higher privileges.)");
 });
 
+test("should_fall_back_through_gitlabs_error_fields_and_bound_the_reason", async () => {
+  const failing = (response: () => Response) =>
+    new GitLabService({ token: "glpat-test" }, null, fakeGitLab(response).fetch);
+
+  // A proxy's HTML error page has no reason to report; the request still names the failure.
+  const proxy = await assertRejects(
+    () => failing(() => new Response("<html>Bad Gateway</html>", { status: 502 })).getIdentity(),
+    AppError,
+  );
+  assertEquals(proxy.status, 502);
+  assertEquals(proxy.message, "gitlab_request_failed (GET /user returned 502)");
+
+  // Validation errors are objects; a null field is no reason at all.
+  const invalid = await assertRejects(
+    () => failing(() => jsonResponse({ message: { title: ["is too long"] } }, {}, 400)).getIdentity(),
+    AppError,
+  );
+  assertEquals(invalid.message, 'gitlab_request_failed (GET /user returned 400: {"title":["is too long"]})');
+  const empty = await assertRejects(
+    () => failing(() => jsonResponse({ error: null }, {}, 404)).getIdentity(),
+    AppError,
+  );
+  assertEquals(empty.message, "gitlab_not_found (GET /user returned 404)");
+
+  const long = await assertRejects(
+    () => failing(() => jsonResponse({ message: "x".repeat(1000) }, {}, 403)).getIdentity(),
+    AppError,
+  );
+  assertEquals(long.message, `gitlab_forbidden (GET /user returned 403: ${"x".repeat(300)})`);
+});
+
+test("should_omit_the_query_string_from_the_failed_request", async () => {
+  const service = new GitLabService(
+    { token: "glpat-test" },
+    null,
+    fakeGitLab(() => jsonResponse({ message: "403 Forbidden" }, {}, 403)).fetch,
+  );
+  const error = await assertRejects(() => service.listRepositories(true), AppError);
+  assertEquals(error.message, "gitlab_forbidden (GET /projects returned 403: 403 Forbidden)");
+});
+
 test("should_pass_rate_limit_status_through_as_request_failed", async () => {
   const limited = new GitLabService(
     { token: "glpat-test" },

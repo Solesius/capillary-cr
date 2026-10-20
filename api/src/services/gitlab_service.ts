@@ -185,8 +185,9 @@ async function gitlabErrorReason(response: Response): Promise<string | undefined
   try {
     const body = await response.json() as { message?: unknown; error?: unknown; error_description?: unknown };
     const reason = body.error_description ?? body.message ?? body.error;
-    const text = typeof reason === "string" ? reason : reason === undefined ? undefined : JSON.stringify(reason);
-    return text?.slice(0, 300);
+    if (reason === undefined || reason === null) return undefined;
+    // Validation failures arrive as objects ({ message: { title: ["is too long"] } }).
+    return (typeof reason === "string" ? reason : JSON.stringify(reason)).slice(0, 300);
   } catch {
     return undefined;
   }
