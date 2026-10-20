@@ -136,7 +136,7 @@ GitLab is a full code host alongside GitHub — gitlab.com or self-hosted. Its p
 ```bash
 # in .env
 CAPILLARY_GITLAB_TOKEN=glpat-...                 # personal, project or group access token
-GITLAB_BASE_URL=https://gitlab.example.com       # optional; blank = https://gitlab.com
+GITLAB_BASE_URL=https://gitlab.example.com       # optional; blank = https://gitlab.com; a trailing /api/v4 is accepted
 ```
 
 Token scope: `api` to post findings, suggestions, notes, issues and commit statuses; `read_api` is enough if you only run reviews and never post. A GitLab token satisfies the login gate on its own, so GitHub-free deployments work with `CAPILLARY_REQUIRE_GITHUB_LOGIN=1`.

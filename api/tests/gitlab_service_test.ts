@@ -224,6 +224,35 @@ test("should_walk_merge_request_diff_pages_into_diff_files", async () => {
   );
 });
 
+test("should_fall_back_to_merge_request_changes_on_gitlab_before_15_7", async () => {
+  const change = { old_path: "src/a.ts", new_path: "src/a.ts", new_file: false, renamed_file: false, deleted_file: false, diff: "@@ -1 +1 @@\n-a\n+b\n" };
+  // An older self-managed instance: no /diffs endpoint, /changes carries the files.
+  const fake = fakeGitLab((url) =>
+    url.pathname.endsWith("/diffs")
+      ? jsonResponse({ error: "404 Not Found" }, {}, 404)
+      : jsonResponse({ ...MR_OPEN, changes: [change] })
+  );
+  const service = new GitLabService({ token: "glpat-test" }, null, fake.fetch);
+
+  const files = await service.getPullRequestDiff("gitlab-42", "7");
+
+  assertEquals(files.map((f) => f.path), ["src/a.ts"]);
+  assertEquals(fake.calls.map((c) => c.url.pathname), [
+    "/api/v4/projects/42/merge_requests/7/diffs",
+    "/api/v4/projects/42/merge_requests/7/changes",
+  ]);
+});
+
+test("should_still_report_a_missing_merge_request_as_not_found", async () => {
+  const fake = fakeGitLab(() => jsonResponse({ message: "404 Not found" }, {}, 404));
+  const service = new GitLabService({ token: "glpat-test" }, null, fake.fetch);
+
+  const error = await assertRejects(() => service.getPullRequestDiff("gitlab-42", "999"), AppError);
+
+  assertEquals(error.code, "gitlab_not_found");
+  assertEquals(error.message, "gitlab_not_found (GET /projects/42/merge_requests/999/changes returned 404)");
+});
+
 test("should_return_merge_request_detail_with_head_sha_from_diff_refs", async () => {
   const fake = fakeGitLab(() => jsonResponse(MR_OPEN));
   const service = new GitLabService({ token: "glpat-test" }, null, fake.fetch);
@@ -272,6 +301,9 @@ test("should_normalize_base_url_and_reject_remote_plain_http", () => {
   assertEquals(normalizeGitlabBaseUrl("http://localhost:8929"), "http://localhost:8929");
   assertEquals(normalizeGitlabBaseUrl("http://git.example.com"), null);
   assertEquals(normalizeGitlabBaseUrl("not a url"), null);
+  // The API root is a common way to name the instance; requests add /api/v4 themselves.
+  assertEquals(normalizeGitlabBaseUrl("https://gitlab.com/api/v4"), "https://gitlab.com");
+  assertEquals(normalizeGitlabBaseUrl("https://git.corp.example/gitlab/api/v4/"), "https://git.corp.example/gitlab");
 });
 
 test("should_map_unauthorized_response_to_stable_auth_error_code", async () => {
@@ -352,6 +384,69 @@ test("should_map_forbidden_and_not_found_responses_to_their_codes", async () => 
   const gone = await assertRejects(() => missing.getPullRequest("gitlab-42", "7"), AppError);
   assertEquals(gone.status, 404);
   assertEquals(gone.code, "gitlab_not_found");
+});
+
+test("should_name_the_failed_request_and_keep_gitlabs_reason_as_the_cause", async () => {
+  const service = new GitLabService(
+    { token: "glpat-test" },
+    null,
+    fakeGitLab(() => jsonResponse({ error: "insufficient_scope", error_description: "The request requires higher privileges." }, {}, 403)).fetch,
+  );
+  const error = await assertRejects(() => service.getIdentity(), AppError);
+  assertEquals(error.code, "gitlab_forbidden");
+  // Clients see the request; GitLab's reason is kept for operator logs.
+  assertEquals(error.message, "gitlab_forbidden (GET /user returned 403)");
+  assertEquals(error.cause, "The request requires higher privileges.");
+});
+
+test("should_fall_back_through_gitlabs_error_fields_and_bound_the_reason", async () => {
+  const failing = (response: () => Response) =>
+    new GitLabService({ token: "glpat-test" }, null, fakeGitLab(response).fetch);
+
+  // A proxy's HTML error page has no reason to report; the request still names the failure.
+  const proxy = await assertRejects(
+    () => failing(() => new Response("<html>Bad Gateway</html>", { status: 502 })).getIdentity(),
+    AppError,
+  );
+  assertEquals(proxy.status, 502);
+  assertEquals(proxy.message, "gitlab_request_failed (GET /user returned 502)");
+  assertEquals(proxy.cause, undefined);
+
+  // Validation errors are objects; a null field is no reason at all.
+  const invalid = await assertRejects(
+    () => failing(() => jsonResponse({ message: { title: ["is too long"] } }, {}, 400)).getIdentity(),
+    AppError,
+  );
+  assertEquals(invalid.cause, '{"title":["is too long"]}');
+  const empty = await assertRejects(
+    () => failing(() => jsonResponse({ error: null }, {}, 404)).getIdentity(),
+    AppError,
+  );
+  assertEquals(empty.message, "gitlab_not_found (GET /user returned 404)");
+  assertEquals(empty.cause, undefined);
+
+  const long = await assertRejects(
+    () => failing(() => jsonResponse({ message: "x".repeat(1000) }, {}, 403)).getIdentity(),
+    AppError,
+  );
+  assertEquals(long.cause, "x".repeat(300));
+
+  // A body past the read limit is not parsed at all.
+  const huge = await assertRejects(
+    () => failing(() => jsonResponse({ message: "y".repeat(10_000) }, {}, 403)).getIdentity(),
+    AppError,
+  );
+  assertEquals(huge.cause, undefined);
+});
+
+test("should_omit_the_query_string_from_the_failed_request", async () => {
+  const service = new GitLabService(
+    { token: "glpat-test" },
+    null,
+    fakeGitLab(() => jsonResponse({ message: "403 Forbidden" }, {}, 403)).fetch,
+  );
+  const error = await assertRejects(() => service.listRepositories(true), AppError);
+  assertEquals(error.message, "gitlab_forbidden (GET /projects returned 403)");
 });
 
 test("should_pass_rate_limit_status_through_as_request_failed", async () => {

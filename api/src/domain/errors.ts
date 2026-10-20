@@ -4,8 +4,8 @@ export class AppError extends Error {
   readonly status: number;
   readonly code: string;
 
-  constructor(message: string, status = 400, code = "bad_request") {
-    super(message);
+  constructor(message: string, status = 400, code = "bad_request", options?: ErrorOptions) {
+    super(message, options);
     this.name = "AppError";
     this.status = status;
     this.code = code;

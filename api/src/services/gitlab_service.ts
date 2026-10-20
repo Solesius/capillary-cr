@@ -143,7 +143,9 @@ interface GitLabMergeRequestDiffDto {
 /**
  * Validate and normalize a GitLab base URL. Blank means gitlab.com. Remote hosts
  * must use https (the token travels in a header); plain http is allowed only for
- * loopback so a local dev instance still works. Returns null when unusable.
+ * loopback so a local dev instance still works. The API root many tools ask
+ * for (`https://gitlab.com/api/v4`) is accepted too: requests add `/api/v4`
+ * themselves, so a trailing one is dropped. Returns null when unusable.
  */
 export function normalizeGitlabBaseUrl(raw: string | null | undefined): string | null {
   const value = raw?.trim() || DEFAULT_BASE_URL;
@@ -157,22 +159,64 @@ export function normalizeGitlabBaseUrl(raw: string | null | undefined): string |
   if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
     return null;
   }
-  return url.href.replace(/\/+$/, "");
+  return url.href.replace(/\/+$/, "").replace(/\/api\/v4$/i, "");
 }
 
-/** Map a GitLab HTTP failure onto a stable AppError code (mirrors github_request_failed). */
-export function gitlabHttpError(status: number): AppError {
-  if (status === 401) {
-    return new AppError("gitlab_auth_failed", 401, "gitlab_auth_failed");
-  }
-  if (status === 403) {
-    return new AppError("gitlab_forbidden", 403, "gitlab_forbidden");
-  }
-  if (status === 404) {
-    return new AppError("gitlab_not_found", 404, "gitlab_not_found");
-  }
+/**
+ * Map a GitLab HTTP failure onto a stable AppError code (mirrors
+ * github_request_failed). The code stays fixed for callers and the message
+ * names the failed request. GitLab's own explanation is kept as the error's
+ * cause, for operator logs only: on a self-hosted instance it can name
+ * internal hosts or paths, so it is never part of what API clients receive.
+ */
+export function gitlabHttpError(status: number, request?: string, reason?: string): AppError {
+  const code = status === 401
+    ? "gitlab_auth_failed"
+    : status === 403
+    ? "gitlab_forbidden"
+    : status === 404
+    ? "gitlab_not_found"
+    : "gitlab_request_failed";
   const mapped = status >= 500 ? 502 : status;
-  return new AppError("gitlab_request_failed", mapped, "gitlab_request_failed");
+  return new AppError(
+    request ? `${code} (${request} returned ${status})` : code,
+    code === "gitlab_request_failed" ? mapped : status,
+    code,
+    reason ? { cause: reason } : undefined,
+  );
+}
+
+const ERROR_BODY_LIMIT = 4096;
+
+/** GitLab's error text from a failed response, reading at most a few KiB of the body. */
+async function gitlabErrorReason(response: Response): Promise<string | undefined> {
+  const reader = response.body?.getReader();
+  if (!reader) return undefined;
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (size < ERROR_BODY_LIMIT) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      size += value.length;
+    }
+  } catch {
+    return undefined;
+  } finally {
+    void reader.cancel().catch(() => {});
+  }
+  try {
+    const text = Buffer.concat(chunks).subarray(0, ERROR_BODY_LIMIT).toString("utf8");
+    const body = JSON.parse(text) as Record<string, unknown>;
+    const reason = body["error_description"] ?? body["message"] ?? body["error"];
+    if (reason === undefined || reason === null) return undefined;
+    // Validation failures arrive as objects ({ message: { title: ["is too long"] } }).
+    return (typeof reason === "string" ? reason : JSON.stringify(reason)).slice(0, 300);
+  } catch {
+    // Not JSON, or cut off at the limit: there is no reason worth reporting.
+    return undefined;
+  }
 }
 
 export function mergeRequestState(mr: GitLabMergeRequestDto): PullRequest["state"] {
@@ -433,9 +477,7 @@ export class GitLabService implements OptionalCodeHost {
   async getPullRequestDiff(repositoryId: string, pullRequestId: string): Promise<DiffFile[]> {
     const project = this.#project(repositoryId);
     const iid = this.#parseIid(pullRequestId);
-    const files = (await this.#getAllPages<GitLabMergeRequestDiffDto>(
-      `/projects/${project}/merge_requests/${iid}/diffs`,
-    )).map(toDiffFile);
+    const files = (await this.#mergeRequestDiffs(project, iid)).map(toDiffFile);
     if (!this.#catalog) {
       return files;
     }
@@ -664,10 +706,24 @@ export class GitLabService implements OptionalCodeHost {
     if (hit) {
       return { old_path: hit.previousPath ?? hit.path, diff: hit.patch ?? "" };
     }
-    const fetched = await this.#getAllPages<GitLabMergeRequestDiffDto>(
-      `/projects/${this.#project(repositoryId)}/merge_requests/${this.#parseIid(pullRequestId)}/diffs`,
-    );
+    const fetched = await this.#mergeRequestDiffs(this.#project(repositoryId), this.#parseIid(pullRequestId));
     return fetched.find((entry) => entry.new_path === path);
+  }
+
+  /**
+   * The merge request's per-file diffs. `/diffs` (paginated) arrived in GitLab
+   * 15.7; older self-managed instances answer it with 404, so those fall back
+   * to `/changes`, which returns the same entries in one response. A merge
+   * request that does not exist is a 404 from both, so that still surfaces.
+   */
+  async #mergeRequestDiffs(project: string, iid: string): Promise<GitLabMergeRequestDiffDto[]> {
+    const base = `/projects/${project}/merge_requests/${iid}`;
+    try {
+      return await this.#getAllPages<GitLabMergeRequestDiffDto>(`${base}/diffs`);
+    } catch (error) {
+      if (!(error instanceof AppError && error.code === "gitlab_not_found")) throw error;
+      return (await this.#getJson<{ changes?: GitLabMergeRequestDiffDto[] }>(`${base}/changes`)).changes ?? [];
+    }
   }
 
   async #mergeRequest(repositoryId: string, pullRequestId: string): Promise<GitLabMergeRequestDto> {
@@ -773,7 +829,8 @@ export class GitLabService implements OptionalCodeHost {
       throw new AppError(`gitlab_unreachable: ${detail}`, 502, "gitlab_unreachable");
     }
     if (!response.ok) {
-      throw gitlabHttpError(response.status);
+      // The path only (no query string): it names the resource without echoing input back.
+      throw gitlabHttpError(response.status, `${method} ${path.split("?")[0]}`, await gitlabErrorReason(response));
     }
     return response;
   }
