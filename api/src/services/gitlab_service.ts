@@ -477,9 +477,7 @@ export class GitLabService implements OptionalCodeHost {
   async getPullRequestDiff(repositoryId: string, pullRequestId: string): Promise<DiffFile[]> {
     const project = this.#project(repositoryId);
     const iid = this.#parseIid(pullRequestId);
-    const files = (await this.#getAllPages<GitLabMergeRequestDiffDto>(
-      `/projects/${project}/merge_requests/${iid}/diffs`,
-    )).map(toDiffFile);
+    const files = (await this.#mergeRequestDiffs(project, iid)).map(toDiffFile);
     if (!this.#catalog) {
       return files;
     }
@@ -708,10 +706,24 @@ export class GitLabService implements OptionalCodeHost {
     if (hit) {
       return { old_path: hit.previousPath ?? hit.path, diff: hit.patch ?? "" };
     }
-    const fetched = await this.#getAllPages<GitLabMergeRequestDiffDto>(
-      `/projects/${this.#project(repositoryId)}/merge_requests/${this.#parseIid(pullRequestId)}/diffs`,
-    );
+    const fetched = await this.#mergeRequestDiffs(this.#project(repositoryId), this.#parseIid(pullRequestId));
     return fetched.find((entry) => entry.new_path === path);
+  }
+
+  /**
+   * The merge request's per-file diffs. `/diffs` (paginated) arrived in GitLab
+   * 15.7; older self-managed instances answer it with 404, so those fall back
+   * to `/changes`, which returns the same entries in one response. A merge
+   * request that does not exist is a 404 from both, so that still surfaces.
+   */
+  async #mergeRequestDiffs(project: string, iid: string): Promise<GitLabMergeRequestDiffDto[]> {
+    const base = `/projects/${project}/merge_requests/${iid}`;
+    try {
+      return await this.#getAllPages<GitLabMergeRequestDiffDto>(`${base}/diffs`);
+    } catch (error) {
+      if (!(error instanceof AppError && error.code === "gitlab_not_found")) throw error;
+      return (await this.#getJson<{ changes?: GitLabMergeRequestDiffDto[] }>(`${base}/changes`)).changes ?? [];
+    }
   }
 
   async #mergeRequest(repositoryId: string, pullRequestId: string): Promise<GitLabMergeRequestDto> {

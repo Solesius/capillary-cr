@@ -224,6 +224,35 @@ test("should_walk_merge_request_diff_pages_into_diff_files", async () => {
   );
 });
 
+test("should_fall_back_to_merge_request_changes_on_gitlab_before_15_7", async () => {
+  const change = { old_path: "src/a.ts", new_path: "src/a.ts", new_file: false, renamed_file: false, deleted_file: false, diff: "@@ -1 +1 @@\n-a\n+b\n" };
+  // An older self-managed instance: no /diffs endpoint, /changes carries the files.
+  const fake = fakeGitLab((url) =>
+    url.pathname.endsWith("/diffs")
+      ? jsonResponse({ error: "404 Not Found" }, {}, 404)
+      : jsonResponse({ ...MR_OPEN, changes: [change] })
+  );
+  const service = new GitLabService({ token: "glpat-test" }, null, fake.fetch);
+
+  const files = await service.getPullRequestDiff("gitlab-42", "7");
+
+  assertEquals(files.map((f) => f.path), ["src/a.ts"]);
+  assertEquals(fake.calls.map((c) => c.url.pathname), [
+    "/api/v4/projects/42/merge_requests/7/diffs",
+    "/api/v4/projects/42/merge_requests/7/changes",
+  ]);
+});
+
+test("should_still_report_a_missing_merge_request_as_not_found", async () => {
+  const fake = fakeGitLab(() => jsonResponse({ message: "404 Not found" }, {}, 404));
+  const service = new GitLabService({ token: "glpat-test" }, null, fake.fetch);
+
+  const error = await assertRejects(() => service.getPullRequestDiff("gitlab-42", "999"), AppError);
+
+  assertEquals(error.code, "gitlab_not_found");
+  assertEquals(error.message, "gitlab_not_found (GET /projects/42/merge_requests/999/changes returned 404)");
+});
+
 test("should_return_merge_request_detail_with_head_sha_from_diff_refs", async () => {
   const fake = fakeGitLab(() => jsonResponse(MR_OPEN));
   const service = new GitLabService({ token: "glpat-test" }, null, fake.fetch);
